@@ -79,16 +79,34 @@ body {
 .btn.ghost.disconnected { color: var(--kelp); border-color: var(--kelp); }
 .btn.ghost.disconnected:hover { background: var(--kelp); color: var(--abyss); }
 
+/* Bottom centre — the space the timeline used to occupy. Persistent: it stays
+   until the visitor signs in or dismisses it, so it must not sit over anything. */
 .signin-notice {
-  position: fixed; z-index: 950; top: calc(var(--header-h) + 14px);
-  left: 50%; transform: translateX(-50%); cursor: pointer;
-  background: rgba(5,22,28,0.92); color: var(--kelp);
+  position: fixed; z-index: 950; bottom: 18px;
+  /* Centred in the band between the activity panel (left) and legend (right)
+     rather than on the viewport, so it cannot overlap either on narrow screens. */
+  left: calc(var(--console-w) + 34px); right: 148px;
+  margin: 0 auto; width: fit-content; max-width: 620px;
+  display: flex; align-items: stretch;
+  background: rgba(5,22,28,0.94);
   border: 1px solid var(--kelp); border-radius: 3px;
-  padding: 7px 14px; font-size: 12px; backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   box-shadow: 0 10px 26px -12px rgba(0,0,0,0.9);
 }
-.signin-notice:hover { background: var(--kelp); color: var(--abyss); }
 .signin-notice[hidden] { display: none; }
+.signin-cta {
+  flex: 1; min-width: 0; cursor: pointer; text-align: left;
+  background: none; border: none; color: var(--kelp);
+  padding: 8px 12px; font-family: var(--sans); font-size: 12px; line-height: 1.35;
+}
+.signin-cta:hover { background: var(--kelp); color: var(--abyss); }
+.signin-x {
+  flex: none; width: 28px; cursor: pointer;
+  background: none; color: var(--tide-dim);
+  border: none; border-left: 1px solid var(--line);
+  font-size: 15px; line-height: 1;
+}
+.signin-x:hover { color: var(--kelp); }
 .btn:focus-visible, .seg button:focus-visible, .step:focus-visible,
 input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 2px; }
 

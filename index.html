@@ -27,9 +27,12 @@
   <div id="map"></div>
   <div id="sweep" class="sweep"></div>
 
-  <button id="signin-notice" class="signin-notice" hidden>
-    Not signed into Google — kelp imagery cannot be loaded. Click to connect.
-  </button>
+  <div id="signin-notice" class="signin-notice" hidden>
+    <button id="signin-cta" class="signin-cta" type="button">
+      Public usage is limited — if you can, please sign in with your Google Earth Engine enabled account
+    </button>
+    <button id="signin-dismiss" class="signin-x" type="button" aria-label="Dismiss this message">×</button>
+  </div>
 
   <aside class="console">
     <div class="sect">

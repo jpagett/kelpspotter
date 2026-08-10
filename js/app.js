@@ -1204,6 +1204,23 @@
    * inside a user gesture, and that grant is lost across an await — so the popup
    * has to be kicked off in the same tick as the click, before any awaiting.
    */
+  /*
+   * The notice persists until the visitor signs in or closes it — it is an
+   * invitation to use their own quota, not a transient error, so it does not
+   * auto-dismiss. Dismissal is remembered for the session only.
+   */
+  let noticeDismissed = false;
+  function updateSigninUi() {
+    const signedIn = !!state.engine && state.engine.name === 'earth-engine';
+    $('connect').style.display = signedIn ? 'none' : '';
+    $('connect').className = 'btn ghost' + (signedIn ? '' : ' disconnected');
+    $('signin-notice').hidden = signedIn || noticeDismissed;
+  }
+  $('signin-dismiss').addEventListener('click', () => {
+    noticeDismissed = true;
+    updateSigninUi();
+  });
+
   function connectEE() {
     if (!cfg.CLIENT_ID || cfg.CLIENT_ID.indexOf('<') === 0) {
       toast('Add your OAuth client ID and project in js/config.js first.', true);
@@ -1243,18 +1260,20 @@
     }).then(() => busy(false));
   }
   $('connect').addEventListener('click', connectEE);
-  $('signin-notice').addEventListener('click', connectEE);
+  $('signin-cta').addEventListener('click', connectEE);
 
   function activateEngine(engine) {
     state.engine = engine;
-    // Both real engines are "live"; only the demo isn't. The public API engine
-    // needs no sign-in, so the Connect button and notice stay hidden for it.
+    /*
+     * Three states, not two. "live" (real imagery) and "signed in" (using the
+     * visitor's own Earth Engine quota) are different things: the shared backend
+     * is live but public, so the invitation to sign in still applies. Only a
+     * personal sign-in retires the Connect button and the notice.
+     */
     const live = engine.name !== 'demo';
     $('status').className = 'status ' + (live ? 'is-live' : 'is-demo');
     $('status-label').textContent = live ? 'LIVE · SENTINEL-2' : 'DEMO DATA';
-    $('connect').style.display = live ? 'none' : '';
-    $('connect').className = 'btn ghost' + (live ? '' : ' disconnected');
-    $('signin-notice').hidden = live;
+    updateSigninUi();
     clearSceneCache();   // demo and live scene lists are not interchangeable
     state.scenes = []; state.allScenes = [];
     state.idx = -1;
@@ -1291,23 +1310,31 @@
     say('Starting up…');
     /*
      * Engine preference, best first:
-     *   1. the public API   — live imagery, no sign-in, everyone sees the same map
-     *   2. per-user OAuth   — for a signed-in owner when no backend is deployed
-     *   3. demo             — synthetic, always works
+     *   1. the visitor's own Earth Engine session — their quota, not the project's
+     *   2. the public backend — live imagery for everyone else, no sign-in
+     *   3. demo — synthetic, always works
+     *
+     * The silent-auth probe is raced against a timeout: when Google's popup is
+     * blocked its callbacks can simply never fire, and without this the page
+     * would sit at boot forever instead of falling through to the backend.
      */
+    const withTimeout = (p, ms) => Promise.race([
+      p, new Promise((res) => setTimeout(() => res(false), ms))
+    ]);
+
     let engine = DemoEngine;
     busy(true);
     try {
-      if (await ApiKelpEngine.init(cfg)) {
-        engine = ApiKelpEngine;
-      } else if (await KelpEngine.init(cfg)) {
+      if (await withTimeout(KelpEngine.init(cfg), 2500)) {
         engine = KelpEngine;
+      } else if (await ApiKelpEngine.init(cfg)) {
+        engine = ApiKelpEngine;
       }
     } catch (err) { console.warn('engine probe skipped:', err); }
     finally { busy(false); }
 
-    say(engine === ApiKelpEngine ? 'Live Sentinel-2 via the public backend — no sign-in needed'
-      : engine === KelpEngine ? 'Earth Engine connected — live Sentinel-2'
+    say(engine === KelpEngine ? 'Signed in — using your Earth Engine account'
+      : engine === ApiKelpEngine ? 'Live Sentinel-2 via the shared backend — sign in to use your own quota'
       : 'Demo mode — synthetic kelp', 'ok');
     if (engine === DemoEngine) await DemoEngine.init(cfg, L);
     activateEngine(engine);

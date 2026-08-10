@@ -24,7 +24,7 @@ window.KELP_CONFIG = {
    * per-user OAuth, then demo mode.
    *   e.g. 'https://kelpspotter-api-abc123-uw.a.run.app'
    */
-  API_URL: '<your-cloud-run-url>',
+  API_URL: 'https://kelpspotter-api-mjhkueccia-uw.a.run.app',
 
   // Earth Engine / Google Cloud (only used when API_URL is not reachable)
   CLIENT_ID: '651837907269-341ri4qffbcl6pqq5su2144dlno4smq5.apps.googleusercontent.com',      // e.g. '1234-abcd.apps.googleusercontent.com'

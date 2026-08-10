@@ -68,7 +68,7 @@ gcloud run deploy kelpspotter-api \
   --region=us-west1 \
   --service-account=kelpspotter-api@kelpscape.iam.gserviceaccount.com \
   --allow-unauthenticated \
-  --set-env-vars=EE_PROJECT=kelpscape,ALLOWED_ORIGINS=https://jpagett.github.io\,http://localhost:8000 \
+  --set-env-vars='^##^EE_PROJECT=kelpscape##ALLOWED_ORIGINS=https://jpagett.github.io,http://localhost:8000' \
   --memory=512Mi --cpu=1 --timeout=120 --max-instances=5
 ```
 
@@ -76,8 +76,20 @@ gcloud run deploy kelpspotter-api \
 while the Earth Engine *credential* stays on the server. `--max-instances=5`
 caps how much concurrent Earth Engine work strangers can trigger.
 
-Note the escaped comma (`\,`) inside `--set-env-vars` — an unescaped one is read
-as the next variable.
+**The `^##^` prefix is not decoration.** `--set-env-vars` splits on commas, and
+`ALLOWED_ORIGINS` contains one. That prefix redefines the separator as `##`, so
+the comma is treated as data. Escaping it as `\,` instead does *not* work from
+bash — the shell strips the backslash before gcloud sees it, and you get:
+
+    ERROR: argument --set-env-vars: Bad syntax for dict arg: [http://localhost:8000]
+
+The single quotes matter too, for the same reason.
+
+If you only need the published origin, there is no comma and no problem:
+
+```bash
+--set-env-vars=EE_PROJECT=kelpscape,ALLOWED_ORIGINS=https://jpagett.github.io
+```
 
 ### 5. Point the site at it
 
@@ -92,9 +104,25 @@ Put that URL in `js/config.js`:
 API_URL: 'https://kelpspotter-api-xxxxxxxx-uw.a.run.app',
 ```
 
-Commit and push. The client probes `/health` on load: if it answers, visitors
-get live imagery with no sign-in; if not, it falls back to per-user OAuth and
-then demo mode, so a missing backend degrades rather than breaks.
+Commit and push.
+
+**Engine precedence, best first:**
+
+1. **The visitor's own Earth Engine session.** Probed first, so anyone signed in
+   spends their own quota rather than this project's. The probe is raced against
+   a 2.5 s timeout — when Google's popup is blocked its callbacks can simply
+   never fire, and without the race the page would hang at boot instead of
+   falling through.
+2. **This backend.** Live imagery for everyone else, no sign-in.
+3. **Demo mode.** Synthetic, always works.
+
+So a missing or broken backend degrades rather than breaks, and signing in
+upgrades a visitor off the shared quota mid-session.
+
+Because the shared backend is public but rate-limited, the site shows a
+persistent bottom-centre invitation to sign in. It clears when the visitor signs
+in, or when they dismiss it with the **×**; it is not an error banner and does
+not auto-hide.
 
 ### 6. Check it
 

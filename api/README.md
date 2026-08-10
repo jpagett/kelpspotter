@@ -39,13 +39,25 @@ gcloud iam service-accounts create kelpspotter-api \
 SA="kelpspotter-api@kelpscape.iam.gserviceaccount.com"
 
 gcloud projects add-iam-policy-binding kelpscape \
-  --member="serviceAccount:$SA" --role="roles/earthengine.viewer"
+  --member="serviceAccount:$SA" --role="roles/earthengine.writer"
 
 gcloud projects add-iam-policy-binding kelpscape \
   --member="serviceAccount:$SA" --role="roles/serviceusage.serviceUsageConsumer"
 ```
 
-**This is the step that most often blocks a first deploy.** The Cloud project
+**`writer`, not `viewer`.** `earthengine.viewer` is enough to *run computations*,
+so `/scenes` will work with it and everything looks fine — but minting map tiles
+needs `earthengine.maps.create`, which only `writer` carries. The symptom is very
+specific and easy to misread:
+
+    /health   -> ok
+    /scenes   -> real data
+    /layer    -> Permission 'earthengine.maps.create' denied on resource 'projects/kelpscape'
+
+If you see that, this role is the reason. No redeploy is needed after fixing it —
+Earth Engine checks the permission per request.
+
+**This is also the step that most often blocks a first deploy.** The Cloud project
 must already be registered for Earth Engine (you did this for the browser
 client), and the service account must be allowed to use it. If `/health`
 succeeds but `/scenes` returns a permission error, this binding — or the
@@ -163,21 +175,63 @@ PROJECT_NUMBER=$(gcloud projects describe kelpscape --format='value(projectNumbe
 ```
 
 ```bash
-gcloud projects add-iam-policy-binding kelpscape --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/run.admin"
+gcloud projects add-iam-policy-binding kelpscape --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/run.admin" --condition=None
 ```
 
 ```bash
-gcloud iam service-accounts add-iam-policy-binding kelpspotter-api@kelpscape.iam.gserviceaccount.com --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/iam.serviceAccountUser"
+gcloud iam service-accounts add-iam-policy-binding kelpspotter-api@kelpscape.iam.gserviceaccount.com --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/iam.serviceAccountUser" --condition=None
 ```
 
 Without the second binding the build fails with a `PERMISSION_DENIED` naming
 `iam.serviceaccounts.actAs` — that error means this step, not a broken YAML.
 
+**`--condition=None` is load-bearing.** Connecting the repository leaves behind a
+short-lived conditional binding (`cloudbuild-connection-setup`, expiring within
+the hour). Once *any* binding on the policy carries a condition, gcloud refuses
+to add an unconditional one silently and prompts instead:
+
+    The policy contains bindings with conditions, so specifying a condition is
+    required when adding a binding. Please specify a condition.
+
+Answer `None`, or pass the flag as above. Picking the offered
+`cloudbuild-connection-setup` condition instead would give Cloud Build deploy
+rights that expire the same hour, and the trigger would start failing later for
+no visible reason.
+
 **3. Create the trigger.**
 
+Which command you need depends on how the repository was connected, and using
+the wrong one fails with a bare `INVALID_ARGUMENT: Request contains an invalid
+argument` that names nothing.
+
+*2nd generation* — the Cloud Build **Repositories** page, the one that warns
+about bot accounts and stores a token in Secret Manager. Find the connection
+first, since the console often creates it in `us-central1` rather than the
+region you expect:
+
 ```bash
-gcloud builds triggers create github --name=kelpspotter-api-deploy --region=us-west1 --repo-owner=jpagett --repo-name=kelpspotter --branch-pattern='^master$' --build-config=cloudbuild.yaml --included-files='api/**'
+gcloud builds connections list --region=us-west1
 ```
+
+```bash
+gcloud builds repositories list --connection=CONNECTION_NAME --region=REGION
+```
+
+```bash
+gcloud builds triggers create github --name=kelpspotter-api-deploy --region=REGION --repository=projects/kelpscape/locations/REGION/connections/CONNECTION_NAME/repositories/REPO_NAME --branch-pattern='^master$' --build-config=cloudbuild.yaml --included-files='api/**'
+```
+
+*1st generation* — the older GitHub App connection. Takes owner/name directly
+and lives in `global`:
+
+```bash
+gcloud builds triggers create github --name=kelpspotter-api-deploy --region=global --repo-owner=jpagett --repo-name=kelpspotter --branch-pattern='^master$' --build-config=cloudbuild.yaml --included-files='api/**'
+```
+
+**The trigger region must match the connection's region.** It does *not* need to
+match Cloud Run's: `cloudbuild.yaml` passes `--region` to the deploy step
+explicitly, so a build running in `us-central1` still deploys the service to
+`us-west1`.
 
 `--included-files='api/**'` is what stops a CSS change from rebuilding a
 container.

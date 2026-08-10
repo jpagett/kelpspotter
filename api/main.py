@@ -199,9 +199,12 @@ def render(kelp, idx, params):
     hi = lo + ramp
     strength = idx.subtract(lo).divide(ramp).clamp(0, 1)
     alpha = strength.pow(0.7).multiply(kelp)
-    # visualize() takes a params dict here rather than keywords: `min`/`max` as
-    # kwargs collide with the builtins in some earthengine-api versions.
-    visual = idx.visualize({"min": lo, "max": hi, "palette": KELP_PALETTE})
+    # Keyword arguments, NOT a params dict. The JavaScript API takes
+    # visualize({min, max, palette}); the Python signature is
+    # visualize(bands, gain, bias, min, max, gamma, palette, ...), so a dict is
+    # swallowed positionally as `bands` and fails with
+    #   "Expected a string or list of strings for field 'bands'".
+    visual = idx.visualize(min=lo, max=hi, palette=KELP_PALETTE)
     return visual.updateMask(alpha)
 
 

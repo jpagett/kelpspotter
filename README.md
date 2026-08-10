@@ -167,10 +167,20 @@ below sea level) and sends `Access-Control-Allow-Origin: *` — so it is a direc
 fetch with no proxy. Metres are converted to feet and labelled *depth* below sea level or
 *elev.* above it.
 
-`mousemove` fires far too often to hit the network each time, so lookups are debounced
-(180 ms), the in-flight request is aborted as soon as the cursor moves on, and results are
-cached per ~11 m of ground. The readout follows the pointer immediately regardless; it
-just dims while the value under it is stale. Sanity check against known points:
+`mousemove` fires far too often to hit the network each time, so lookups are gated four
+ways:
+
+- **A movement threshold.** No re-read until the cursor has travelled
+  `DEPTH.probe.minMovePx` (default **5** px) from the last lookup, so jitter around one
+  spot never discards a good reading.
+- **A debounce** of 180 ms after that.
+- **Abort** of the in-flight request as soon as the cursor moves on.
+- **A cache** per ~11 m of ground; revisiting a known point renders instantly with no
+  request and no placeholder.
+
+The readout follows the pointer immediately regardless, showing **`…`** while a lookup is
+outstanding. The threshold resets on mouse-out and on map pan/zoom, since the same screen
+point then refers to somewhere new. Sanity check against known points:
 
 | Location | Pixel value | Readout |
 |---|---|---|

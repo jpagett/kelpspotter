@@ -298,7 +298,7 @@ input[type=range]::-moz-range-thumb {
   white-space: nowrap; opacity: 0; transition: opacity 120ms ease;
 }
 .depth-probe.show { opacity: 1; }
-.depth-probe.pending { opacity: 0.45; }   /* dim the stale value while re-reading */
+.depth-probe.loading { color: var(--tide-dim); }   /* the "…" placeholder */
 .depth-probe .dp-sub { color: var(--tide-dim); margin-left: 5px; }
 
 /* ---------- activity readout ---------- */

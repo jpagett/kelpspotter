@@ -101,7 +101,11 @@ window.KELP_CONFIG = {
      * negative below sea level), and it sends Access-Control-Allow-Origin: *, so
      * the browser can query it directly with no proxy.
      */
-    probe: { url: 'https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/DEM_global_mosaic/ImageServer' },
+    probe: {
+      url: 'https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/DEM_global_mosaic/ImageServer',
+      // don't re-read until the cursor has travelled this far, in screen pixels
+      minMovePx: 5
+    },
 
     /*
      * NOAA sends `cache-control: private` with no max-age, ETag or Last-Modified,

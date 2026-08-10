@@ -150,6 +150,7 @@
   const M_TO_FT = 3.280839895;
   const probeCache = new Map();
   let probeAbort = null, probeTimer = null, probeFailed = false;
+  let lastProbePt = null;   // screen position of the last lookup
 
   const depthEnabled = () => state.params.showRelief || state.params.showContours;
 
@@ -161,7 +162,13 @@
   function hideProbe() {
     $('depth-probe').className = 'depth-probe';
     clearTimeout(probeTimer);
+    lastProbePt = null;      // re-entering the map should read again
     if (probeAbort) { probeAbort.abort(); probeAbort = null; }
+  }
+  function showProbeLoading() {
+    const el = $('depth-probe');
+    el.textContent = '…';
+    el.className = 'depth-probe show loading';
   }
   function renderProbe(metres) {
     const el = $('depth-probe');
@@ -203,16 +210,29 @@
 
   map.on('mousemove', (ev) => {
     if (!depthEnabled()) { hideProbe(); return; }
-    moveProbe(ev.originalEvent);
+    const oe = ev.originalEvent;
+    moveProbe(oe);
 
     const key = ev.latlng.lat.toFixed(4) + ',' + ev.latlng.lng.toFixed(4);
-    if (probeCache.has(key)) {           // already known — no network, no flicker
+    if (probeCache.has(key)) {           // already known — no network, no "…"
       clearTimeout(probeTimer);
       renderProbe(probeCache.get(key));
+      lastProbePt = { x: oe.clientX, y: oe.clientY };
       return;
     }
-    const el = $('depth-probe');
-    el.className = 'depth-probe' + (el.textContent ? ' show pending' : '');
+
+    /*
+     * Screen-space guard on top of the debounce: tiny jitters around a spot
+     * shouldn't blank a good reading and re-query. Only once the cursor has
+     * actually travelled do we treat it as a new place worth reading.
+     */
+    const minMove = cfg.DEPTH.probe.minMovePx;
+    if (lastProbePt) {
+      const dx = oe.clientX - lastProbePt.x, dy = oe.clientY - lastProbePt.y;
+      if (Math.sqrt(dx * dx + dy * dy) < minMove) return;
+    }
+    lastProbePt = { x: oe.clientX, y: oe.clientY };
+    showProbeLoading();
 
     clearTimeout(probeTimer);
     const at = ev.latlng;
@@ -227,6 +247,8 @@
     }, 180);
   });
   map.on('mouseout', hideProbe);
+  // the same screen point means somewhere new once the map itself has moved
+  map.on('movestart zoomstart', () => { lastProbePt = null; });
 
   /*
    * ---- scenes + scrubber ----

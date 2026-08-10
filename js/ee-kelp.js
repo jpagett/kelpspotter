@@ -250,6 +250,20 @@ const KelpEngine = (function () {
       const clear = collection(startISO, endISO, maxCloud)
         .map((img) => reflectance(img).updateMask(clearSky(img)));
       return tileLayerFromImage(renderKelp(classify(clear.median(), p, null), p), {});
+    },
+
+    /*
+     * True-color RGB (B4=red, B3=green, B2=blue), an alternative to the kelp
+     * mask rather than a layer on top of it — a plain visual read of the scene.
+     * Raw TOA DN is used directly (not the 1e-4 rescale reflectance() applies),
+     * since visualize()'s min/max is just a display stretch either way.
+     */
+    trueColorLayer(dateISO) {
+      const start = dateISO;
+      const end = ee.Date(dateISO).advance(1, 'day');
+      const img = ee.Image(collection(start, end, 100).mosaic());
+      const vis = img.select(['B4', 'B3', 'B2']).visualize({ min: 0, max: 2500, gamma: 1.3 });
+      return tileLayerFromImage(vis, {});
     }
   };
 })();

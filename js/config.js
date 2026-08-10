@@ -139,10 +139,19 @@ window.KELP_CONFIG = {
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
     sacUnit: 'cuft/min',    // gas planning: 'cuft/min' | 'L/min'
     speedUnit: 'mi/hr',     // gas planning: 'mi/hr' | 'm/s' | 'kts' | 'km/hr'
-    defaultSac: 0.75,       // starting SAC rate for a new path, in cuft/min
-    defaultSpeed: 1,        // starting swim speed for a new path, in mi/hr
+    /*
+     * Gas planning applies to every path at once (one console, not one per
+     * path). timeMode picks which of time/speed is the input the diver typed
+     * in; the other is always derived from it plus each path's own length.
+     */
+    sac: 0.75,              // cuft/min
+    speed: 1,                // mi/hr — used when timeMode is 'speed'
+    time: 30,                // minutes — used when timeMode is 'time'
+    timeMode: 'speed',      // 'speed' | 'time'
+    showGas: false,
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
-    depthOpacity: 0.45      // kept well under 1 so the kelp layer still reads over it
+    depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it
+    trueColorOpacity: 0     // Sentinel-2 B4/B3/B2 RGB read; off by default
   }
 };

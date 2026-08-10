@@ -4,7 +4,7 @@
     {
       "name": "kelpspotter-static",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8177"],
+      "runtimeArgs": ["-m", "http.server", "8177", "--directory", "C:\\Users\\jpagett\\code\\kelpspotter"],
       "port": 8177
     }
   ]

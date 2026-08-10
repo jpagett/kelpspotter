@@ -29,6 +29,7 @@
    * needs its own pane above it, and the kelp needs a pane above that. The demo
    * engine's canvas lives in Leaflet's overlayPane (400) and stays on top.
    */
+  map.createPane('truecolor').style.zIndex = 240;   // an alternative base image, so it sits just under depth
   map.createPane('depth').style.zIndex = 250;
   map.createPane('contour').style.zIndex = 260;
   map.createPane('kelpPane').style.zIndex = 350;
@@ -134,6 +135,51 @@
   function setDepthOpacity(v) {
     state.params.depthOpacity = v;
     if (DEPTH_LAYERS.relief.layer) DEPTH_LAYERS.relief.layer.setOpacity(v);
+  }
+
+  /*
+   * ---- true color (B4/B3/B2) ----
+   * A plain RGB read of the current scene, tied to whatever single day is
+   * selected — an alternative to the kelp mask rather than a layer stacked on
+   * top of it, so it lives in its own pane just under depth. Fetched lazily,
+   * the first time its opacity goes above zero, and refetched if the selected
+   * scene date changes while it's visible.
+   */
+  let trueColorLayer = null, trueColorDate = null, trueColorLoading = false;
+
+  async function ensureTrueColor() {
+    const sc = state.scenes[state.idx];
+    if (!sc || trueColorLoading) return;
+    if (trueColorLayer && trueColorDate === sc.date) return;   // already showing this date
+    if (typeof state.engine.trueColorLayer !== 'function') return;
+    trueColorLoading = true;
+    say('Loading true color · ' + sc.date + '…');
+    try {
+      const res = await state.engine.trueColorLayer(sc.date);
+      if (trueColorLayer) map.removeLayer(trueColorLayer);
+      trueColorLayer = toLeafletLayer(res, { pane: 'truecolor', opacity: state.params.trueColorOpacity });
+      trueColorLayer.addTo(map);
+      trueColorDate = sc.date;
+      say('True color ready · ' + sc.date, 'ok');
+    } catch (err) {
+      console.warn(err);
+      say('True color unavailable — ' + err.message, 'warn');
+      toast(err.message, true);
+      setTrueColorOpacity(0);
+      // undo whatever solo state this failed attempt started, so the eye icon
+      // doesn't read "active" over a layer that never actually loaded
+      if (overlaySoloed === 'eye') { overlaySoloed = null; overlayPreSolo = null; }
+      syncOverlayPicker();
+    } finally {
+      trueColorLoading = false;
+    }
+  }
+
+  function setTrueColorOpacity(v) {
+    state.params.trueColorOpacity = v;
+    map.getPane('truecolor').style.display = v > 0 ? '' : 'none';
+    if (v > 0) ensureTrueColor();
+    if (trueColorLayer && trueColorLayer.setOpacity) trueColorLayer.setOpacity(v);
   }
 
   /*
@@ -520,7 +566,7 @@
     if (on) {
       const sel = state.scenes[state.idx];
       const [rs] = dateRangeISO();
-      calMode = 'start';                 // opens armed to set the range start
+      calMode = 'scene';                 // opens ready to pick a single day; Start/End are opt-in
       calMonth = parseISO(sel ? sel.date : rs);
       calMonth.setDate(1);
       cal.removeAttribute('hidden');
@@ -655,10 +701,16 @@
     }
   }
 
-  // Engines return either a tile-URL template (Earth Engine) or a Leaflet layer (demo).
-  function toLeafletLayer(res) {
+  /*
+   * Engines return either a tile-URL template (Earth Engine) or a Leaflet layer
+   * (demo). tileSize:128 (half Leaflet's 256 default) requests a finer grid —
+   * more, smaller boxes over the same area — so the map redraws more of the
+   * layer's edge on each pan/zoom step rather than in fewer, larger jumps.
+   */
+  function toLeafletLayer(res, opts) {
     if (typeof res === 'string') {
-      return L.tileLayer(res, { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane' });
+      return L.tileLayer(res, Object.assign(
+        { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane', tileSize: 128 }, opts));
     }
     return res; // already a Leaflet layer (demo overlay)
   }
@@ -792,6 +844,70 @@
   });
   bindSlider('depth-op', 'depth-op-val', (v) => Math.round(v * 100) + '%',
     (v) => setDepthOpacity(+v), () => {});
+
+  /*
+   * ---- overlay picker: true color vs depth, "solo" style ----
+   * Clicking an icon remembers both overlays' current opacity, then sets this
+   * one to full and the other to zero — click it again to put both back the
+   * way they were. Dragging a flyout slider by hand is a plain opacity set and
+   * drops the "soloed" bookkeeping, since at that point the user is composing
+   * their own mix rather than toggling between two presets.
+   */
+  let overlaySoloed = null;        // 'eye' | 'ruler' | null
+  let overlayPreSolo = null;       // {trueColorOpacity, depthOpacity} saved before a solo click
+
+  function syncOverlayPicker() {
+    $('ov-eye').setAttribute('aria-pressed', overlaySoloed === 'eye' ? 'true' : 'false');
+    $('ov-ruler').setAttribute('aria-pressed', overlaySoloed === 'ruler' ? 'true' : 'false');
+    $('ov-eye-slider').value = state.params.trueColorOpacity;
+    $('ov-ruler-slider').value = state.params.depthOpacity;
+  }
+
+  function soloOverlay(which) {
+    if (overlaySoloed === which) {
+      if (overlayPreSolo) {
+        setTrueColorOpacity(overlayPreSolo.trueColorOpacity);
+        setDepthOpacity(overlayPreSolo.depthOpacity);
+      }
+      overlaySoloed = null;
+      overlayPreSolo = null;
+    } else {
+      overlayPreSolo = { trueColorOpacity: state.params.trueColorOpacity, depthOpacity: state.params.depthOpacity };
+      if (which === 'eye') {
+        setTrueColorOpacity(1);
+        setDepthOpacity(0);
+      } else {
+        if (!state.params.showRelief) {
+          state.params.showRelief = true;
+          $('relief').checked = true;
+          setDepthLayer('relief', true);
+        }
+        setDepthOpacity(1);
+        setTrueColorOpacity(0);
+      }
+      overlaySoloed = which;
+    }
+    syncOverlayPicker();
+  }
+
+  $('ov-eye').addEventListener('click', () => soloOverlay('eye'));
+  $('ov-ruler').addEventListener('click', () => soloOverlay('ruler'));
+  $('ov-eye-slider').addEventListener('input', (ev) => {
+    overlaySoloed = null; overlayPreSolo = null;
+    setTrueColorOpacity(+ev.target.value);
+    syncOverlayPicker();
+  });
+  $('ov-ruler-slider').addEventListener('input', (ev) => {
+    overlaySoloed = null; overlayPreSolo = null;
+    if (+ev.target.value > 0 && !state.params.showRelief) {
+      state.params.showRelief = true;
+      $('relief').checked = true;
+      setDepthLayer('relief', true);
+    }
+    setDepthOpacity(+ev.target.value);
+    syncOverlayPicker();
+  });
+  syncOverlayPicker();
 
   /*
    * ---- custom contours: draggable depth ruler ----
@@ -1000,16 +1116,25 @@
     return sel;
   }
 
-  function numberInput(value, dp, title, onCommit) {
-    const inp = document.createElement('input');
-    inp.type = 'number'; inp.className = 'pp-num'; inp.title = title;
-    inp.min = '0'; inp.step = dp > 0 ? (1 / Math.pow(10, dp)).toString() : '1';
-    inp.value = isFinite(value) ? (+value.toFixed(dp)).toString() : '';
-    inp.addEventListener('change', () => {
-      const v = parseFloat(inp.value);
-      if (isFinite(v) && v > 0) onCommit(v); else inp.value = isFinite(value) ? (+value.toFixed(dp)).toString() : '';
-    });
-    return inp;
+  // Total path length in miles — the shared basis for the speed<->time conversion.
+  const lengthMiles = (p) => Paths.lengthOf(p) / 1609.344;
+
+  /*
+   * Gas planning is one console for every path (see #pp-global-tools), not a
+   * per-path setting: state.params.speed/time/timeMode drive it, and each
+   * path only contributes its own length. Whichever of speed/time the diver
+   * did NOT type in is derived from the other plus this path's length.
+   */
+  function effectiveTimeSpeed(p) {
+    const miles = lengthMiles(p);
+    if (state.params.timeMode === 'time') {
+      const timeMin = state.params.time;
+      const speedMiHr = timeMin > 0 ? miles / (timeMin / 60) : 0;
+      return { timeMin: timeMin, speedMiHr: speedMiHr };
+    }
+    const speedMiHr = state.params.speed;
+    const timeMin = speedMiHr > 0 ? (miles / speedMiHr) * 60 : 0;
+    return { timeMin: timeMin, speedMiHr: speedMiHr };
   }
 
   /*
@@ -1021,14 +1146,15 @@
   const ATA_DEPTH_FT = 33;
   function gasProfile(p) {
     const pts = (p.profile || []).filter((s) => s.feet !== null);
-    if (pts.length < 2 || !(p.speed > 0) || !(p.sac > 0)) return null;
+    const speedMiHr = effectiveTimeSpeed(p).speedMiHr;
+    if (pts.length < 2 || !(speedMiHr > 0) || !(state.params.sac > 0)) return null;
     let cum = 0, prevMi = 0;
     const points = pts.map((s, i) => {
       const depthFt = -s.feet;
       const ata = 1 + depthFt / ATA_DEPTH_FT;
       const mi = s.distance / 1609.344;
-      const dtMin = i === 0 ? 0 : ((mi - prevMi) / p.speed) * 60;
-      cum += p.sac * ata * dtMin;
+      const dtMin = i === 0 ? 0 : ((mi - prevMi) / speedMiHr) * 60;
+      cum += state.params.sac * ata * dtMin;
       prevMi = mi;
       return { distance: s.distance, cuft: cum };
     });
@@ -1093,7 +1219,7 @@
     dist.textContent = fmtDist(maxX);
     svg.appendChild(dist);
 
-    if (p.showGas) {
+    if (state.params.showGas) {
       const gp = gasProfile(p);
       if (gp && gp.total > 0) {
         const yG = (cuft) => PADT + (H - PADT - PADB) * (cuft / gp.total);
@@ -1238,9 +1364,10 @@
 
       const mirror = document.createElement('button');
       mirror.className = 'pp-mirror'; mirror.type = 'button'; mirror.textContent = '⇄';
-      mirror.title = 'Mirror this path back to its start';
-      mirror.disabled = p.nodes.length < 2;
-      mirror.addEventListener('click', () => Paths.mirror(p.id));
+      mirror.title = p.mirrored ? 'Remove the out-and-back mirror' : 'Mirror this path back to its start';
+      mirror.disabled = !p.mirrored && p.nodes.length < 2;
+      mirror.setAttribute('aria-pressed', p.mirrored ? 'true' : 'false');
+      mirror.addEventListener('click', () => Paths.setMirrored(p.id, !p.mirrored));
 
       const cog = document.createElement('button');
       cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
@@ -1260,10 +1387,10 @@
         state.params.depthUnit = v; renderPaths();
       });
       const su = unitSelect('sac', state.params.sacUnit, (v) => {
-        state.params.sacUnit = v; renderPaths();
+        state.params.sacUnit = v; syncGasBar(); renderPaths();
       });
       const pu = unitSelect('speed', state.params.speedUnit, (v) => {
-        state.params.speedUnit = v; renderPaths();
+        state.params.speedUnit = v; syncGasBar(); renderPaths();
       });
       menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu);
       menu.appendChild(su); menu.appendChild(pu); menu.appendChild(del);
@@ -1273,54 +1400,13 @@
       });
 
       row.appendChild(sw); row.appendChild(nameWrap);
-      row.appendChild(meta); row.appendChild(caret); row.appendChild(mirror); row.appendChild(cog);
+      row.appendChild(meta); row.appendChild(mirror); row.appendChild(caret); row.appendChild(cog);
       item.appendChild(row); item.appendChild(menu);
 
       let wrap = null;
       if (p.expanded) {
         wrap = document.createElement('div');
         wrap.className = 'pp-profile';
-
-        const tools = document.createElement('div');
-        tools.className = 'pp-plot-tools';
-
-        const sacField = document.createElement('label');
-        sacField.className = 'pp-field'; sacField.title = 'Surface air consumption rate';
-        const sacLabel = document.createElement('span'); sacLabel.textContent = 'SAC';
-        const sacInput = numberInput(sacU().fromBase(p.sac), sacU().dp, 'Surface air consumption rate', (v) => {
-          Paths.setSac(p.id, sacU().toBase(v));
-        });
-        const sacUnitLabel = document.createElement('span'); sacUnitLabel.className = 'pp-field-unit';
-        sacUnitLabel.textContent = sacU().label;
-        sacField.appendChild(sacLabel); sacField.appendChild(sacInput); sacField.appendChild(sacUnitLabel);
-
-        const speedField = document.createElement('label');
-        speedField.className = 'pp-field'; speedField.title = 'Swim speed (assumed constant over the path)';
-        const speedLabel = document.createElement('span'); speedLabel.textContent = 'Speed';
-        const speedInput = numberInput(speedU().fromBase(p.speed), speedU().dp, 'Swim speed', (v) => {
-          Paths.setSpeed(p.id, speedU().toBase(v));
-        });
-        const speedUnitLabel = document.createElement('span'); speedUnitLabel.className = 'pp-field-unit';
-        speedUnitLabel.textContent = speedU().label;
-        speedField.appendChild(speedLabel); speedField.appendChild(speedInput); speedField.appendChild(speedUnitLabel);
-
-        const gasBtn = document.createElement('button');
-        gasBtn.className = 'pp-gas-toggle'; gasBtn.type = 'button'; gasBtn.textContent = 'Gas';
-        gasBtn.title = 'Overlay estimated gas consumption';
-        gasBtn.setAttribute('aria-pressed', p.showGas ? 'true' : 'false');
-        gasBtn.addEventListener('click', () => Paths.toggleGas(p.id));
-
-        const gasTotal = document.createElement('span');
-        gasTotal.className = 'pp-gas-total';
-        if (p.showGas) {
-          const gp = gasProfile(p);
-          gasTotal.textContent = gp ? gp.total.toFixed(1) + ' cuft total' : '—';
-        }
-
-        tools.appendChild(sacField); tools.appendChild(speedField);
-        tools.appendChild(gasBtn); tools.appendChild(gasTotal);
-        wrap.appendChild(tools);
-
         item.appendChild(wrap);
       }
       box.appendChild(item);
@@ -1342,6 +1428,25 @@
           t.textContent = p.nodes.length < 2 ? 'Add at least two nodes.' : 'Reading depth…';
           wrap.appendChild(t);
         }
+
+        // time/speed/distance readout — driven by the global gas-planning bar,
+        // just applied against this path's own length
+        const { timeMin, speedMiHr } = effectiveTimeSpeed(p);
+        const readout = document.createElement('div');
+        readout.className = 'pp-readout';
+        readout.appendChild(document.createTextNode(fmtDist(Paths.lengthOf(p)) + ' · '));
+        readout.appendChild(document.createTextNode((timeMin > 0 ? timeMin.toFixed(1) + ' min' : '—') + ' · '));
+        const speedSpan = document.createElement('span');
+        const warnFast = state.params.timeMode === 'time' && speedMiHr > 1.2;
+        speedSpan.className = 'pp-readout-speed' + (warnFast ? ' warn' : '');
+        speedSpan.textContent = speedMiHr > 0
+          ? (+speedU().fromBase(speedMiHr).toFixed(speedU().dp)) + ' ' + speedU().label : '—';
+        readout.appendChild(speedSpan);
+        if (state.params.showGas) {
+          const gp = gasProfile(p);
+          readout.appendChild(document.createTextNode(' · ' + (gp ? gp.total.toFixed(1) + ' cuft' : '—')));
+        }
+        wrap.appendChild(readout);
       }
     });
   }
@@ -1500,8 +1605,37 @@
     'Collapse this panel', 'Expand this panel');
   collapseToggle($('act-toggle').closest('.activity'), $('act-toggle'),
     'Collapse this panel', 'Expand this panel');
-  collapseToggle($('pp-collapse').closest('.paths-panel'), $('pp-collapse'),
-    'Collapse this panel', 'Expand this panel');
+
+  /*
+   * The Paths panel gets mobile-specific behaviour instead of the plain
+   * collapseToggle the other two panels use: on a phone-width viewport the
+   * floating box is too small to work in, so tapping its name expands it to
+   * fill the screen (.mobile-full) rather than just revealing the body in
+   * place, and it starts collapsed on load rather than open.
+   */
+  const mobileQuery = window.matchMedia('(max-width: 860px)');
+  const pathsPanel = $('pp-collapse').closest('.paths-panel');
+  $('pp-collapse').addEventListener('click', () => {
+    if (mobileQuery.matches) {
+      // strict two-state toggle on mobile: collapsed strip <-> full screen
+      const goingFull = !pathsPanel.classList.contains('mobile-full');
+      pathsPanel.classList.toggle('mobile-full', goingFull);
+      pathsPanel.classList.toggle('collapsed', !goingFull);
+      $('pp-collapse').setAttribute('aria-expanded', goingFull ? 'true' : 'false');
+      $('pp-collapse').title = goingFull ? 'Shrink this panel' : 'Expand this panel';
+    } else {
+      const collapsed = pathsPanel.classList.toggle('collapsed');
+      $('pp-collapse').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      $('pp-collapse').title = collapsed ? 'Expand this panel' : 'Collapse this panel';
+    }
+  });
+  if (mobileQuery.matches) {
+    pathsPanel.classList.add('collapsed');
+    $('pp-collapse').setAttribute('aria-expanded', 'false');
+  }
+  mobileQuery.addEventListener('change', (ev) => {
+    if (!ev.matches) pathsPanel.classList.remove('mobile-full');
+  });
 
   // ---- View menu: show/hide whole panels, independent of their own collapse state ----
   const VIEW_TARGETS = {
@@ -1525,6 +1659,62 @@
     $('view-list').hidden = true;
     $('view-toggle').setAttribute('aria-expanded', 'false');
   });
+
+  /*
+   * ---- global gas-planning bar ----
+   * One SAC/speed-or-time/gas setup for every path, rather than repeating it
+   * per path — see effectiveTimeSpeed()/gasProfile() for how each path's own
+   * length turns these into its own numbers.
+   */
+  function syncGasBar() {
+    $('pp-sac-field').style.display = state.params.showGas ? '' : 'none';
+    $('pp-sac-input').value = +sacU().fromBase(state.params.sac).toFixed(sacU().dp);
+    $('pp-sac-unit').textContent = sacU().label;
+
+    const isTime = state.params.timeMode === 'time';
+    $('pp-time-btn').setAttribute('aria-pressed', isTime ? 'true' : 'false');
+    $('pp-speed-btn').setAttribute('aria-pressed', isTime ? 'false' : 'true');
+    $('pp-mode-input').value = isTime
+      ? (+state.params.time.toFixed(1))
+      : (+speedU().fromBase(state.params.speed).toFixed(speedU().dp));
+    $('pp-mode-input').title = isTime
+      ? 'Target time for each path (speed is derived from this and each path\'s length)'
+      : 'Swim speed, assumed constant (time is derived from this and each path\'s length)';
+    $('pp-mode-unit').textContent = isTime ? 'min' : speedU().label;
+
+    $('pp-gas-btn').setAttribute('aria-pressed', state.params.showGas ? 'true' : 'false');
+  }
+  $('pp-sac-input').addEventListener('change', () => {
+    const v = parseFloat($('pp-sac-input').value);
+    if (isFinite(v) && v > 0) state.params.sac = sacU().toBase(v);
+    syncGasBar();
+    renderPaths();
+  });
+  $('pp-time-btn').addEventListener('click', () => {
+    state.params.timeMode = 'time';
+    syncGasBar();
+    renderPaths();
+  });
+  $('pp-speed-btn').addEventListener('click', () => {
+    state.params.timeMode = 'speed';
+    syncGasBar();
+    renderPaths();
+  });
+  $('pp-mode-input').addEventListener('change', () => {
+    const v = parseFloat($('pp-mode-input').value);
+    if (isFinite(v) && v > 0) {
+      if (state.params.timeMode === 'time') state.params.time = v;
+      else state.params.speed = speedU().toBase(v);
+    }
+    syncGasBar();
+    renderPaths();
+  });
+  $('pp-gas-btn').addEventListener('click', () => {
+    state.params.showGas = !state.params.showGas;
+    syncGasBar();
+    renderPaths();
+  });
+  syncGasBar();
 
   $('pp-add').addEventListener('click', () => {
     if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KelpSpotter · Santa Barbara Channel</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -192,6 +193,18 @@
           <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
         </div>
       </div>
+      <div id="pp-global-tools" class="pp-global-tools">
+        <label id="pp-sac-field" class="pp-field" title="Surface air consumption rate">
+          <span>SAC</span>
+          <input id="pp-sac-input" type="number" class="pp-num" min="0" aria-label="Surface air consumption rate">
+          <span id="pp-sac-unit" class="pp-field-unit"></span>
+        </label>
+        <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
+        <button id="pp-speed-btn" class="pp-mode-btn" type="button" aria-pressed="true">Speed</button>
+        <input id="pp-mode-input" type="number" class="pp-num" min="0" aria-label="Time or speed value">
+        <span id="pp-mode-unit" class="pp-field-unit"></span>
+        <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false" title="Overlay estimated gas consumption on every path">Gas</button>
+      </div>
       <div id="pp-body">
       <div id="pp-list" class="pp-list"></div>
       <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
@@ -211,6 +224,21 @@
       <span id="act-dot" class="act-dot" aria-hidden="true"></span>
     </button>
     <ul id="act-log" class="act-log"></ul>
+  </div>
+
+  <div class="overlay-picker" aria-label="Base overlay">
+    <div class="ov-item">
+      <button id="ov-eye" class="ov-icon" type="button" aria-pressed="false" title="True color (Sentinel-2 B4/B3/B2)">👁</button>
+      <div class="ov-flyout">
+        <input id="ov-eye-slider" type="range" min="0" max="1" step="0.05" value="0" aria-label="True color opacity">
+      </div>
+    </div>
+    <div class="ov-item">
+      <button id="ov-ruler" class="ov-icon" type="button" aria-pressed="false" title="Depth overlay">📏</button>
+      <div class="ov-flyout">
+        <input id="ov-ruler-slider" type="range" min="0" max="1" step="0.05" value="0.45" aria-label="Depth overlay opacity">
+      </div>
+    </div>
   </div>
 
   <div id="depth-probe" class="depth-probe" aria-hidden="true"></div>

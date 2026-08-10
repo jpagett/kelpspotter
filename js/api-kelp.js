@@ -89,6 +89,10 @@ const ApiKelpEngine = (function () {
         kelpThresh: p.kelpThresh,
         b11Thresh: p.b11Thresh
       }).then((r) => r.urlFormat);
+    },
+
+    trueColorLayer(dateISO) {
+      return getJSON('/layer', { mode: 'truecolor', date: dateISO }).then((r) => r.urlFormat);
     }
   };
 })();

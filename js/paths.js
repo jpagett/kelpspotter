@@ -120,9 +120,7 @@ const Paths = (function () {
       id: id, name: 'Path ' + id, nodes: [],
       color: COLORS[(id - 1) % COLORS.length],
       line: null, markers: [], profile: null, expanded: true,
-      sac: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSac) || 0.75,     // cuft/min
-      speed: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSpeed) || 1,    // mi/hr
-      showGas: false
+      mirrored: false, preMirrorNodes: null
     };
     paths.push(p);
     selectedId = p.id;
@@ -199,34 +197,29 @@ const Paths = (function () {
     onChange();
   }
 
-  function mirror(id) {
+  /*
+   * Toggled, not one-shot: turning it on appends the reversed out-and-back
+   * nodes (remembering the pre-mirror list so turning it off can restore
+   * exactly, rather than guessing how many trailing nodes to drop).
+   */
+  function setMirrored(id, on) {
     const p = paths.find((x) => x.id === id);
-    if (!p || p.nodes.length < 2) return;
-    p.nodes = p.nodes.concat(p.nodes.slice(0, -1).reverse());
+    if (!p || p.mirrored === on) return;
+    if (on) {
+      if (p.nodes.length < 2) return;
+      p.preMirrorNodes = p.nodes.slice();
+      p.nodes = p.nodes.concat(p.nodes.slice(0, -1).reverse());
+      say(p.name + ' mirrored — now ' + p.nodes.length + ' nodes out-and-back');
+    } else if (p.preMirrorNodes) {
+      p.nodes = p.preMirrorNodes;
+      p.preMirrorNodes = null;
+      say(p.name + ' mirror removed — back to ' + p.nodes.length + ' nodes');
+    }
+    p.mirrored = on;
     p.profile = null;
     redraw(p);
     refreshProfile(p);
-    say(p.name + ' mirrored — now ' + p.nodes.length + ' nodes out-and-back');
     onChange();
-  }
-
-  function setSac(id, cuftPerMin) {
-    const p = paths.find((x) => x.id === id);
-    if (!p || !(cuftPerMin > 0)) return;
-    p.sac = cuftPerMin;
-    onChange();
-  }
-
-  function setSpeed(id, miPerHr) {
-    const p = paths.find((x) => x.id === id);
-    if (!p || !(miPerHr > 0)) return;
-    p.speed = miPerHr;
-    onChange();
-  }
-
-  function toggleGas(id) {
-    const p = paths.find((x) => x.id === id);
-    if (p) { p.showGas = !p.showGas; onChange(); }
   }
 
   function setColor(id, color) {
@@ -292,9 +285,7 @@ const Paths = (function () {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
         color: COLORS[(id - 1) % COLORS.length],
         line: null, markers: [], profile: null, expanded: true,
-        sac: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSac) || 0.75,
-        speed: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSpeed) || 1,
-        showGas: false
+        mirrored: false, preMirrorNodes: null
       };
       paths.push(p);
       selectedId = p.id;
@@ -317,11 +308,8 @@ const Paths = (function () {
     select: select,
     rename: rename,
     toggleExpand: toggleExpand,
-    mirror: mirror,
+    setMirrored: setMirrored,
     setColor: setColor,
-    setSac: setSac,
-    setSpeed: setSpeed,
-    toggleGas: toggleGas,
     remove: remove,
     exportPath: exportPath,
     importFile: importFile,

@@ -95,6 +95,32 @@ body {
 .console.view-hidden, .paths-panel.view-hidden,
 .activity.view-hidden, .legend.view-hidden { display: none; }
 
+/* ---------- base overlay picker (true color vs depth) ---------- */
+.overlay-picker {
+  position: fixed; z-index: 900; right: 16px; bottom: 16px;
+  display: flex; gap: 8px;
+  background: rgba(5,22,28,0.6); border: 1px solid var(--line); border-radius: 22px;
+  padding: 6px; backdrop-filter: blur(6px);
+}
+.ov-item { position: relative; }
+.ov-icon {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.ov-icon:hover { border-color: var(--kelp); }
+.ov-icon[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+.ov-flyout {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 7px; box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+  opacity: 0; pointer-events: none; transition: opacity 120ms ease;
+}
+.ov-item:hover .ov-flyout, .ov-item:focus-within .ov-flyout { opacity: 1; pointer-events: auto; }
+.ov-flyout input[type=range] {
+  writing-mode: vertical-lr; direction: rtl; width: 16px; height: 64px; accent-color: var(--kelp);
+}
+
 /* Bottom centre — the space the timeline used to occupy. Persistent: it stays
    until the visitor signs in or dismisses it, so it must not sit over anything. */
 .signin-notice {
@@ -446,11 +472,19 @@ input[type=range]::-moz-range-thumb {
   border: 1px solid var(--kelp); border-radius: 2px; padding: 1px 3px;
 }
 .pp-meta { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); flex: none; }
-.pp-cog, .pp-caret, .pp-mirror {
+.pp-cog, .pp-caret {
   background: none; border: none; cursor: pointer; padding: 0 2px;
   color: var(--tide-dim); font-size: 11px; line-height: 1;
 }
+/* outlined, filled a shade lighter than the row so it reads as a toggle
+   control rather than an icon-only button like the cog/caret next to it */
+.pp-mirror {
+  width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
+  background: var(--current); color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 11px; line-height: 1;
+}
 .pp-mirror:disabled { opacity: 0.3; cursor: not-allowed; }
+.pp-mirror[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
 /* identical to .field .hint so the panel reads like the console */
 .paths-panel .hint {
   font-family: inherit; font-size: 10px; color: var(--tide-dim);
@@ -478,7 +512,9 @@ input[type=range]::-moz-range-thumb {
   width: 6px; height: 6px;
   border-right: 2px solid var(--tide-dim); border-bottom: 2px solid var(--tide-dim);
 }
-.pp-cog:hover, .pp-caret:hover, .pp-mirror:hover:not(:disabled) { color: var(--kelp); }
+.pp-cog:hover, .pp-caret:hover { color: var(--kelp); }
+.pp-mirror:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
+.pp-mirror[aria-pressed="true"]:hover { color: var(--abyss); }
 .pp-menu {
   position: absolute; top: 26px; right: 4px; z-index: 20;
   display: flex; flex-wrap: wrap; justify-content: flex-end;
@@ -501,9 +537,13 @@ input[type=range]::-moz-range-thumb {
 .pp-profile svg { display: block; width: 100%; height: 62px; }
 .pp-profile .pp-axis { font-family: var(--mono); font-size: 8px; fill: var(--tide-dim); }
 
-.pp-plot-tools {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
-  margin-bottom: 6px; font-family: var(--mono); font-size: 10px; color: var(--tide-dim);
+/*
+ * Global gas-planning bar — one set of controls for every path, sitting
+ * between the panel head and the path list rather than repeated per path.
+ */
+.pp-global-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  padding: 0 10px 10px; font-family: var(--mono); font-size: 10px; color: var(--tide-dim);
 }
 .pp-field { display: flex; align-items: center; gap: 4px; }
 .pp-field-unit { color: var(--tide-dim); }
@@ -514,15 +554,29 @@ input[type=range]::-moz-range-thumb {
 }
 /* Chrome/Safari spinner arrows crowd a 46px field */
 .pp-num::-webkit-inner-spin-button, .pp-num::-webkit-outer-spin-button { margin-left: 2px; }
+.pp-mode-btn {
+  height: 20px; padding: 0 8px; cursor: pointer;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; line-height: 1;
+}
+.pp-mode-btn:hover { border-color: var(--kelp); color: var(--kelp); }
+.pp-mode-btn[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
 .pp-gas-toggle {
-  margin-left: auto; height: 20px; padding: 0 8px; cursor: pointer;
+  height: 20px; padding: 0 8px; cursor: pointer;
   background: none; color: var(--tide-dim);
   border: 1px solid var(--line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; line-height: 1;
 }
 .pp-gas-toggle:hover { border-color: var(--kelp); color: var(--kelp); }
 .pp-gas-toggle[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
-.pp-gas-total { color: var(--foam); white-space: nowrap; }
+
+/* per-path time/speed/distance readout, bottom-right of each plot */
+.pp-readout {
+  text-align: right; font-family: var(--mono); font-size: 10px; color: var(--tide);
+  margin-top: 4px; padding: 0 2px;
+}
+.pp-readout-speed.warn { color: #e2725b; font-weight: 600; }
 
 /* draggable node handles */
 .path-node span {
@@ -650,9 +704,41 @@ input[type=range]::-moz-range-thumb {
     position: relative; top: auto; left: auto; width: auto; margin: var(--header-h) 10px 0;
     max-height: none;
   }
-  .scrubber { position: relative; left: auto; right: auto; margin: 10px; bottom: auto; }
-  .legend { position: fixed; }
+  .console-body { max-height: none; }
+  .activity {
+    position: relative; left: auto; bottom: auto; top: auto; width: auto; margin: 10px;
+  }
   .brand .sub { display: none; }
+
+  /* header buttons crop instead of wrapping the row onto a second line */
+  .header { padding: 0 10px; gap: 8px; }
+  .brand { min-width: 0; gap: 8px; }
+  .brand .mark { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header-right { gap: 6px; min-width: 0; }
+  .header-right .btn, .header-right .status {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 30vw;
+  }
+
+  /* legend and paths panel stay fixed top-right, but width-capped so they
+     never force horizontal scroll on a narrow phone */
+  .legend { right: 10px; }
+  .paths-panel {
+    right: 10px; top: calc(var(--header-h) + 52px);
+    width: min(360px, calc(100vw - 20px));
+  }
+  /* collapsed to its header strip by default on mobile — see boot() in app.js */
+  .paths-panel.collapsed { width: auto; }
+
+  /* tapping the Paths name expands to fill the screen instead of the small
+     floating box, which is too fiddly to work with at phone width */
+  .paths-panel.mobile-full {
+    position: fixed; inset: var(--header-h) 0 0 0; z-index: 1200;
+    width: auto; height: auto; max-width: none; max-height: none;
+    border-radius: 0; margin: 0;
+  }
+  .paths-panel.mobile-full .pp-inner { height: 100%; }
+  .paths-panel.mobile-full .pp-grip { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

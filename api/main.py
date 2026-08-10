@@ -208,6 +208,13 @@ def render(kelp, idx, params):
     return visual.updateMask(alpha)
 
 
+def render_truecolor(img):
+    """Plain RGB read of the scene — an alternative to the kelp mask, not a
+    layer on top of it. Raw TOA DN, same as render(): visualize()'s min/max is
+    just a display stretch either way."""
+    return img.select(["B4", "B3", "B2"]).visualize(min=0, max=2500, gamma=1.3)
+
+
 def tile_url(image):
     """Mint a tile template, tolerating both getMapId return shapes.
 
@@ -340,6 +347,10 @@ def layer():
                 start, end, max_cloud, params["indexType"],
                 params["kelpThresh"], params["b11Thresh"],
             )
+        elif mode == "truecolor":
+            date = request.args.get("date", "")
+            dt.date.fromisoformat(date)          # validate
+            cache_key = "layer|truecolor|%s" % date
         else:
             date = request.args.get("date", "")
             dt.date.fromisoformat(date)          # validate
@@ -361,15 +372,25 @@ def layer():
                 lambda img: reflectance(img).updateMask(clear_sky(img))
             )
             kelp, idx = classify(clear.median(), params, None)
+            payload = {
+                "urlFormat": tile_url(render(kelp, idx, params)),
+                "expiresIn": MAPID_TTL_SECONDS,
+            }
+        elif mode == "truecolor":
+            day = ee.Date(date)
+            img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
+            payload = {
+                "urlFormat": tile_url(render_truecolor(img)),
+                "expiresIn": MAPID_TTL_SECONDS,
+            }
         else:
             day = ee.Date(date)
             img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
             kelp, idx = classify(reflectance(img), params, clear_sky(img))
-
-        payload = {
-            "urlFormat": tile_url(render(kelp, idx, params)),
-            "expiresIn": MAPID_TTL_SECONDS,
-        }
+            payload = {
+                "urlFormat": tile_url(render(kelp, idx, params)),
+                "expiresIn": MAPID_TTL_SECONDS,
+            }
     except Exception as err:                    # noqa: BLE001 — reported, not hidden
         # A bare 500 page says nothing, and this service is remote by design, so
         # the reason has to travel back with the response as well as to the log.

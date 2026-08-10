@@ -163,6 +163,11 @@ const DemoEngine = (function () {
         .map((s) => dateSeed(s.date));
       const Layer = makeLayer(L, seeds.slice(0, 6), p, true);
       return Promise.resolve(new Layer());
+    },
+    // Demo mode has no real Sentinel-2 pixels to composite — nothing honest to
+    // show here, so the caller is told plainly rather than being handed a fake.
+    trueColorLayer(dateISO) {
+      return Promise.reject(new Error('True color needs a live Earth Engine or API connection — demo mode has no real imagery.'));
     }
   };
 })();

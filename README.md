@@ -72,12 +72,15 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 |---|---|
 | **Scene ‹ ›** | Step through individual satellite passes (the timeline at the bottom). **← / →** do the same from the keyboard, except while a form control has focus. |
 | **The date itself** | Click it to open a calendar with its own cloud-ceiling slider. Only dates whose pass meets the ceiling are clickable; passes that exist but are too cloudy are struck through, so you can see what raising the ceiling would buy you. |
+| **Calendar → Start / End** | Arm either button, then click any day to move that edge of the date range. While armed, every day is clickable and month navigation is unclamped, so you can reach dates outside the current window. **Reset** returns to the last `LOOKBACK_DAYS`. |
 | **Single day / Composite** | One pass, or the paper's mean cloud-free composite across the date range. |
-| **Date range** | The window feeding both the timeline and the composite. *reset* returns it to the last `LOOKBACK_DAYS`. |
+| **Date range** | Shown read-only under the date, and edited from the calendar's Start / End buttons. Feeds both the timeline and the composite. |
 | **Cloud cover ceiling** | Drop scenes cloudier than this from the timeline and the composite. |
 | **Depth → Shaded relief** | NOAA depth/relief overlay (**on** by default). |
 | **Depth → Depth contours** | Charted depth contours from NOAA ENC (off by default). |
 | **Depth → Depth opacity** | Dims the relief so the kelp layer stays readable over it. |
+| **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
+| **Paths** (top right) | **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. |
 | **Depth at the cursor** | With either depth layer on, the depth (or land elevation) under the pointer is read out in feet beside the crosshair. |
 | **Index: KD / FAI / NDVI** | Which spectral index defines "kelp" (see below). |
 | **Kelp threshold** | Index value at or above which a pixel counts as canopy. Snaps back to the published value each time you switch index. |
@@ -158,6 +161,46 @@ make it cache properly. What the app does instead is cut the number of requests
 For caching that survives a reload, the next step would be a service worker with a
 cache-first strategy for the two NOAA hosts. That is a real addition rather than a tweak,
 so it is deliberately not in yet.
+
+### Custom contours
+
+The ENC layer only carries the depths the chart happens to publish, so an arbitrary
+"trace −87 ft" contour has to be computed. `js/contours.js` does it in three steps:
+
+1. `DemSampler` returns a lattice of elevations covering the view.
+2. Marching squares extracts the isoline at that level, interpolating along cell edges.
+3. The segments become one Leaflet multi-polyline per contour, in its own pane.
+
+Cells with any NoData corner are skipped rather than guessed at, so unmapped water
+leaves an honest gap instead of an invented contour.
+
+**The lattice is the interesting part.** Sample points snap to a *power-of-two* degree
+lattice, so the grids nest across zoom levels and a point sampled once is reused
+everywhere it recurs. Panning therefore fetches only the newly exposed strip; the rest is
+a cache hit and the isoline is simply re-extracted, which is pure client-side arithmetic.
+Measured over the channel:
+
+| Action | Points fetched | Time |
+|---|---|---|
+| First view | 840 | 395 ms |
+| Same view again | 0 | 1 ms |
+| Panned east | 147 (714 reused) | 75 ms |
+
+`getSamples` **caps at 1000 samples per request** — verified: asking for 1600 or 4096
+returns exactly 1000 — so `js/dem.js` chunks every grid at that boundary.
+
+### Paths
+
+Draw transects and read the depth profile along them. A path is a list of nodes; the
+polyline is derived from them, and each node of the selected path is a draggable marker
+(right-click a node to delete it). Depth comes from a single `getSamples` call sampling
+250 evenly spaced points, so profile resolution is capped by the same 1000-sample limit.
+
+The floppy button exports the selected path as a real `.xlsx` with two sheets — **Profile**
+(`distance_m`, `depth_ft`, `elevation_m`, `lat`, `lng`) and **Nodes** (`node`, `lat`, `lng`).
+Two sheets is why this uses SheetJS rather than CSV; it is the only dependency added for
+the feature. The load button reads that same workbook back, rebuilding the path from the
+Nodes sheet and re-reading its profile.
 
 ### Depth at the cursor
 
@@ -258,6 +301,9 @@ kelpspotter/
     ├── config.js     your credentials + area of interest + defaults
     ├── ee-kelp.js    the real Sentinel-2 → kelp pipeline (Earth Engine)
     ├── demo.js       synthetic kelp engine (same interface as ee-kelp)
+    ├── dem.js        shared NOAA depth sampling + the lattice cache
+    ├── contours.js   custom contours (marching squares over the lattice)
+    ├── paths.js      path drawing, depth profiles, xlsx in/out
     └── app.js        map, controls, timeline, engine selection, run loop
 ```
 

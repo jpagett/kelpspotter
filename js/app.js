@@ -353,6 +353,14 @@
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
                   'July', 'August', 'September', 'October', 'November', 'December'];
   let calMonth = null;   // Date pinned to the 1st of the displayed month
+  /*
+   * 'scene'       — clicking a day jumps to that pass (only ceiling-passing days)
+   * 'start'/'end' — armed by the Start/End buttons; the next day clicked becomes
+   *                 that edge of the date range. Any day is clickable in these
+   *                 modes, and month navigation is unclamped, since the whole
+   *                 point is to reach dates outside the current window.
+   */
+  let calMode = 'scene';
 
   const ymd = (y, m, d) =>
     y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
@@ -386,6 +394,8 @@
       b.className = 'cal-day blank';
       grid.appendChild(b);
     }
+    const [rs, re] = dateRangeISO();
+    const picking = calMode !== 'scene';
     let usable = 0;
     for (let d = 1; d <= days; d++) {
       const date = ymd(y, m, d);
@@ -393,7 +403,14 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = d;
-      if (!sc) {
+
+      if (picking) {
+        // any day can be a range edge, pass or no pass
+        btn.className = 'cal-day edge' +
+          (date === rs || date === re ? ' sel' : (sc && sc.cloud <= ceiling ? ' has' : ''));
+        btn.title = 'Set the range ' + calMode + ' to ' + date;
+        btn.addEventListener('click', () => setRangeEdge(date));
+      } else if (!sc) {
         btn.className = 'cal-day';
         btn.disabled = true;
       } else if (sc.cloud > ceiling) {
@@ -409,14 +426,44 @@
       grid.appendChild(btn);
     }
 
-    const [rs, re] = dateRangeISO();
-    $('cal-prev').disabled = monthKey(calMonth) <= monthKey(parseISO(rs));
-    $('cal-next').disabled = monthKey(calMonth) >= monthKey(parseISO(re));
-    $('cal-note').textContent = usable
-      ? usable + ' selectable pass' + (usable === 1 ? '' : 'es') + ' this month'
-      : 'No passes this month under ' + ceiling + '% cloud';
+    // month nav is clamped to the window only while picking a scene
+    $('cal-prev').disabled = !picking && monthKey(calMonth) <= monthKey(parseISO(rs));
+    $('cal-next').disabled = !picking && monthKey(calMonth) >= monthKey(parseISO(re));
+    $('cal-set-start').setAttribute('aria-pressed', calMode === 'start');
+    $('cal-set-end').setAttribute('aria-pressed', calMode === 'end');
+    $('cal-note').textContent = picking
+      ? 'Click a day to set the range ' + calMode + '. Currently ' + rs + ' → ' + re + '.'
+      : (usable ? usable + ' selectable pass' + (usable === 1 ? '' : 'es') + ' this month'
+                : 'No passes this month under ' + ceiling + '% cloud');
     $('cal-cloud').value = ceiling;
     $('cal-cloud-val').textContent = ceiling + '%';
+  }
+
+  // Arm / disarm the Start and End buttons.
+  function setCalMode(mode) {
+    calMode = calMode === mode ? 'scene' : mode;
+    if (calMode === 'scene') clampCalMonth();
+    renderCalendar();
+  }
+
+  // Applying a new edge leaves the calendar open so you can set the other one.
+  function setRangeEdge(date) {
+    const [rs, re] = dateRangeISO();
+    const next = calMode === 'start' ? [date, re] : [rs, date];
+    const ok = applyRange(next[0], next[1], true);
+    if (!ok) return;                 // invalid (start after end) — stay armed
+    calMode = 'scene';
+    clampCalMonth();
+    renderCalendar();
+  }
+
+  // Keep the displayed month inside the window once we're back to picking scenes.
+  function clampCalMonth() {
+    if (!calMonth) return;
+    const [rs, re] = dateRangeISO();
+    const lo = parseISO(rs), hi = parseISO(re);
+    if (monthKey(calMonth) < monthKey(lo)) calMonth = new Date(lo.getFullYear(), lo.getMonth(), 1);
+    if (monthKey(calMonth) > monthKey(hi)) calMonth = new Date(hi.getFullYear(), hi.getMonth(), 1);
   }
 
   function pickDate(date) {
@@ -434,12 +481,14 @@
     if (on) {
       const sel = state.scenes[state.idx];
       const [rs] = dateRangeISO();
+      calMode = 'scene';                 // always open ready to pick a scene
       calMonth = parseISO(sel ? sel.date : rs);
       calMonth.setDate(1);
       cal.removeAttribute('hidden');
       $('date-big').setAttribute('aria-expanded', 'true');
       renderCalendar();
     } else {
+      calMode = 'scene';
       cal.setAttribute('hidden', '');
       $('date-big').setAttribute('aria-expanded', 'false');
     }
@@ -453,14 +502,29 @@
   $('date-big').addEventListener('click', () => setCalendar(!calOpen()));
   $('cal-prev').addEventListener('click', () => shiftMonth(-1));
   $('cal-next').addEventListener('click', () => shiftMonth(1));
+  $('cal-set-start').addEventListener('click', () => setCalMode('start'));
+  $('cal-set-end').addEventListener('click', () => setCalMode('end'));
+  $('cal-reset').addEventListener('click', () => {
+    const [ds, de] = defaultRange();
+    applyRange(ds, de, true);
+    calMode = 'scene';
+    clampCalMonth();
+    renderCalendar();
+  });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && calOpen()) setCalendar(false);
   });
+  /*
+   * Capture phase, deliberately. A day button re-renders the grid in its own
+   * click handler, so by the time a bubble-phase listener ran, the clicked node
+   * would already be detached and `contains` would read it as an outside click —
+   * closing the calendar on every pick.
+   */
   document.addEventListener('click', (ev) => {
     if (!calOpen()) return;
     if ($('cal').contains(ev.target) || $('date-big').contains(ev.target)) return;
     setCalendar(false);
-  });
+  }, true);
 
   function renderTicks() {
     const box = $('ticks');
@@ -645,27 +709,26 @@
     }, () => run());
 
   // ---- date range ----
+  // Read-only in the console; edited from the calendar's Start / End buttons.
   function showRange() {
-    $('date-start').value = state.range.start;
-    $('date-end').value = state.range.end;
+    $('range-value').textContent = state.range.start + '  →  ' + state.range.end;
   }
-  function applyRange(start, end) {
-    if (!start || !end) { showRange(); return; }
+  function applyRange(start, end, keepCalendar) {
+    if (!start || !end) { showRange(); return false; }
     if (start > end) {
       toast('Start date is after the end date.', true);
-      showRange();   // put the inputs back to the window we're actually showing
-      return;
+      showRange();
+      return false;
     }
+    if (start === state.range.start && end === state.range.end) { showRange(); return true; }
     state.range.start = start;
     state.range.end = end;
     showRange();
-    setCalendar(false);  // its month may fall outside the new window
+    if (!keepCalendar) setCalendar(false);
     state.idx = -1;      // the old scene index means nothing in a new window
     loadScenes();
+    return true;
   }
-  $('date-start').addEventListener('change', () => applyRange($('date-start').value, state.range.end));
-  $('date-end').addEventListener('change', () => applyRange(state.range.start, $('date-end').value));
-  $('range-reset').addEventListener('click', () => applyRange.apply(null, defaultRange()));
 
   $('relief').addEventListener('change', (ev) => {
     state.params.showRelief = ev.target.checked;
@@ -678,7 +741,225 @@
   bindSlider('depth-op', 'depth-op-val', (v) => Math.round(v * 100) + '%',
     (v) => setDepthOpacity(+v), () => {});
 
+  // ---- custom contours ----
+  function renderContourTiles() {
+    const box = $('cc-list');
+    box.textContent = '';
+    CustomContours.items.forEach((it) => {
+      const tile = document.createElement('div');
+      tile.className = 'cc-tile';
+
+      const sw = document.createElement('span');
+      sw.className = 'cc-swatch';
+      sw.style.background = it.color;
+
+      const label = document.createElement('span');
+      label.textContent = Math.abs(it.feet) + ' ft';
+
+      const cog = document.createElement('button');
+      cog.className = 'cc-cog';
+      cog.type = 'button';
+      cog.textContent = '⚙';
+      cog.title = 'Settings';
+
+      const menu = document.createElement('div');
+      menu.className = 'cc-menu';
+      menu.hidden = true;
+
+      const color = document.createElement('input');
+      color.type = 'color';
+      color.value = it.color;
+      color.title = 'Contour colour';
+      color.addEventListener('input', () => {
+        CustomContours.setColor(it.id, color.value);
+        sw.style.background = color.value;
+      });
+
+      const rm = document.createElement('button');
+      rm.className = 'cc-remove';
+      rm.type = 'button';
+      rm.textContent = '×';
+      rm.title = 'Remove this contour';
+      rm.addEventListener('click', () => {
+        CustomContours.remove(it.id);
+        renderContourTiles();
+        say(Math.abs(it.feet) + ' ft contour removed');
+      });
+
+      cog.addEventListener('click', () => {
+        // one menu at a time
+        box.querySelectorAll('.cc-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+        menu.hidden = !menu.hidden;
+      });
+
+      menu.appendChild(color); menu.appendChild(rm);
+      tile.appendChild(sw); tile.appendChild(label); tile.appendChild(cog); tile.appendChild(menu);
+      box.appendChild(tile);
+    });
+  }
+
+  function addContour() {
+    const raw = parseFloat($('cc-depth').value);
+    if (!isFinite(raw)) { toast('Enter a depth in feet first.', true); return; }
+    const it = CustomContours.add(raw);
+    if (!it) return;
+    $('cc-depth').value = '';
+    renderContourTiles();
+    say('Tracing the ' + Math.abs(it.feet) + ' ft contour…');
+  }
+  $('cc-add').addEventListener('click', addContour);
+  $('cc-depth').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); addContour(); }
+  });
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('.cc-tile')) return;
+    $('cc-list').querySelectorAll('.cc-menu').forEach((m) => { m.hidden = true; });
+  });
+
   $('run').addEventListener('click', run);
+
+  // ---- paths panel ----
+  // Depth-vs-distance sparkline. Depth increases downward, which is the way a
+  // profile is conventionally read.
+  function profileSvg(p) {
+    const pts = (p.profile || []).filter((s) => s.feet !== null);
+    if (pts.length < 2) return null;
+    const W = 240, H = 62, PADL = 26, PADB = 12, PADT = 4;
+    const maxD = Math.max.apply(null, pts.map((s) => -s.feet));
+    const maxX = pts[pts.length - 1].distance || 1;
+    const x = (d) => PADL + (W - PADL - 4) * (d / maxX);
+    const y = (ft) => PADT + (H - PADT - PADB) * (ft / (maxD || 1));
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    const area = document.createElementNS(NS, 'path');
+    let d = 'M' + x(0) + ',' + y(0);
+    pts.forEach((s) => { d += 'L' + x(s.distance).toFixed(1) + ',' + y(-s.feet).toFixed(1); });
+    d += 'L' + x(maxX) + ',' + y(0) + 'Z';
+    area.setAttribute('d', d);
+    area.setAttribute('fill', p.color);
+    area.setAttribute('fill-opacity', '0.22');
+    svg.appendChild(area);
+
+    const line = document.createElementNS(NS, 'polyline');
+    line.setAttribute('points', pts.map((s) => x(s.distance).toFixed(1) + ',' + y(-s.feet).toFixed(1)).join(' '));
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', p.color);
+    line.setAttribute('stroke-width', '1.4');
+    svg.appendChild(line);
+
+    [[0, '0'], [maxD, Math.round(maxD) + ' ft']].forEach(([v, label], i) => {
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('class', 'pp-axis');
+      t.setAttribute('x', '2');
+      t.setAttribute('y', (i === 0 ? y(0) + 3 : y(maxD)));
+      t.textContent = label;
+      svg.appendChild(t);
+    });
+    const dist = document.createElementNS(NS, 'text');
+    dist.setAttribute('class', 'pp-axis');
+    dist.setAttribute('x', W - 4); dist.setAttribute('y', H - 2);
+    dist.setAttribute('text-anchor', 'end');
+    dist.textContent = Math.round(maxX) + ' m';
+    svg.appendChild(dist);
+    return svg;
+  }
+
+  function renderPaths() {
+    const box = $('pp-list');
+    box.textContent = '';
+    const list = Paths.list;
+    $('pp-add').setAttribute('aria-pressed', Paths.drawing ? 'true' : 'false');
+    $('pp-add').textContent = Paths.drawing ? '✓' : '+';
+    $('pp-add').title = Paths.drawing ? 'Finish this path' : 'Draw a new path';
+    $('pp-save').disabled = !Paths.selectedId;
+    $('pp-note').textContent = !list.length
+      ? 'No paths yet — press + and click the map.'
+      : (Paths.drawing ? 'Click the map to add nodes. Esc or ✓ to finish.'
+                       : 'Drag a node to move it; right-click a node to delete it.');
+
+    list.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'pp-item' + (p.id === Paths.selectedId ? ' sel' : '');
+
+      const row = document.createElement('div');
+      row.className = 'pp-row';
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret')) return;
+        Paths.select(p.id);
+      });
+
+      const sw = document.createElement('span');
+      sw.className = 'pp-swatch'; sw.style.background = p.color;
+
+      const name = document.createElement('span');
+      name.className = 'pp-name'; name.textContent = p.name;
+
+      const meta = document.createElement('span');
+      meta.className = 'pp-meta';
+      meta.textContent = p.nodes.length + 'n · ' + Math.round(Paths.lengthOf(p)) + 'm';
+
+      const caret = document.createElement('button');
+      caret.className = 'pp-caret'; caret.type = 'button';
+      caret.textContent = p.expanded ? '▾' : '▸';
+      caret.title = p.expanded ? 'Collapse' : 'Show depth profile';
+      caret.addEventListener('click', () => Paths.toggleExpand(p.id));
+
+      const cog = document.createElement('button');
+      cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
+
+      const menu = document.createElement('div');
+      menu.className = 'pp-menu'; menu.hidden = true;
+      const color = document.createElement('input');
+      color.type = 'color'; color.value = p.color; color.title = 'Path colour';
+      color.addEventListener('input', () => { Paths.setColor(p.id, color.value); });
+      const del = document.createElement('button');
+      del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
+      del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
+      menu.appendChild(color); menu.appendChild(del);
+      cog.addEventListener('click', () => {
+        box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+        menu.hidden = !menu.hidden;
+      });
+
+      row.appendChild(sw); row.appendChild(name); row.appendChild(meta);
+      row.appendChild(caret); row.appendChild(cog);
+      item.appendChild(row); item.appendChild(menu);
+
+      if (p.expanded) {
+        const wrap = document.createElement('div');
+        wrap.className = 'pp-profile';
+        const svg = profileSvg(p);
+        if (svg) wrap.appendChild(svg);
+        else {
+          const t = document.createElement('div');
+          t.className = 'hint';
+          t.textContent = p.nodes.length < 2 ? 'Add at least two nodes.' : 'Reading depth…';
+          wrap.appendChild(t);
+        }
+        item.appendChild(wrap);
+      }
+      box.appendChild(item);
+    });
+  }
+
+  $('pp-add').addEventListener('click', () => {
+    if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();
+  });
+  $('pp-save').addEventListener('click', () => Paths.exportPath(Paths.selectedId));
+  $('pp-load').addEventListener('click', () => $('pp-file').click());
+  $('pp-file').addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (f) Paths.importFile(f);
+    ev.target.value = '';
+  });
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('.pp-item')) return;
+    $('pp-list').querySelectorAll('.pp-menu').forEach((m) => { m.hidden = true; });
+  });
 
   // ---- Earth Engine connect ----
   $('connect').addEventListener('click', async () => {
@@ -717,7 +998,7 @@
 
     const [rs, re] = defaultRange();
     state.range.start = rs; state.range.end = re;
-    $('date-start').value = rs; $('date-end').value = re;
+    showRange();
 
     setCloudCeiling(state.params.maxCloud, true);   // sync both sliders, no refilter yet
 
@@ -727,6 +1008,11 @@
     $('contours').checked = !!state.params.showContours;
     if (state.params.showRelief) setDepthLayer('relief', true);
     if (state.params.showContours) setDepthLayer('contours', true);
+
+    DemSampler.init(cfg);
+    CustomContours.init(cfg, L, map, say);
+    Paths.init(cfg, L, map, say, toast, renderPaths);
+    renderPaths();
 
     say('Starting up…');
     let engine = DemoEngine;

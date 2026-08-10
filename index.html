@@ -39,6 +39,10 @@
         </div>
         <button id="next" class="step" aria-label="Next scene">›</button>
       </div>
+      <div class="range-readout">
+        <span class="range-label">Date range</span>
+        <span id="range-value" class="range-value">—</span>
+      </div>
 
       <div id="cal" class="cal" role="dialog" aria-label="Pick a scene date" hidden>
         <div class="cal-head">
@@ -52,6 +56,11 @@
           <div class="label-row"><span class="label">Cloud ceiling</span><span id="cal-cloud-val" class="value">40%</span></div>
           <input id="cal-cloud" type="range" min="0" max="90" step="5" value="40">
         </div>
+        <div class="cal-actions">
+          <button id="cal-set-start" class="cal-act" aria-pressed="false">Start</button>
+          <button id="cal-set-end" class="cal-act" aria-pressed="false">End</button>
+          <button id="cal-reset" class="cal-act ghost">Reset</button>
+        </div>
         <div id="cal-note" class="hint"></div>
       </div>
     </div>
@@ -61,15 +70,6 @@
       <div class="seg" role="group" aria-label="View mode">
         <button id="mode-single" data-mode="single" aria-pressed="true">Single day</button>
         <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>
-      </div>
-      <div class="field">
-        <div class="label-row"><span class="label">Date range</span><button id="range-reset" class="mini">reset</button></div>
-        <div class="date-range">
-          <input id="date-start" type="date" aria-label="Start date">
-          <span class="dash">→</span>
-          <input id="date-end" type="date" aria-label="End date">
-        </div>
-        <div class="hint">Window for the timeline and the composite.</div>
       </div>
       <div class="field">
         <div class="label-row"><span class="label">Cloud cover ceiling</span><span id="cloud-val" class="value">40%</span></div>
@@ -98,6 +98,15 @@
         <div class="label-row"><span class="label">Depth opacity</span><span id="depth-op-val" class="value">45%</span></div>
         <input id="depth-op" type="range" min="0.1" max="1" step="0.05" value="0.45">
         <div class="hint">Lower this if the kelp layer is hard to read over the relief.</div>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Custom contours</span></div>
+        <div class="cc-add">
+          <input id="cc-depth" type="number" step="5" min="0" placeholder="depth in ft" aria-label="Contour depth in feet">
+          <button id="cc-add" class="cc-plus" title="Trace this depth across the current view">+</button>
+        </div>
+        <div id="cc-list" class="cc-list"></div>
+        <div class="hint">Traced over the current view and extended as you pan.</div>
       </div>
     </div>
 
@@ -144,6 +153,20 @@
     <div class="ramp-labels"><span>High</span><span>Low</span></div>
   </div>
 
+  <aside class="paths-panel" aria-label="Paths">
+    <div class="pp-head">
+      <span class="eyebrow">Paths</span>
+      <div class="pp-tools">
+        <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
+        <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
+        <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
+      </div>
+    </div>
+    <div id="pp-list" class="pp-list"></div>
+    <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
+    <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
+  </aside>
+
   <div class="activity" aria-live="polite">
     <div class="act-head">
       <span class="eyebrow">Activity</span>
@@ -163,7 +186,13 @@
   <!-- Earth Engine JS client library (optional; site falls back to demo if absent) -->
   <script src="https://unpkg.com/@google/earthengine@latest/build/ee_api_js.js"></script>
 
+  <!-- SheetJS: path export/import needs a real two-sheet workbook -->
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <script src="js/config.js"></script>
+  <script src="js/dem.js"></script>
+  <script src="js/contours.js"></script>
+  <script src="js/paths.js"></script>
   <script src="js/ee-kelp.js"></script>
   <script src="js/demo.js"></script>
   <script src="js/app.js"></script>

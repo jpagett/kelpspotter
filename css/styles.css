@@ -160,6 +160,19 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal-day.sel { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
 .cal-day:disabled { cursor: default; }
 
+.cal-actions { display: flex; gap: 6px; margin-top: 10px; }
+.cal-act {
+  flex: 1; padding: 6px 0; cursor: pointer;
+  background: var(--current); color: var(--tide);
+  border: 1px solid var(--line); border-radius: 3px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+}
+.cal-act:hover { color: var(--foam); border-color: var(--tide-dim); }
+/* armed: the next day clicked sets this end of the range */
+.cal-act[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+.cal-act.ghost { flex: 0 0 auto; padding: 6px 10px; color: var(--tide-dim); }
+.cal-act.ghost:hover { color: var(--kelp); }
+
 .cal-cloud { margin-top: 10px; }
 .cal-cloud .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
 .cal-cloud .label { font-size: 11px; color: var(--tide); }
@@ -187,26 +200,16 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .field .value { font-family: var(--mono); font-size: 12px; color: var(--kelp); }
 .field .hint { font-size: 10px; color: var(--tide-dim); margin-top: 5px; line-height: 1.4; }
 
-/* date range */
-.date-range { display: flex; align-items: center; gap: 6px; }
-.date-range input[type=date] {
-  flex: 1; min-width: 0;
-  padding: 5px 6px; border: 1px solid var(--line); border-radius: 2px;
-  background: rgba(111,183,189,0.06); color: var(--foam);
-  font-family: var(--mono); font-size: 11px;
+/* read-only date range, under the date button */
+.range-readout {
+  display: flex; align-items: baseline; justify-content: center; gap: 7px;
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
 }
-.date-range input[type=date]:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 1px; }
-/* the picker glyph renders near-black on the dark field without this */
-.date-range input[type=date]::-webkit-calendar-picker-indicator {
-  filter: invert(1) opacity(0.55); cursor: pointer;
+.range-readout .range-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--tide-dim);
 }
-.date-range .dash { color: var(--tide-dim); font-size: 11px; }
-.mini {
-  background: none; border: none; cursor: pointer; padding: 0;
-  font-family: var(--mono); font-size: 10px; color: var(--tide-dim);
-  text-decoration: underline; text-underline-offset: 2px;
-}
-.mini:hover { color: var(--kelp); }
+.range-readout .range-value { font-family: var(--mono); font-size: 10px; color: var(--tide); }
 
 /* checkbox row */
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -300,6 +303,122 @@ input[type=range]::-moz-range-thumb {
 .depth-probe.show { opacity: 1; }
 .depth-probe.loading { color: var(--tide-dim); }   /* the "…" placeholder */
 .depth-probe .dp-sub { color: var(--tide-dim); margin-left: 5px; }
+
+/* ---------- paths panel ---------- */
+.paths-panel {
+  position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
+  width: 268px; max-height: 42vh; overflow-y: auto;
+  background: rgba(10,40,48,0.94); border: 1px solid var(--line); border-radius: 4px;
+  padding: 10px 11px; backdrop-filter: blur(8px);
+}
+.paths-panel::-webkit-scrollbar { width: 8px; }
+.paths-panel::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
+.pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pp-head .eyebrow {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--tide-dim);
+}
+.pp-tools { display: flex; gap: 4px; }
+.pp-tool {
+  width: 24px; height: 22px; cursor: pointer; display: grid; place-items: center;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 12px; line-height: 1;
+}
+.pp-tool:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
+.pp-tool:disabled { opacity: 0.3; cursor: not-allowed; }
+.pp-tool[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+
+.pp-list { display: flex; flex-direction: column; gap: 5px; }
+.pp-item {
+  border: 1px solid var(--line); border-radius: 3px; background: rgba(111,183,189,0.05);
+  position: relative;
+}
+.pp-item.sel { border-color: var(--kelp); background: rgba(242,177,52,0.10); }
+.pp-row { display: flex; align-items: center; gap: 6px; padding: 5px 6px; cursor: pointer; }
+.pp-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.pp-name { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10px; color: var(--foam);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-meta { font-family: var(--mono); font-size: 9px; color: var(--tide-dim); flex: none; }
+.pp-cog, .pp-caret {
+  background: none; border: none; cursor: pointer; padding: 0 1px;
+  color: var(--tide-dim); font-size: 11px; line-height: 1;
+}
+.pp-cog:hover, .pp-caret:hover { color: var(--kelp); }
+.pp-menu {
+  position: absolute; top: 26px; right: 4px; z-index: 20;
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+  background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+}
+.pp-menu[hidden] { display: none; }
+.pp-menu input[type=color] {
+  width: 26px; height: 20px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--line); border-radius: 2px;
+}
+.pp-del {
+  width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+}
+.pp-del:hover { color: #e2725b; border-color: #e2725b; }
+.pp-profile { padding: 2px 6px 7px; }
+.pp-profile svg { display: block; width: 100%; height: 62px; }
+.pp-profile .pp-axis { font-family: var(--mono); font-size: 8px; fill: var(--tide-dim); }
+
+/* draggable node handles */
+.path-node span {
+  display: block; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid var(--abyss); box-sizing: border-box;
+}
+.leaflet-container.drawing { cursor: copy; }
+
+/* ---------- custom contours ---------- */
+.cc-add { display: flex; gap: 6px; }
+.cc-add input[type=number] {
+  flex: 1; min-width: 0; padding: 5px 7px;
+  background: rgba(111,183,189,0.06); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 11px;
+}
+.cc-add input[type=number]:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 1px; }
+.cc-plus {
+  flex: 0 0 28px; cursor: pointer;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-size: 15px; line-height: 1;
+}
+.cc-plus:hover { border-color: var(--kelp); color: var(--kelp); }
+
+.cc-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.cc-tile {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  padding: 3px 5px 3px 6px; border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(111,183,189,0.06);
+  font-family: var(--mono); font-size: 10px; color: var(--foam);
+}
+.cc-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.cc-cog {
+  background: none; border: none; cursor: pointer; padding: 0 1px;
+  color: var(--tide-dim); font-size: 11px; line-height: 1;
+}
+.cc-cog:hover { color: var(--kelp); }
+.cc-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+  background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+}
+.cc-menu[hidden] { display: none; }
+.cc-menu input[type=color] {
+  width: 26px; height: 20px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--line); border-radius: 2px;
+}
+.cc-remove {
+  width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+}
+.cc-remove:hover { color: #e2725b; border-color: #e2725b; }
 
 /* ---------- activity readout ---------- */
 /* sits above the legend (~132px tall at bottom:16) and clear of the scrubber */

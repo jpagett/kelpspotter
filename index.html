@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KelpSpotter · Santa Barbara Channel</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <span class="mark">KELP<span class="drop">·</span>SPOTTER</span>
+      <span class="sub">Sentinel-2 · Santa Barbara Channel</span>
+    </div>
+    <div class="header-right">
+      <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
+      <button id="connect" class="btn ghost">Connect Earth Engine</button>
+    </div>
+  </header>
+
+  <div id="map"></div>
+  <div id="sweep" class="sweep"></div>
+
+  <aside class="console">
+    <div class="sect">
+      <p class="eyebrow">Scene</p>
+      <div class="date-row">
+        <button id="prev" class="step" aria-label="Previous scene">‹</button>
+        <div class="date-display">
+          <div id="date-big" class="big">—</div>
+          <div id="date-meta" class="meta">no scene</div>
+        </div>
+        <button id="next" class="step" aria-label="Next scene">›</button>
+      </div>
+    </div>
+
+    <div class="sect">
+      <p class="eyebrow">View</p>
+      <div class="seg" role="group" aria-label="View mode">
+        <button id="mode-single" data-mode="single" aria-pressed="true">Single day</button>
+        <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Cloud cover ceiling</span><span id="cloud-val" class="value">40%</span></div>
+        <input id="cloud" type="range" min="0" max="90" step="5" value="40">
+        <div class="hint">Scenes cloudier than this are dropped from the timeline.</div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <p class="eyebrow">Kelp model</p>
+      <div class="field">
+        <div class="label-row"><span class="label">Index</span></div>
+        <div class="seg" role="group" aria-label="Index type">
+          <button id="idx-ndvi" data-index="NDVI" aria-pressed="true">NDVI</button>
+          <button id="idx-fai" data-index="FAI" aria-pressed="false">FAI</button>
+        </div>
+        <div id="idx-hint" class="hint">NDVI: canopy vs. dark water. Simple and robust.</div>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.10</span></div>
+        <input id="kelp" type="range" min="-0.10" max="0.60" step="0.01" value="0.10">
+        <div class="hint">Higher = only the densest canopy counts as kelp.</div>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Water threshold</span><span id="water-val" class="value">0.10</span></div>
+        <input id="water" type="range" min="-0.20" max="0.40" step="0.01" value="0.10">
+        <div class="hint">NDWI cutoff that separates sea from land.</div>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
+        <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
+      </div>
+    </div>
+
+    <div class="sect">
+      <button id="run" class="btn run">Run kelp map</button>
+    </div>
+  </aside>
+
+  <div class="scrubber">
+    <div class="scrub-head"><span id="scrub-range">— scenes</span><span>timeline</span></div>
+    <div id="ticks" class="ticks"><div class="axis"></div></div>
+  </div>
+
+  <div class="legend">
+    <div class="eyebrow">Kelp</div>
+    <div class="ramp"></div>
+    <div class="ramp-labels"><span>High</span><span>Low</span></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Google Identity Services (for live Earth Engine sign-in) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Earth Engine JS client library (optional; site falls back to demo if absent) -->
+  <script src="https://unpkg.com/@google/earthengine@latest/build/ee_api_js.js"></script>
+
+  <script src="js/config.js"></script>
+  <script src="js/ee-kelp.js"></script>
+  <script src="js/demo.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

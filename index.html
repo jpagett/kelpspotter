@@ -47,9 +47,25 @@
         <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>
       </div>
       <div class="field">
+        <div class="label-row"><span class="label">Date range</span><button id="range-reset" class="mini">reset</button></div>
+        <div class="date-range">
+          <input id="date-start" type="date" aria-label="Start date">
+          <span class="dash">→</span>
+          <input id="date-end" type="date" aria-label="End date">
+        </div>
+        <div class="hint">Window for the timeline and the composite.</div>
+      </div>
+      <div class="field">
         <div class="label-row"><span class="label">Cloud cover ceiling</span><span id="cloud-val" class="value">40%</span></div>
         <input id="cloud" type="range" min="0" max="90" step="5" value="40">
         <div class="hint">Scenes cloudier than this are dropped from the timeline.</div>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input id="bathy" type="checkbox">
+          <span class="label">Depth (NOAA bathymetry)</span>
+        </label>
+        <div class="hint">Shaded relief from the NOAA NCEI DEM global mosaic.</div>
       </div>
     </div>
 
@@ -58,24 +74,30 @@
       <div class="field">
         <div class="label-row"><span class="label">Index</span></div>
         <div class="seg" role="group" aria-label="Index type">
-          <button id="idx-ndvi" data-index="NDVI" aria-pressed="true">NDVI</button>
+          <button id="idx-kd" data-index="KD" aria-pressed="true">KD</button>
           <button id="idx-fai" data-index="FAI" aria-pressed="false">FAI</button>
+          <button id="idx-ndvi" data-index="NDVI" aria-pressed="false">NDVI</button>
         </div>
-        <div id="idx-hint" class="hint">NDVI: canopy vs. dark water. Simple and robust.</div>
+        <div id="idx-hint" class="hint">KD = B6 − B4 (Mora-Soto et al. 2020). The paper’s own index — best kappa of the three.</div>
       </div>
       <div class="field">
-        <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.10</span></div>
-        <input id="kelp" type="range" min="-0.10" max="0.60" step="0.01" value="0.10">
-        <div class="hint">Higher = only the densest canopy counts as kelp.</div>
+        <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.003216</span></div>
+        <input id="kelp" type="range" min="-0.02" max="0.05" step="0.0000001" value="0.003216">
+        <div class="hint">Higher = only the densest canopy counts as kelp. Resets to the published value when you switch index.</div>
       </div>
       <div class="field">
-        <div class="label-row"><span class="label">Water threshold</span><span id="water-val" class="value">0.10</span></div>
-        <input id="water" type="range" min="-0.20" max="0.40" step="0.01" value="0.10">
-        <div class="hint">NDWI cutoff that separates sea from land.</div>
+        <div class="label-row"><span class="label">B11 land filter</span><span id="b11-val" class="value">0.028</span></div>
+        <input id="b11" type="range" min="0" max="0.1" step="0.001" value="0.028">
+        <div class="hint">Step 1 of the paper: drop pixels at or above this B11 (1610 nm) reflectance — coast and land vegetation.</div>
       </div>
       <div class="field">
         <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
         <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
+      </div>
+      <div class="hint">
+        Detection after
+        <a href="https://doi.org/10.3390/rs12040694" target="_blank" rel="noopener">Mora-Soto et al. 2020</a>,
+        <em>Remote Sens.</em> 12, 694.
       </div>
     </div>
 

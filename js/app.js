@@ -10,6 +10,7 @@
     scenes: [],
     idx: -1,
     layer: null,
+    range: { start: null, end: null }, // filled in at boot from LOOKBACK_DAYS
     params: Object.assign({}, cfg.DEFAULTS)
   };
 
@@ -32,10 +33,35 @@
   }
   function sweep(on) { $('sweep').className = 'sweep' + (on ? ' on' : ''); }
 
+  const iso = (d) => d.toISOString().slice(0, 10);
+
+  // The window the user picked, or the LOOKBACK_DAYS default before they touch it.
+  function defaultRange() {
+    return [iso(new Date(Date.now() - cfg.LOOKBACK_DAYS * 86400000)),
+            iso(new Date(Date.now() + 86400000))];
+  }
   function dateRangeISO() {
-    const end = new Date(Date.now() + 86400000);
-    const start = new Date(Date.now() - cfg.LOOKBACK_DAYS * 86400000);
-    return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+    return [state.range.start, state.range.end];
+  }
+
+  // ---- NOAA bathymetry overlay ----
+  let bathyLayer = null;
+  function setBathymetry(on) {
+    state.params.showBathymetry = on;
+    if (on) {
+      if (!bathyLayer) {
+        const b = cfg.BATHYMETRY;
+        bathyLayer = L.tileLayer.wms(b.url, {
+          layers: b.layers, format: 'image/png', transparent: true,
+          version: '1.1.1', opacity: b.opacity, attribution: b.attribution
+        });
+      }
+      // keep it under the kelp layer
+      bathyLayer.addTo(map);
+      bathyLayer.bringToBack();
+    } else if (bathyLayer) {
+      map.removeLayer(bathyLayer);
+    }
   }
 
   // ---- scenes + scrubber ----
@@ -138,23 +164,41 @@
     $('mode-composite').setAttribute('aria-pressed', mode === 'composite');
     updateDate(); run();
   }
-  function setIndex(kind) {
+  // The published thresholds run to seven decimals (KD 0.003216, NDVI -0.0003411),
+  // so show enough digits to read them, without trailing-zero noise.
+  function fmtIndex(v) {
+    return (+v).toFixed(7).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function applyIndex(kind) {
+    const spec = cfg.INDICES[kind];
+    if (!spec) return null;
     state.params.indexType = kind;
-    $('idx-ndvi').setAttribute('aria-pressed', kind === 'NDVI');
-    $('idx-fai').setAttribute('aria-pressed', kind === 'FAI');
-    $('idx-hint').textContent = kind === 'FAI'
-      ? 'FAI: floating-algae index, tolerant of sun glint.'
-      : 'NDVI: canopy vs. dark water. Simple and robust.';
-    // sensible default threshold per index scale
-    const def = kind === 'FAI' ? 0.02 : 0.10;
-    $('kelp').value = def; state.params.kelpThresh = def; $('kelp-val').textContent = def.toFixed(2);
-    run();
+    Object.keys(cfg.INDICES).forEach((k) => {
+      const btn = $('idx-' + k.toLowerCase());
+      if (btn) btn.setAttribute('aria-pressed', k === kind);
+    });
+    $('idx-hint').textContent = spec.hint;
+    // Each index lives on its own scale, so rebuild the slider and snap back to
+    // the value published for that index.
+    const el = $('kelp');
+    el.min = spec.min; el.max = spec.max; el.step = 0.0000001;
+    el.value = spec.thresh;
+    state.params.kelpThresh = spec.thresh;
+    $('kelp-val').textContent = fmtIndex(spec.thresh);
+    return spec;
+  }
+
+  function setIndex(kind) {
+    if (applyIndex(kind)) run();
   }
 
   $('mode-single').addEventListener('click', () => setMode('single'));
   $('mode-composite').addEventListener('click', () => setMode('composite'));
-  $('idx-ndvi').addEventListener('click', () => setIndex('NDVI'));
-  $('idx-fai').addEventListener('click', () => setIndex('FAI'));
+  Object.keys(cfg.INDICES).forEach((k) => {
+    const btn = $('idx-' + k.toLowerCase());
+    if (btn) btn.addEventListener('click', () => setIndex(k));
+  });
 
   $('prev').addEventListener('click', () => { if (state.idx > 0) { state.idx--; updateDate(); renderTicks(); run(); } });
   $('next').addEventListener('click', () => { if (state.idx < state.scenes.length - 1) { state.idx++; updateDate(); renderTicks(); run(); } });
@@ -167,16 +211,41 @@
   }
   bindSlider('cloud', 'cloud-val', (v) => v + '%',
     (v) => (state.params.maxCloud = +v), () => loadScenes());
-  bindSlider('kelp', 'kelp-val', (v) => (+v).toFixed(2),
+  bindSlider('kelp', 'kelp-val', fmtIndex,
     (v) => (state.params.kelpThresh = +v), () => run());
-  bindSlider('water', 'water-val', (v) => (+v).toFixed(2),
-    (v) => (state.params.waterThresh = +v), () => run());
+  bindSlider('b11', 'b11-val', (v) => (+v).toFixed(3),
+    (v) => (state.params.b11Thresh = +v), () => run());
   bindSlider('opacity', 'op-val', (v) => Math.round(v * 100) + '%',
     (v) => {
       state.params.opacity = +v;
       if (state.layer && state.layer.setOpacity) state.layer.setOpacity(+v);
       if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
     }, () => run());
+
+  // ---- date range ----
+  function showRange() {
+    $('date-start').value = state.range.start;
+    $('date-end').value = state.range.end;
+  }
+  function applyRange(start, end) {
+    if (!start || !end) { showRange(); return; }
+    if (start > end) {
+      toast('Start date is after the end date.', true);
+      showRange();   // put the inputs back to the window we're actually showing
+      return;
+    }
+    state.range.start = start;
+    state.range.end = end;
+    $('date-start').value = start;
+    $('date-end').value = end;
+    state.idx = -1;      // the old scene index means nothing in a new window
+    loadScenes();
+  }
+  $('date-start').addEventListener('change', () => applyRange($('date-start').value, state.range.end));
+  $('date-end').addEventListener('change', () => applyRange(state.range.start, $('date-end').value));
+  $('range-reset').addEventListener('click', () => applyRange.apply(null, defaultRange()));
+
+  $('bathy').addEventListener('change', (ev) => setBathymetry(ev.target.checked));
 
   $('run').addEventListener('click', run);
 
@@ -207,6 +276,18 @@
 
   // ---- boot ----
   (async function boot() {
+    // Point the controls at whichever index config.js defaults to, so the slider
+    // scale and the published threshold always agree.
+    applyIndex(state.params.indexType);
+    $('b11').value = state.params.b11Thresh;
+    $('b11-val').textContent = state.params.b11Thresh.toFixed(3);
+
+    const [rs, re] = defaultRange();
+    state.range.start = rs; state.range.end = re;
+    $('date-start').value = rs; $('date-end').value = re;
+    $('bathy').checked = !!state.params.showBathymetry;
+    if (state.params.showBathymetry) setBathymetry(true);
+
     let engine = DemoEngine;
     try {
       const live = await KelpEngine.init(cfg);

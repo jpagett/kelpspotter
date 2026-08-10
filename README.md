@@ -73,23 +73,61 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Scene ‹ ›** | Step through individual satellite passes (the timeline at the bottom). |
 | **Single day / Composite** | One pass, or a kelp-*frequency* map averaged across every clear pass in the window. |
 | **Cloud cover ceiling** | Drop scenes cloudier than this from the timeline. |
-| **Index: NDVI / FAI** | Which spectral index defines "kelp" (see below). |
-| **Kelp threshold** | Index value above which a water pixel counts as canopy. Raise it to keep only dense kelp. |
-| **Water threshold** | NDWI cutoff separating sea from land, so kelp is only detected on water. |
+| **Index: KD / FAI / NDVI** | Which spectral index defines "kelp" (see below). |
+| **Kelp threshold** | Index value at or above which a pixel counts as canopy. Snaps back to the published value each time you switch index. |
+| **B11 land filter** | Step 1 of the algorithm — pixels at or above this B11 (1610 nm) reflectance are dropped as coast or land vegetation. |
 | **Layer opacity** | Blend of the kelp layer over the basemap. |
 
-### The two indices
+---
 
-- **NDVI** = (NIR − Red) / (NIR + Red). Kelp canopy floating at the surface reflects
-  strongly in the near-infrared, so it stands out against dark water. Simple and
-  robust; a good default (threshold ~0.10).
-- **FAI** (Floating Algae Index) = NIR − a baseline interpolated between Red and SWIR.
-  More tolerant of sun glint and thin haze, which is why it's popular for floating
-  vegetation. It lives on a different numeric scale, so the app resets the kelp
-  threshold when you switch (start ~0.02).
+## The detection algorithm
 
-Masking uses the Sentinel-2 Scene Classification band to remove cloud, cloud shadow,
-and cirrus before the index is computed.
+Detection follows the kelp filter algorithm of:
+
+> Mora-Soto, A.; Palacios, M.; Macaya, E.C.; Gómez, I.; Huovinen, P.; Pérez-Matus, A.;
+> Young, M.; Golding, N.; Toro, M.; Yaqub, M.; Macias-Fauria, M.
+> **A High-Resolution Global Map of Giant Kelp (*Macrocystis pyrifera*) Forests and
+> Intertidal Green Algae (Ulvophyceae) with Sentinel-2 Imagery.**
+> *Remote Sensing* **2020**, 12, 694. [doi:10.3390/rs12040694](https://doi.org/10.3390/rs12040694)
+
+Their Earth Engine reference implementation lives at
+[BiogeoscienceslabOxford/kelp_forests](https://github.com/BiogeoscienceslabOxford/kelp_forests);
+`js/ee-kelp.js` is a port of it.
+
+It is a chain of threshold filters, not a classifier:
+
+1. **Band-based threshold.** Drop every pixel with **B11 ≥ 0.028**. B11 (1610 nm) is
+   where *Coast* and *Land Vegetation* separate cleanly from anything wet — 100% of
+   the authors' coast and land training pixels sit at or above that line.
+2. **Index.** Compute one of three:
+   - **KD** (Kelp Difference, the paper's own formula) = **B6 − B4**. Giant kelp shows
+     a conspicuously large gap between the red edge and the red band, and B6 (740 nm)
+     is where that gap is widest. This is the index the authors used for their global
+     map, and it scored the best Cohen's kappa (0.66) of the three.
+   - **FAI** (Floating Algae Index) = B8 − [B4 + (B11 − B4) · (0.833 − 0.665)/(1.612 − 0.665)].
+     Tolerant of sun glint and thin haze.
+   - **NDVI** = (B8 − B4) / (B8 + B4). Simple and robust.
+3. **Index threshold.** Keep pixels at or above the value that removed 100% of the
+   non-kelp, non-green-algae training cells:
+
+   | Index | Threshold | Set by |
+   |---|---|---|
+   | KD | ≥ 0.003216 | max *River grass* value |
+   | FAI | ≥ 0.005352 | max *Organic water* value |
+   | NDVI | ≥ −0.0003411 | max *River grass* value |
+
+4. **Sea-level mask.** Drop anything with a DEM elevation above sea level
+   (`USGS/SRTMGL1_003` = 0), so land features absent from the training set can't leak in.
+
+Two things worth knowing about those numbers:
+
+- They are calibrated on **Sentinel-2 L1C top-of-atmosphere reflectance rescaled by
+  1e-4**, so the app loads `COPERNICUS/S2_HARMONIZED` (L1C), *not* the L2A surface-
+  reflectance product it used before. Applying these thresholds to surface reflectance
+  would be meaningless.
+- The algorithm cannot separate giant kelp from intertidal green algae (Ulvophyceae) —
+  their spectra overlap too much. The paper is explicit about this; on the Santa Barbara
+  Channel coast it mostly matters around river mouths and shallow rocky intertidal.
 
 ---
 
@@ -115,6 +153,18 @@ in `config.js`.
 
 ## Notes & caveats
 
+- **Two deliberate deviations from the paper**, both in `js/ee-kelp.js`:
+  1. *Cloud screening.* The authors ran an ~800-line JRC cloud-free compositing tool
+     offline. This app uses the Sentinel-2 **QA60** bitmask (opaque cloud + cirrus)
+     instead, plus the scene-level `CLOUDY_PIXEL_PERCENTAGE` ceiling from the console.
+  2. *Compositing.* The paper filters a single multi-year (2015–2019) median composite.
+     KelpSpotter filters **each pass separately** so the timeline is scrubbable;
+     Composite mode then averages those per-scene masks into a detection *frequency*.
+     That frequency map is KelpSpotter's own view, not a product from the paper.
+- **One discrepancy in the source material.** The paper's Table 2 gives the NDVI
+  threshold as −0.003411, but the authors' published GEE script uses −0.0003411 (an
+  extra zero). This app follows the script, since that is the code that produced the
+  global map. It only affects NDVI — KD and FAI agree in both places.
 - The demo kelp is **procedural, not real** — bed *locations* follow actual channel
   reefs, but their extent is generated noise. It exists to exercise the UI, not to
   report real canopy. Only **LIVE** mode reflects the sea.

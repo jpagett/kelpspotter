@@ -29,17 +29,37 @@ const DemoEngine = (function () {
 
   function dateSeed(iso) { let h = 0; for (const c of iso) h = (h * 31 + c.charCodeAt(0)) % 100000; return h; }
 
-  // Build a synthetic scene list at the Sentinel-2 revisit cadence (~5 days).
-  function scenes(lookbackDays) {
+  /*
+   * Synthetic scenes at the Sentinel-2 revisit cadence (~5 days) across whatever
+   * window is asked for. Passes are anchored to a fixed epoch rather than to
+   * "today", so a given date always yields the same scene and cloud cover no
+   * matter which range the user picks.
+   */
+  const DAY = 86400000, CADENCE = 5, MAX_SCENES = 400;
+  const EPOCH = Date.UTC(2015, 5, 23); // Sentinel-2 archive start, roughly
+
+  function scenesBetween(startISO, endISO) {
+    const start = Date.parse(startISO + 'T00:00:00Z');
+    const end = Date.parse(endISO + 'T00:00:00Z');
+    if (!(start <= end)) return [];
+    const step = CADENCE * DAY;
     const out = [];
-    const today = new Date();
-    for (let d = 2; d <= lookbackDays; d += 5) {
-      const dt = new Date(today.getTime() - d * 86400000);
-      const iso = dt.toISOString().slice(0, 10);
-      const cloud = Math.round(Math.pow(rand(dateSeed(iso)), 1.7) * 85); // skew toward clear
-      out.push({ id: 'demo_' + iso, date: iso, cloud });
+    let t = EPOCH + Math.ceil((start - EPOCH) / step) * step;
+    for (; t <= end && out.length < MAX_SCENES; t += step) {
+      const d = new Date(t).toISOString().slice(0, 10);
+      out.push({ id: 'demo_' + d, date: d, cloud: Math.round(Math.pow(rand(dateSeed(d)), 1.7) * 85) });
     }
-    return out.sort((a, b) => a.date < b.date ? -1 : 1);
+    return out;
+  }
+
+  // The real indices sit on scales two orders of magnitude apart (KD ~0.003 vs
+  // NDVI ~0.1), so translate the live threshold into a 0-centred "strictness"
+  // relative to that index's published value. 0 = the paper's threshold, so the
+  // demo looks the same at defaults whichever index is selected.
+  function strictness(p) {
+    const spec = cfg && cfg.INDICES && cfg.INDICES[p.indexType];
+    if (!spec) return 0;
+    return (p.kelpThresh - spec.thresh) / (spec.max - spec.min);
   }
 
   // A Leaflet layer that paints amber kelp glow for a given seed set + params.
@@ -71,6 +91,8 @@ const DemoEngine = (function () {
         // meters-per-pixel so bed radius stays geographically sensible on zoom
         const c = map.getCenter();
         const mpp = 40075016.686 * Math.cos(c.lat * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
+        // raising the B11 ceiling keeps more pixels, so more demo kelp survives
+        const cut = 0.52 + strictness(p) * 0.6 - 0.8 * (p.b11Thresh - 0.028);
         const bedRadiusM = 1600;
         const rPx = bedRadiusM / mpp;
 
@@ -88,7 +110,7 @@ const DemoEngine = (function () {
                 const nx = (lng * 60 + dx / rPx * 1.6);
                 const ny = (lat * 60 + dy / rPx * 1.6);
                 let v = fbm(nx, ny, seed) * strength * falloff;
-                const m = v - (0.42 + p.kelpThresh) + 0.06 * (0.10 - p.waterThresh);
+                const m = v - cut;
                 if (m <= 0) continue;
                 const inten = Math.min(1, m * 2.6);
                 const a = Math.min(0.55, m * 2.4) * p.opacity;
@@ -115,23 +137,29 @@ const DemoEngine = (function () {
     });
   }
 
-  let cfg = null, L = null, _scenes = [];
+  let cfg = null, L = null;
 
   return {
     name: 'demo',
     available: true,
     needsLogin: false,
-    init(config, leaflet) { cfg = config; L = leaflet; _scenes = scenes(cfg.LOOKBACK_DAYS); return Promise.resolve(true); },
+    init(config, leaflet) { cfg = config; L = leaflet; return Promise.resolve(true); },
     login() { return Promise.resolve(true); },
     listScenes(startISO, endISO, maxCloud) {
-      return Promise.resolve(_scenes.filter((s) => s.cloud <= maxCloud && s.date >= startISO.slice(0, 10) && s.date <= endISO.slice(0, 10)));
+      return Promise.resolve(
+        scenesBetween(startISO.slice(0, 10), endISO.slice(0, 10))
+          .filter((s) => s.cloud <= maxCloud)
+      );
     },
     singleSceneLayer(dateISO, p) {
       const Layer = makeLayer(L, [dateSeed(dateISO)], p, false);
       return Promise.resolve(new Layer());
     },
+    // stand-in for the mean composite: blend the clear passes in the window
     compositeLayer(startISO, endISO, maxCloud, p) {
-      const seeds = _scenes.filter((s) => s.cloud <= maxCloud).map((s) => dateSeed(s.date));
+      const seeds = scenesBetween(startISO.slice(0, 10), endISO.slice(0, 10))
+        .filter((s) => s.cloud <= maxCloud)
+        .map((s) => dateSeed(s.date));
       const Layer = makeLayer(L, seeds.slice(0, 6), p, true);
       return Promise.resolve(new Layer());
     }

@@ -105,11 +105,8 @@ const CustomContours = (function () {
       lastKey = key;
       items.forEach((it) => draw(it, grid));
       if (grid.stats.fetched) {
-        const fine = grid.stats.fineHits
-          ? ', ' + grid.stats.fineHits + ' from survey grids'
-          : '';
         say('Sampled ' + grid.stats.fetched + ' new depth points (' +
-            grid.stats.cached + ' cached' + fine + ')', 'ok');
+            grid.stats.cached + ' cached)', 'ok');
       }
     } catch (err) {
       console.warn(err);
@@ -159,11 +156,20 @@ const CustomContours = (function () {
     if (it.layer) it.layer.setStyle({ color: color });
   }
 
+  function setDepth(id, feet) {
+    const it = items.find((x) => x.id === id);
+    if (!it || !isFinite(feet)) return;
+    it.feet = -Math.abs(feet);
+    lastKey = null;                                // force an extraction at the new depth
+    refresh(true);
+  }
+
   return {
     init: init,
     add: add,
     remove: remove,
     setColor: setColor,
+    setDepth: setDepth,
     refresh: refresh,
     get items() { return items; }
   };

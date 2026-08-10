@@ -117,28 +117,6 @@ window.KELP_CONFIG = {
     },
 
     /*
-     * Opportunistic high-resolution source, queried alongside the mosaic above
-     * and preferred wherever it has data.
-     *
-     * NOS_MBAB publishes NOS survey grids at a 0.2 m cell — against ~10 m from
-     * the mosaic, whose finest tile over this coast is `santa_barbara` at 1/3
-     * arc-second. Coverage follows survey footprints, so it is nearly useless on
-     * the mainland and genuinely good offshore. Measured over 600-point grids:
-     *
-     *     SB Channel AOI          0.8%
-     *     SB nearshore strip      0.3%
-     *     Channel Islands        38.5%   (depths −10 to −34 m)
-     *
-     * Because coverage is that sparse, the two sources are queried IN PARALLEL
-     * rather than falling back sequentially: a miss then costs no extra latency,
-     * only an extra request. Set `url` to '' to turn this off entirely.
-     */
-    hires: {
-      url: 'https://gis.ngdc.noaa.gov/arcgis/rest/services/NOS_MBAB/NOS_MBAB_F32/ImageServer',
-      label: 'NOS multibeam survey'
-    },
-
-    /*
      * NOAA sends `cache-control: private` with no max-age, ETag or Last-Modified,
      * so browsers have no freshness signal and re-request aggressively. These
      * cut the number of requests rather than trying to cache harder: 512 px tiles
@@ -159,6 +137,10 @@ window.KELP_CONFIG = {
     mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
+    sacUnit: 'cuft/min',    // gas planning: 'cuft/min' | 'L/min'
+    speedUnit: 'mi/hr',     // gas planning: 'mi/hr' | 'm/s' | 'kts' | 'km/hr'
+    defaultSac: 0.75,       // starting SAC rate for a new path, in cuft/min
+    defaultSpeed: 1,        // starting swim speed for a new path, in mi/hr
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45      // kept well under 1 so the kelp layer still reads over it

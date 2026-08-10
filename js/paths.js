@@ -32,7 +32,7 @@ const Paths = (function () {
     map.createPane(PANE).style.zIndex = 380;   // above kelp, below the demo canvas
     map.on('click', onMapClick);
     document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && drawing) finishDrawing();
+      if ((ev.key === 'Escape' || ev.key === 'Enter') && drawing) finishDrawing();
     });
   }
 
@@ -119,7 +119,10 @@ const Paths = (function () {
     const p = {
       id: id, name: 'Path ' + id, nodes: [],
       color: COLORS[(id - 1) % COLORS.length],
-      line: null, markers: [], profile: null, expanded: true
+      line: null, markers: [], profile: null, expanded: true,
+      sac: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSac) || 0.75,     // cuft/min
+      speed: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSpeed) || 1,    // mi/hr
+      showGas: false
     };
     paths.push(p);
     selectedId = p.id;
@@ -144,6 +147,7 @@ const Paths = (function () {
     if (!p) return;
     if (p.nodes.length < 2) {
       remove(p.id);
+      if (p.id === nextId - 1) nextId--;   // discarded before anything else claimed the next number
       toast('A path needs at least two nodes.', true);
       say('Path discarded — fewer than two nodes', 'warn');
       onChange();
@@ -193,6 +197,36 @@ const Paths = (function () {
     if (!p || !name) return;
     p.name = name;
     onChange();
+  }
+
+  function mirror(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || p.nodes.length < 2) return;
+    p.nodes = p.nodes.concat(p.nodes.slice(0, -1).reverse());
+    p.profile = null;
+    redraw(p);
+    refreshProfile(p);
+    say(p.name + ' mirrored — now ' + p.nodes.length + ' nodes out-and-back');
+    onChange();
+  }
+
+  function setSac(id, cuftPerMin) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(cuftPerMin > 0)) return;
+    p.sac = cuftPerMin;
+    onChange();
+  }
+
+  function setSpeed(id, miPerHr) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(miPerHr > 0)) return;
+    p.speed = miPerHr;
+    onChange();
+  }
+
+  function toggleGas(id) {
+    const p = paths.find((x) => x.id === id);
+    if (p) { p.showGas = !p.showGas; onChange(); }
   }
 
   function setColor(id, color) {
@@ -257,7 +291,10 @@ const Paths = (function () {
       const p = {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
         color: COLORS[(id - 1) % COLORS.length],
-        line: null, markers: [], profile: null, expanded: true
+        line: null, markers: [], profile: null, expanded: true,
+        sac: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSac) || 0.75,
+        speed: (cfg.DEFAULTS && cfg.DEFAULTS.defaultSpeed) || 1,
+        showGas: false
       };
       paths.push(p);
       selectedId = p.id;
@@ -280,7 +317,11 @@ const Paths = (function () {
     select: select,
     rename: rename,
     toggleExpand: toggleExpand,
+    mirror: mirror,
     setColor: setColor,
+    setSac: setSac,
+    setSpeed: setSpeed,
+    toggleGas: toggleGas,
     remove: remove,
     exportPath: exportPath,
     importFile: importFile,

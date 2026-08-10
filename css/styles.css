@@ -79,6 +79,22 @@ body {
 .btn.ghost.disconnected { color: var(--kelp); border-color: var(--kelp); }
 .btn.ghost.disconnected:hover { background: var(--kelp); color: var(--abyss); }
 
+.view-menu { position: relative; }
+.view-menu .sect-caret { font-size: 8px; margin-left: 2px; }
+.view-list {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+  display: flex; flex-direction: column; gap: 8px; min-width: 120px;
+  padding: 10px 12px; background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+}
+.view-list[hidden] { display: none; }
+.view-list .check { font-size: 12px; color: var(--tide); }
+.view-list .check:hover { color: var(--foam); }
+
+/* panels hidden entirely from the View menu, independent of their own collapse state */
+.console.view-hidden, .paths-panel.view-hidden,
+.activity.view-hidden, .legend.view-hidden { display: none; }
+
 /* Bottom centre — the space the timeline used to occupy. Persistent: it stays
    until the visitor signs in or dismisses it, so it must not sit over anything. */
 .signin-notice {
@@ -126,15 +142,31 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .console {
   position: fixed; z-index: 900;
   top: calc(var(--header-h) + 14px); left: 14px; width: var(--console-w);
-  /* leave room for the activity panel sitting below it */
-  max-height: calc(100vh - var(--header-h) - 38px - var(--activity-h)); overflow-y: auto;
   background: linear-gradient(180deg, rgba(10,40,48,0.94), rgba(8,32,39,0.94));
   border: 1px solid var(--line); border-radius: 4px;
   box-shadow: 0 18px 50px -20px rgba(0,0,0,0.8);
   backdrop-filter: blur(8px);
+  cursor: move;                          /* drag the panel by its background, as with Paths */
 }
-.console::-webkit-scrollbar { width: 8px; }
-.console::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
+.console button, .console input, .console select, .console a { cursor: pointer; }
+.console.dragging { user-select: none; }
+.console-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; padding: 12px 16px; margin: 0; cursor: pointer;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--tide-dim); text-align: left;
+}
+.console-head:hover { color: var(--kelp); }
+.console-head .sect-caret { font-size: 9px; line-height: 1; transition: transform 0.15s; }
+.console-head[aria-expanded="false"] .sect-caret { transform: rotate(-90deg); }
+.console-body {
+  border-top: 1px solid var(--line);
+  /* leave room for the activity panel sitting below it */
+  max-height: calc(100vh - var(--header-h) - 76px - var(--activity-h)); overflow-y: auto;
+}
+.console.collapsed .console-body { display: none; }
+.console-body::-webkit-scrollbar { width: 8px; }
+.console-body::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
 
 .sect { padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .sect:last-child { border-bottom: none; }
@@ -305,24 +337,25 @@ input[type=range]::-moz-range-thumb {
 
 .run { width: 100%; padding: 11px; font-size: 12px; margin-top: 4px; }
 
-/* ---------- scene scrubber (signature) ---------- */
+/* ---------- kelp colorbar ---------- */
 .legend {
-  position: fixed; z-index: 900; right: 16px; bottom: 16px; width: 96px;
-  background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
-  padding: 12px 12px 10px; backdrop-filter: blur(6px);
+  position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(5,22,28,0.5); border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px 10px; backdrop-filter: blur(6px);
 }
 .legend .eyebrow {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--tide-dim); margin-bottom: 8px;
+  text-transform: uppercase; color: var(--tide-dim); margin: 0; flex: none;
 }
+.ramp-wrap { display: flex; flex-direction: column; gap: 2px; flex: none; }
 .legend .ramp {
-  height: 88px; width: 14px; border-radius: 2px; margin: 0 auto;
-  background: linear-gradient(180deg, var(--kelp-hot), var(--kelp) 45%, #7a6a1f 78%, var(--deep));
+  width: 64px; height: 7px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--deep), #7a6a1f 22%, var(--kelp) 55%, var(--kelp-hot));
 }
 .legend .ramp-labels {
-  display: flex; flex-direction: column; justify-content: space-between;
-  height: 88px; margin-top: -88px; padding-left: 34px;
-  font-family: var(--mono); font-size: 9px; color: var(--tide);
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 8px; color: var(--tide);
 }
 
 /* ENC contours are drawn as black lines on transparent, which vanish against the
@@ -353,7 +386,8 @@ input[type=range]::-moz-range-thumb {
 
 /* ---------- paths panel ---------- */
 .paths-panel {
-  position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
+  position: fixed; z-index: 900; right: 16px;
+  top: calc(var(--header-h) + 58px);   /* clears the kelp colorbar sitting above it */
   width: 360px; height: 320px;
   min-width: 240px; min-height: 120px; max-width: 70vw; max-height: 80vh;
   /* The panel itself never scrolls — .pp-inner does. If it did, the corner grips
@@ -378,7 +412,11 @@ input[type=range]::-moz-range-thumb {
 .pp-head .eyebrow {
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--tide-dim);
+  background: none; border: none; padding: 0; cursor: pointer;
 }
+.pp-head .eyebrow:hover { color: var(--kelp); }
+.paths-panel.collapsed #pp-body,
+.paths-panel.collapsed .pp-grip { display: none; }
 .pp-tools { display: flex; gap: 4px; }
 .pp-tool {
   width: 24px; height: 22px; cursor: pointer; display: grid; place-items: center;
@@ -398,14 +436,21 @@ input[type=range]::-moz-range-thumb {
 /* row text follows the console: 12px label, 10px mono meta */
 .pp-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; cursor: pointer; }
 .pp-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
-.pp-name { flex: 1; min-width: 0; font-size: 12px; color: var(--tide);
+.pp-name-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.pp-name { flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--tide);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-item.sel .pp-name { color: var(--foam); }
+.pp-name-input {
+  flex: 1; min-width: 0; font-size: 12px; font-family: inherit;
+  color: var(--foam); background: rgba(111,183,189,0.08);
+  border: 1px solid var(--kelp); border-radius: 2px; padding: 1px 3px;
+}
 .pp-meta { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); flex: none; }
-.pp-cog, .pp-caret {
+.pp-cog, .pp-caret, .pp-mirror {
   background: none; border: none; cursor: pointer; padding: 0 2px;
   color: var(--tide-dim); font-size: 11px; line-height: 1;
 }
+.pp-mirror:disabled { opacity: 0.3; cursor: not-allowed; }
 /* identical to .field .hint so the panel reads like the console */
 .paths-panel .hint {
   font-family: inherit; font-size: 10px; color: var(--tide-dim);
@@ -433,10 +478,11 @@ input[type=range]::-moz-range-thumb {
   width: 6px; height: 6px;
   border-right: 2px solid var(--tide-dim); border-bottom: 2px solid var(--tide-dim);
 }
-.pp-cog:hover, .pp-caret:hover { color: var(--kelp); }
+.pp-cog:hover, .pp-caret:hover, .pp-mirror:hover:not(:disabled) { color: var(--kelp); }
 .pp-menu {
   position: absolute; top: 26px; right: 4px; z-index: 20;
-  display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+  display: flex; flex-wrap: wrap; justify-content: flex-end;
+  align-items: center; gap: 6px; padding: 5px 6px; max-width: 230px;
   background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
   box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
 }
@@ -455,6 +501,29 @@ input[type=range]::-moz-range-thumb {
 .pp-profile svg { display: block; width: 100%; height: 62px; }
 .pp-profile .pp-axis { font-family: var(--mono); font-size: 8px; fill: var(--tide-dim); }
 
+.pp-plot-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin-bottom: 6px; font-family: var(--mono); font-size: 10px; color: var(--tide-dim);
+}
+.pp-field { display: flex; align-items: center; gap: 4px; }
+.pp-field-unit { color: var(--tide-dim); }
+.pp-num {
+  width: 46px; background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; padding: 2px 3px;
+}
+/* Chrome/Safari spinner arrows crowd a 46px field */
+.pp-num::-webkit-inner-spin-button, .pp-num::-webkit-outer-spin-button { margin-left: 2px; }
+.pp-gas-toggle {
+  margin-left: auto; height: 20px; padding: 0 8px; cursor: pointer;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; line-height: 1;
+}
+.pp-gas-toggle:hover { border-color: var(--kelp); color: var(--kelp); }
+.pp-gas-toggle[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+.pp-gas-total { color: var(--foam); white-space: nowrap; }
+
 /* draggable node handles */
 .path-node span {
   display: block; width: 11px; height: 11px; border-radius: 50%;
@@ -462,53 +531,46 @@ input[type=range]::-moz-range-thumb {
 }
 .leaflet-container.drawing { cursor: copy; }
 
-/* ---------- custom contours ---------- */
-.cc-add { display: flex; gap: 6px; }
-.cc-add input[type=number] {
-  flex: 1; min-width: 0; padding: 5px 7px;
-  background: rgba(111,183,189,0.06); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 2px;
-  font-family: var(--mono); font-size: 11px;
+/* ---------- custom contours: draggable depth ruler ---------- */
+.cc-field { margin-top: 14px; }
+.cc-ruler {
+  position: relative; height: 4px; margin: 24px 8px 6px;
+  background: var(--line); border-radius: 2px; cursor: copy;
 }
-.cc-add input[type=number]:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 1px; }
-.cc-plus {
-  flex: 0 0 28px; cursor: pointer;
-  background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 2px;
-  font-size: 15px; line-height: 1;
+.cc-tick {
+  position: absolute; top: -3px; width: 1px; height: 10px;
+  background: var(--tide-dim); opacity: 0.5; transform: translateX(-0.5px);
 }
-.cc-plus:hover { border-color: var(--kelp); color: var(--kelp); }
-
-.cc-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.cc-tile {
-  position: relative; display: flex; align-items: center; gap: 6px;
-  padding: 3px 5px 3px 6px; border: 1px solid var(--line); border-radius: 3px;
-  background: rgba(111,183,189,0.06);
-  font-family: var(--mono); font-size: 10px; color: var(--foam);
+.cc-tick.cc-tick-major { opacity: 0.9; }
+.cc-ruler-scale {
+  display: flex; justify-content: space-between; margin: 0 8px;
+  font-family: var(--mono); font-size: 9px; color: var(--tide-dim);
 }
-.cc-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
-.cc-cog {
-  background: none; border: none; cursor: pointer; padding: 0 1px;
-  color: var(--tide-dim); font-size: 11px; line-height: 1;
+.cc-marker {
+  position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%);
+  width: 15px; height: 15px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 2px solid var(--abyss); box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+  cursor: grab; touch-action: none; font-size: 8px; color: rgba(0,0,0,0.55); line-height: 1;
 }
-.cc-cog:hover { color: var(--kelp); }
-.cc-menu {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+.cc-marker:active { cursor: grabbing; }
+.cc-marker-label {
+  position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+  white-space: nowrap; font-family: var(--mono); font-size: 9px; color: var(--foam);
+  background: rgba(5,22,28,0.85); padding: 1px 4px; border-radius: 2px; pointer-events: none;
+}
+.cc-marker .cc-menu {
+  position: absolute; top: calc(100% + 6px); left: 50%; right: auto; z-index: 20;
+  transform: translateX(-50%);
   display: flex; align-items: center; gap: 6px; padding: 5px 6px;
   background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
   box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
 }
-.cc-menu[hidden] { display: none; }
-.cc-menu input[type=color] {
+.cc-marker .cc-menu[hidden] { display: none; }
+.cc-marker .cc-menu input[type=color] {
   width: 26px; height: 20px; padding: 0; cursor: pointer;
   background: none; border: 1px solid var(--line); border-radius: 2px;
 }
-.cc-remove {
-  width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
-}
-.cc-remove:hover { color: #e2725b; border-color: #e2725b; }
 
 /* ---------- activity readout ---------- */
 /* sits above the legend (~132px tall at bottom:16) and clear of the scrubber */
@@ -516,12 +578,23 @@ input[type=range]::-moz-range-thumb {
   position: fixed; z-index: 900; left: 14px; bottom: 16px; width: var(--console-w);
   background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
   padding: 9px 11px 8px; backdrop-filter: blur(6px);
+  cursor: move;
 }
-.act-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+.activity button, .activity a { cursor: pointer; }
+.activity.dragging { user-select: none; }
+.act-head {
+  display: flex; justify-content: flex-start; align-items: center; gap: 6px;
+  width: 100%; margin-bottom: 7px; background: none; border: none; padding: 0; cursor: pointer;
+}
+.act-head:hover .eyebrow { color: var(--kelp); }
+.act-head .sect-caret { font-size: 9px; line-height: 1; transition: transform 0.15s; }
+.act-head[aria-expanded="false"] .sect-caret { transform: rotate(-90deg); }
 .act-head .eyebrow {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--tide-dim);
 }
+.act-head .act-dot { margin-left: auto; }
+.activity.collapsed .act-log { display: none; }
 .act-dot {
   width: 6px; height: 6px; border-radius: 50%; background: var(--tide-dim); opacity: 0.5;
   transition: background 150ms ease, opacity 150ms ease;

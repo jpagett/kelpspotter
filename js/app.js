@@ -170,21 +170,19 @@
     el.textContent = '…';
     el.className = 'depth-probe show loading';
   }
-  function renderProbe(result) {
+  function renderProbe(metres) {
     const el = $('depth-probe');
-    const metres = result && result.metres;
     el.textContent = '';
     const main = document.createElement('span');
     const sub = document.createElement('span');
     sub.className = 'dp-sub';
-    if (!result || metres === null || metres === undefined) {
+    if (metres === null || metres === undefined) {
       main.textContent = '—';
       sub.textContent = 'no data';
     } else {
       const ft = Math.round(Math.abs(metres) * M_TO_FT);
       main.textContent = ft.toLocaleString() + ' ft';
-      // flag the 0.2 m survey grids — they only cover a few percent of the coast
-      sub.textContent = (metres < 0 ? 'depth' : 'elev.') + (result.fine ? ' · survey' : '');
+      sub.textContent = metres < 0 ? 'depth' : 'elev.';
     }
     el.appendChild(main); el.appendChild(sub);
     el.className = 'depth-probe show';
@@ -196,12 +194,10 @@
 
     if (probeAbort) probeAbort.abort();
     probeAbort = new AbortController();
-    // DemSampler queries the survey grid and the mosaic together and reports
-    // which answered, so the readout can mark the high-resolution hits.
-    const result = await DemSampler.identify(latlng.lat, latlng.lng, probeAbort.signal);
+    const metres = await DemSampler.identify(latlng.lat, latlng.lng, probeAbort.signal);
     if (probeCache.size > 800) probeCache.clear();
-    probeCache.set(key, result);
-    return result;
+    probeCache.set(key, metres);
+    return metres;
   }
 
   map.on('mousemove', (ev) => {
@@ -797,82 +793,121 @@
   bindSlider('depth-op', 'depth-op-val', (v) => Math.round(v * 100) + '%',
     (v) => setDepthOpacity(+v), () => {});
 
-  // ---- custom contours ----
-  function renderContourTiles() {
-    const box = $('cc-list');
-    box.textContent = '';
-    CustomContours.items.forEach((it) => {
-      const tile = document.createElement('div');
-      tile.className = 'cc-tile';
+  /*
+   * ---- custom contours: draggable depth ruler ----
+   * A horizontal 0-100 ft ruler replaces the old numeric input. Click the bare
+   * line to trace a new contour there; drag an existing marker to retarget it
+   * (contour redraw — a DEM resample — only fires on release, not per pixel of
+   * drag); click a marker for its colour picker; right-click to remove it.
+   */
+  const CC_MAX_FT = 100;
 
-      const sw = document.createElement('span');
-      sw.className = 'cc-swatch';
-      sw.style.background = it.color;
+  function buildContourMarker(it) {
+    const ruler = $('cc-ruler');
+    const depth = Math.max(0, Math.min(CC_MAX_FT, Math.abs(it.feet)));
 
-      const label = document.createElement('span');
-      label.textContent = Math.abs(it.feet) + ' ft';
+    const marker = document.createElement('div');
+    marker.className = 'cc-marker';
+    marker.style.left = (depth / CC_MAX_FT * 100) + '%';
+    marker.style.background = it.color;
+    marker.textContent = '⚙';
+    marker.title = 'Drag to move, click for colour, right-click to remove';
 
-      const cog = document.createElement('button');
-      cog.className = 'cc-cog';
-      cog.type = 'button';
-      cog.textContent = '⚙';
-      cog.title = 'Settings';
+    const label = document.createElement('span');
+    label.className = 'cc-marker-label';
+    label.textContent = Math.round(depth) + ' ft';
+    marker.appendChild(label);
 
-      const menu = document.createElement('div');
-      menu.className = 'cc-menu';
-      menu.hidden = true;
-
-      const color = document.createElement('input');
-      color.type = 'color';
-      color.value = it.color;
-      color.title = 'Contour colour';
-      // 'change', not 'input': commit on release rather than restyling on every
-      // pixel the user drags through the picker
-      color.addEventListener('change', () => {
-        CustomContours.setColor(it.id, color.value);
-        sw.style.background = color.value;
-      });
-
-      const rm = document.createElement('button');
-      rm.className = 'cc-remove';
-      rm.type = 'button';
-      rm.textContent = '×';
-      rm.title = 'Remove this contour';
-      rm.addEventListener('click', () => {
-        CustomContours.remove(it.id);
-        renderContourTiles();
-        say(Math.abs(it.feet) + ' ft contour removed');
-      });
-
-      cog.addEventListener('click', () => {
-        // one menu at a time
-        box.querySelectorAll('.cc-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
-        menu.hidden = !menu.hidden;
-      });
-
-      menu.appendChild(color); menu.appendChild(rm);
-      tile.appendChild(sw); tile.appendChild(label); tile.appendChild(cog); tile.appendChild(menu);
-      box.appendChild(tile);
+    const menu = document.createElement('div');
+    menu.className = 'cc-menu';
+    menu.hidden = true;
+    const color = document.createElement('input');
+    color.type = 'color'; color.value = it.color; color.title = 'Contour colour';
+    color.addEventListener('change', () => {
+      CustomContours.setColor(it.id, color.value);
+      marker.style.background = color.value;
     });
+    menu.appendChild(color);
+    marker.appendChild(menu);
+
+    let dragging = false, moved = false, startX = 0, startDepth = depth, pending = depth;
+
+    marker.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      dragging = true; moved = false;
+      startX = ev.clientX;
+      startDepth = Math.max(0, Math.min(CC_MAX_FT, Math.abs(it.feet)));
+      pending = startDepth;
+      try { marker.setPointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+    });
+
+    marker.addEventListener('pointermove', (ev) => {
+      if (!dragging) return;
+      const rawDx = ev.clientX - startX;
+      if (Math.abs(rawDx) > 3) moved = true;
+      const scaledDx = rawDx * 0.1;                       // 1/10 sensitivity — fine control
+      const ftPerPx = CC_MAX_FT / ruler.clientWidth;
+      pending = Math.max(0, Math.min(CC_MAX_FT, startDepth + scaledDx * ftPerPx));
+      marker.style.left = (pending / CC_MAX_FT * 100) + '%';
+      label.textContent = Math.round(pending) + ' ft';    // live label; the contour itself waits for release
+    });
+
+    marker.addEventListener('pointerup', (ev) => {
+      if (!dragging) return;
+      dragging = false;
+      try { marker.releasePointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+      if (moved) {
+        const next = Math.round(pending);
+        if (next !== Math.round(startDepth)) {
+          CustomContours.setDepth(it.id, next);
+          say(next + ' ft contour moved');
+        } else {
+          label.textContent = Math.round(startDepth) + ' ft';
+        }
+      } else {
+        document.querySelectorAll('.cc-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+        menu.hidden = !menu.hidden;
+      }
+    });
+
+    marker.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const ftLabel = Math.abs(it.feet);
+      CustomContours.remove(it.id);
+      renderContourRuler();
+      say(ftLabel + ' ft contour removed');
+    });
+
+    return marker;
   }
 
-  function addContour() {
-    const raw = parseFloat($('cc-depth').value);
-    if (!isFinite(raw)) { toast('Enter a depth in feet first.', true); return; }
-    const it = CustomContours.add(raw);
-    if (!it) return;
-    $('cc-depth').value = '';
-    renderContourTiles();
-    say('Tracing the ' + Math.abs(it.feet) + ' ft contour…');
+  function renderContourRuler() {
+    const ruler = $('cc-ruler');
+    ruler.textContent = '';
+    for (let ft = 0; ft <= CC_MAX_FT; ft += 10) {
+      const tick = document.createElement('span');
+      tick.className = 'cc-tick' + (ft % 50 === 0 ? ' cc-tick-major' : '');
+      tick.style.left = (ft / CC_MAX_FT * 100) + '%';
+      ruler.appendChild(tick);
+    }
+    CustomContours.items.forEach((it) => ruler.appendChild(buildContourMarker(it)));
   }
-  $('cc-add').addEventListener('click', addContour);
-  $('cc-depth').addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); addContour(); }
+
+  $('cc-ruler').addEventListener('click', (ev) => {
+    if (ev.target.closest('.cc-marker')) return;
+    const r = $('cc-ruler').getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+    const depth = Math.round(frac * CC_MAX_FT);
+    const it = CustomContours.add(depth);
+    if (!it) return;
+    renderContourRuler();
+    say('Tracing the ' + depth + ' ft contour…');
   });
   document.addEventListener('click', (ev) => {
-    if (ev.target.closest && ev.target.closest('.cc-tile')) return;
-    $('cc-list').querySelectorAll('.cc-menu').forEach((m) => { m.hidden = true; });
+    if (ev.target.closest && ev.target.closest('.cc-marker')) return;
+    $('cc-ruler').querySelectorAll('.cc-menu').forEach((m) => { m.hidden = true; });
   });
+  renderContourRuler();
 
   /*
    * ---- model-dirty tracking ----
@@ -927,11 +962,35 @@
   const fmtDist = (metres) => { const u = distU(); return u.from(metres).toFixed(u.dp) + ' ' + u.label; };
   const fmtDepth = (feet) => { const u = depthU(); return u.from(feet).toFixed(u.dp) + ' ' + u.label; };
 
+  /*
+   * Gas-planning units. Unlike dist/depth (sampled once, in fixed units, and
+   * only ever formatted for display), SAC/speed are typed in directly — so
+   * each unit needs a round trip, toBase for what the user types and fromBase
+   * for what's shown back. Base units are the defaults: cuft/min, mi/hr.
+   */
+  const SAC_UNITS = {
+    'cuft/min': { label: 'cuft/min', toBase: (v) => v, fromBase: (v) => v, dp: 2 },
+    'L/min':    { label: 'L/min', toBase: (v) => v / 28.316846592, fromBase: (v) => v * 28.316846592, dp: 1 }
+  };
+  const SPEED_UNITS = {
+    'mi/hr': { label: 'mi/hr', toBase: (v) => v, fromBase: (v) => v, dp: 2 },
+    'm/s':   { label: 'm/s', toBase: (v) => v * 2.2369362921, fromBase: (v) => v / 2.2369362921, dp: 2 },
+    'kts':   { label: 'kts', toBase: (v) => v * 1.15077945, fromBase: (v) => v / 1.15077945, dp: 2 },
+    'km/hr': { label: 'km/hr', toBase: (v) => v * 0.62137119224, fromBase: (v) => v / 0.62137119224, dp: 2 }
+  };
+  const sacU = () => SAC_UNITS[state.params.sacUnit] || SAC_UNITS['cuft/min'];
+  const speedU = () => SPEED_UNITS[state.params.speedUnit] || SPEED_UNITS['mi/hr'];
+
+  const UNIT_TABLES = { dist: DIST_UNITS, depth: DEPTH_UNITS, sac: SAC_UNITS, speed: SPEED_UNITS };
+  const UNIT_TITLES = {
+    dist: 'Distance units', depth: 'Depth units',
+    sac: 'SAC units', speed: 'Speed units'
+  };
   function unitSelect(kind, current, onPick) {
     const sel = document.createElement('select');
     sel.className = 'pp-units';
-    sel.title = kind === 'dist' ? 'Distance units' : 'Depth units';
-    Object.keys(kind === 'dist' ? DIST_UNITS : DEPTH_UNITS).forEach((k) => {
+    sel.title = UNIT_TITLES[kind];
+    Object.keys(UNIT_TABLES[kind]).forEach((k) => {
       const o = document.createElement('option');
       o.value = k; o.textContent = k;
       if (k === current) o.selected = true;
@@ -941,13 +1000,52 @@
     return sel;
   }
 
+  function numberInput(value, dp, title, onCommit) {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.className = 'pp-num'; inp.title = title;
+    inp.min = '0'; inp.step = dp > 0 ? (1 / Math.pow(10, dp)).toString() : '1';
+    inp.value = isFinite(value) ? (+value.toFixed(dp)).toString() : '';
+    inp.addEventListener('change', () => {
+      const v = parseFloat(inp.value);
+      if (isFinite(v) && v > 0) onCommit(v); else inp.value = isFinite(value) ? (+value.toFixed(dp)).toString() : '';
+    });
+    return inp;
+  }
+
+  /*
+   * Cumulative gas consumption along a path, assuming constant swim speed
+   * (so distance along the path maps directly to elapsed time) and SAC scaled
+   * by ambient pressure at each sampled depth (1 atm at the surface, +1 atm
+   * every 33 ft of seawater).
+   */
+  const ATA_DEPTH_FT = 33;
+  function gasProfile(p) {
+    const pts = (p.profile || []).filter((s) => s.feet !== null);
+    if (pts.length < 2 || !(p.speed > 0) || !(p.sac > 0)) return null;
+    let cum = 0, prevMi = 0;
+    const points = pts.map((s, i) => {
+      const depthFt = -s.feet;
+      const ata = 1 + depthFt / ATA_DEPTH_FT;
+      const mi = s.distance / 1609.344;
+      const dtMin = i === 0 ? 0 : ((mi - prevMi) / p.speed) * 60;
+      cum += p.sac * ata * dtMin;
+      prevMi = mi;
+      return { distance: s.distance, cuft: cum };
+    });
+    return { points: points, total: cum };
+  }
+
   // ---- paths panel ----
   // Depth-vs-distance sparkline. Depth increases downward, which is the way a
   // profile is conventionally read.
-  function profileSvg(p) {
+  function profileSvg(p, pxWidth) {
     const pts = (p.profile || []).filter((s) => s.feet !== null);
     if (pts.length < 2) return null;
-    const W = 240, H = 62, PADL = 26, PADB = 12, PADT = 4;
+    // The viewBox width is matched to the actual rendered pixel width (measured
+    // by the caller) rather than fixed, so 1 viewBox unit == 1 CSS px and text
+    // never needs non-uniform scaling to fill the panel — see the comment on
+    // preserveAspectRatio below.
+    const W = Math.max(120, Math.round(pxWidth) || 240), H = 62, PADL = 26, PADB = 12, PADT = 4;
     const maxD = Math.max.apply(null, pts.map((s) => -s.feet));
     const maxX = pts[pts.length - 1].distance || 1;
     const x = (d) => PADL + (W - PADL - 4) * (d / maxX);
@@ -956,7 +1054,13 @@
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-    svg.setAttribute('preserveAspectRatio', 'none');
+    /*
+     * No preserveAspectRatio="none" here (unlike before): since W now matches
+     * the container's real width and H matches the CSS height, the viewBox
+     * aspect ratio already equals the rendered box's, so the default uniform
+     * scale (1:1) applies and text/strokes never stretch horizontally when the
+     * panel or window is resized.
+     */
 
     const area = document.createElementNS(NS, 'path');
     let d = 'M' + x(0) + ',' + y(0);
@@ -988,6 +1092,29 @@
     dist.setAttribute('text-anchor', 'end');
     dist.textContent = fmtDist(maxX);
     svg.appendChild(dist);
+
+    if (p.showGas) {
+      const gp = gasProfile(p);
+      if (gp && gp.total > 0) {
+        const yG = (cuft) => PADT + (H - PADT - PADB) * (cuft / gp.total);
+        const gline = document.createElementNS(NS, 'polyline');
+        gline.setAttribute('points', gp.points.map((s) => x(s.distance).toFixed(1) + ',' + yG(s.cuft).toFixed(1)).join(' '));
+        gline.setAttribute('fill', 'none');
+        gline.style.stroke = 'var(--foam)';
+        gline.setAttribute('stroke-width', '1');
+        gline.setAttribute('stroke-dasharray', '3 2');
+        gline.setAttribute('opacity', '0.85');
+        svg.appendChild(gline);
+
+        const gLabel = document.createElementNS(NS, 'text');
+        gLabel.setAttribute('class', 'pp-axis');
+        gLabel.style.fill = 'var(--foam)';
+        gLabel.setAttribute('x', W - 4); gLabel.setAttribute('y', PADT + 7);
+        gLabel.setAttribute('text-anchor', 'end');
+        gLabel.textContent = gp.total.toFixed(1) + ' cuft';
+        svg.appendChild(gLabel);
+      }
+    }
 
     /*
      * Hovering the plot drops a dot on the map at the matching point along the
@@ -1057,12 +1184,15 @@
       const row = document.createElement('div');
       row.className = 'pp-row';
       row.addEventListener('click', (ev) => {
-        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil')) return;
+        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil, .pp-mirror, .pp-name-input')) return;
         Paths.select(p.id);
       });
 
       const sw = document.createElement('span');
       sw.className = 'pp-swatch'; sw.style.background = p.color;
+
+      const nameWrap = document.createElement('span');
+      nameWrap.className = 'pp-name-wrap';
 
       const name = document.createElement('span');
       name.className = 'pp-name'; name.textContent = p.name;
@@ -1071,14 +1201,30 @@
       const pencil = document.createElement('button');
       pencil.className = 'pp-pencil'; pencil.type = 'button';
       pencil.textContent = '✎'; pencil.title = 'Rename this path';
-      pencil.addEventListener('click', () => {
-        const next = window.prompt('Rename path', p.name);
-        if (next === null) return;
-        const clean = next.trim();
-        if (!clean) { toast('A path needs a name.', true); return; }
-        Paths.rename(p.id, clean);
-        say('Renamed to ' + clean);
-      });
+
+      function startRename() {
+        const input = document.createElement('input');
+        input.className = 'pp-name-input'; input.type = 'text'; input.value = p.name;
+        nameWrap.replaceChild(input, name);
+        input.focus(); input.select();
+
+        function commit() {
+          const clean = input.value.trim();
+          input.removeEventListener('blur', commit);
+          if (!clean || clean === p.name) { renderPaths(); return; }
+          Paths.rename(p.id, clean);
+          say('Renamed to ' + clean);
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') input.blur();
+          else if (ev.key === 'Escape') { input.removeEventListener('blur', commit); renderPaths(); }
+        });
+      }
+      pencil.addEventListener('click', startRename);
+      name.addEventListener('dblclick', startRename);
+
+      nameWrap.appendChild(name); nameWrap.appendChild(pencil);
 
       const meta = document.createElement('span');
       meta.className = 'pp-meta';
@@ -1089,6 +1235,12 @@
       caret.textContent = p.expanded ? '▾' : '▸';
       caret.title = p.expanded ? 'Collapse' : 'Show depth profile';
       caret.addEventListener('click', () => Paths.toggleExpand(p.id));
+
+      const mirror = document.createElement('button');
+      mirror.className = 'pp-mirror'; mirror.type = 'button'; mirror.textContent = '⇄';
+      mirror.title = 'Mirror this path back to its start';
+      mirror.disabled = p.nodes.length < 2;
+      mirror.addEventListener('click', () => Paths.mirror(p.id));
 
       const cog = document.createElement('button');
       cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
@@ -1107,20 +1259,82 @@
       const zu = unitSelect('depth', state.params.depthUnit, (v) => {
         state.params.depthUnit = v; renderPaths();
       });
-      menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu); menu.appendChild(del);
+      const su = unitSelect('sac', state.params.sacUnit, (v) => {
+        state.params.sacUnit = v; renderPaths();
+      });
+      const pu = unitSelect('speed', state.params.speedUnit, (v) => {
+        state.params.speedUnit = v; renderPaths();
+      });
+      menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu);
+      menu.appendChild(su); menu.appendChild(pu); menu.appendChild(del);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = !menu.hidden;
       });
 
-      row.appendChild(sw); row.appendChild(name); row.appendChild(pencil);
-      row.appendChild(meta); row.appendChild(caret); row.appendChild(cog);
+      row.appendChild(sw); row.appendChild(nameWrap);
+      row.appendChild(meta); row.appendChild(caret); row.appendChild(mirror); row.appendChild(cog);
       item.appendChild(row); item.appendChild(menu);
 
+      let wrap = null;
       if (p.expanded) {
-        const wrap = document.createElement('div');
+        wrap = document.createElement('div');
         wrap.className = 'pp-profile';
-        const svg = profileSvg(p);
+
+        const tools = document.createElement('div');
+        tools.className = 'pp-plot-tools';
+
+        const sacField = document.createElement('label');
+        sacField.className = 'pp-field'; sacField.title = 'Surface air consumption rate';
+        const sacLabel = document.createElement('span'); sacLabel.textContent = 'SAC';
+        const sacInput = numberInput(sacU().fromBase(p.sac), sacU().dp, 'Surface air consumption rate', (v) => {
+          Paths.setSac(p.id, sacU().toBase(v));
+        });
+        const sacUnitLabel = document.createElement('span'); sacUnitLabel.className = 'pp-field-unit';
+        sacUnitLabel.textContent = sacU().label;
+        sacField.appendChild(sacLabel); sacField.appendChild(sacInput); sacField.appendChild(sacUnitLabel);
+
+        const speedField = document.createElement('label');
+        speedField.className = 'pp-field'; speedField.title = 'Swim speed (assumed constant over the path)';
+        const speedLabel = document.createElement('span'); speedLabel.textContent = 'Speed';
+        const speedInput = numberInput(speedU().fromBase(p.speed), speedU().dp, 'Swim speed', (v) => {
+          Paths.setSpeed(p.id, speedU().toBase(v));
+        });
+        const speedUnitLabel = document.createElement('span'); speedUnitLabel.className = 'pp-field-unit';
+        speedUnitLabel.textContent = speedU().label;
+        speedField.appendChild(speedLabel); speedField.appendChild(speedInput); speedField.appendChild(speedUnitLabel);
+
+        const gasBtn = document.createElement('button');
+        gasBtn.className = 'pp-gas-toggle'; gasBtn.type = 'button'; gasBtn.textContent = 'Gas';
+        gasBtn.title = 'Overlay estimated gas consumption';
+        gasBtn.setAttribute('aria-pressed', p.showGas ? 'true' : 'false');
+        gasBtn.addEventListener('click', () => Paths.toggleGas(p.id));
+
+        const gasTotal = document.createElement('span');
+        gasTotal.className = 'pp-gas-total';
+        if (p.showGas) {
+          const gp = gasProfile(p);
+          gasTotal.textContent = gp ? gp.total.toFixed(1) + ' cuft total' : '—';
+        }
+
+        tools.appendChild(sacField); tools.appendChild(speedField);
+        tools.appendChild(gasBtn); tools.appendChild(gasTotal);
+        wrap.appendChild(tools);
+
+        item.appendChild(wrap);
+      }
+      box.appendChild(item);
+
+      if (wrap) {
+        // Measure the plot's actual rendered width (now that it's laid out in
+        // the document) so the SVG viewBox can match it 1:1 — see profileSvg().
+        const probe = document.createElement('div');
+        probe.style.cssText = 'width:100%; height:0;';
+        wrap.appendChild(probe);
+        const pxWidth = probe.clientWidth || box.clientWidth || 240;
+        wrap.removeChild(probe);
+
+        const svg = profileSvg(p, pxWidth);
         if (svg) wrap.appendChild(svg);
         else {
           const t = document.createElement('div');
@@ -1128,11 +1342,32 @@
           t.textContent = p.nodes.length < 2 ? 'Add at least two nodes.' : 'Reading depth…';
           wrap.appendChild(t);
         }
-        item.appendChild(wrap);
       }
-      box.appendChild(item);
     });
   }
+
+  /*
+   * The plot viewBox is matched to the panel's pixel width at render time
+   * (see renderPaths/profileSvg), so anything that changes that width — a
+   * corner-drag, the panel's own max-width:70vw hitting a narrow window, or a
+   * plain window resize — needs a re-render to stay matched. Debounced so a
+   * drag doesn't thrash the DOM on every pointermove.
+   *
+   * Three triggers feed the same debounce rather than relying on one: a
+   * ResizeObserver alone would cover every case, but it just missed a manual
+   * panel.style.width change in testing, so the corner-drag handler and a
+   * plain window listener call it directly too — belt and suspenders.
+   */
+  let ppResizeTimer = null;
+  function schedulePathsRerender() {
+    clearTimeout(ppResizeTimer);
+    ppResizeTimer = setTimeout(renderPaths, 120);
+  }
+  // Held in a module-scoped const, not a local, because an unreferenced
+  // ResizeObserver is eligible for GC, which would silently stop delivering.
+  const ppResizeObserver = new ResizeObserver(schedulePathsRerender);
+  ppResizeObserver.observe(document.querySelector('.paths-panel'));
+  window.addEventListener('resize', schedulePathsRerender);
 
   /*
    * Corner resizing. CSS `resize` only ever gives you the bottom-right, so the
@@ -1171,6 +1406,7 @@
         panel.style.height = h + 'px';
         if (west) panel.style.left = (drag.left + (drag.w - w)) + 'px';
         if (north) panel.style.top = (drag.top + (drag.h - h)) + 'px';
+        schedulePathsRerender();
       } else {
         // Keep a grabbable strip on screen rather than allowing it to be lost.
         const maxL = window.innerWidth - 60, maxT = window.innerHeight - 40;
@@ -1209,6 +1445,86 @@
       begin(ev, null);
     });
   })();
+
+  /*
+   * Drag-only chrome for the Console and Activity panels — the same
+   * "drag from any non-interactive background area" pattern as the Paths
+   * panel's initPanelChrome above, minus the corner resize (their content
+   * sizes itself; only their position needs to move).
+   */
+  function makeDraggable(panel, interactiveSelector) {
+    let drag = null;
+    function unpin() {
+      const r = panel.getBoundingClientRect();
+      panel.style.left = r.left + 'px';
+      panel.style.top = r.top + 'px';
+      panel.style.right = 'auto'; panel.style.bottom = 'auto';
+      return r;
+    }
+    function onMove(ev) {
+      if (!drag) return;
+      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+      const maxL = window.innerWidth - 60, maxT = window.innerHeight - 40;
+      panel.style.left = Math.max(60 - drag.w, Math.min(maxL, drag.left + dx)) + 'px';
+      panel.style.top = Math.max(0, Math.min(maxT, drag.top + dy)) + 'px';
+      ev.preventDefault();
+    }
+    function onUp() {
+      drag = null;
+      panel.classList.remove('dragging');
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+    panel.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target.closest(interactiveSelector)) return;
+      const r = unpin();
+      drag = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height, left: r.left, top: r.top };
+      panel.classList.add('dragging');
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      ev.preventDefault();
+    });
+  }
+  makeDraggable($('console-toggle').closest('.console'), 'button, input, select, textarea, a');
+  makeDraggable($('act-toggle').closest('.activity'), 'button, input, select, textarea, a');
+
+  function collapseToggle(panel, headBtn, expandedTitle, collapsedTitle) {
+    headBtn.addEventListener('click', () => {
+      const collapsed = panel.classList.toggle('collapsed');
+      headBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      headBtn.title = collapsed ? collapsedTitle : expandedTitle;
+    });
+  }
+  collapseToggle($('console-toggle').closest('.console'), $('console-toggle'),
+    'Collapse this panel', 'Expand this panel');
+  collapseToggle($('act-toggle').closest('.activity'), $('act-toggle'),
+    'Collapse this panel', 'Expand this panel');
+  collapseToggle($('pp-collapse').closest('.paths-panel'), $('pp-collapse'),
+    'Collapse this panel', 'Expand this panel');
+
+  // ---- View menu: show/hide whole panels, independent of their own collapse state ----
+  const VIEW_TARGETS = {
+    'view-console': '.console',
+    'view-paths': '.paths-panel',
+    'view-activity': '.activity',
+    'view-legend': '.legend'
+  };
+  Object.keys(VIEW_TARGETS).forEach((id) => {
+    $(id).addEventListener('change', () => {
+      document.querySelector(VIEW_TARGETS[id]).classList.toggle('view-hidden', !$(id).checked);
+    });
+  });
+  $('view-toggle').addEventListener('click', () => {
+    const open = $('view-list').hidden;
+    $('view-list').hidden = !open;
+    $('view-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('.view-menu')) return;
+    $('view-list').hidden = true;
+    $('view-toggle').setAttribute('aria-expanded', 'false');
+  });
 
   $('pp-add').addEventListener('click', () => {
     if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();

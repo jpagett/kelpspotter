@@ -20,6 +20,15 @@
     </div>
     <div class="header-right">
       <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
+      <div class="view-menu">
+        <button id="view-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false">View <span class="sect-caret">▾</span></button>
+        <div id="view-list" class="view-list" hidden>
+          <label class="check"><input type="checkbox" id="view-console" checked><span class="label">Console</span></label>
+          <label class="check"><input type="checkbox" id="view-paths" checked><span class="label">Paths</span></label>
+          <label class="check"><input type="checkbox" id="view-activity" checked><span class="label">Activity</span></label>
+          <label class="check"><input type="checkbox" id="view-legend" checked><span class="label">Legend</span></label>
+        </div>
+      </div>
       <button id="connect" class="btn ghost disconnected">Connect Earth Engine</button>
     </div>
   </header>
@@ -35,6 +44,10 @@
   </div>
 
   <aside class="console">
+    <button id="console-toggle" class="console-head" aria-expanded="true" title="Collapse this panel">
+      <span class="sect-caret">▾</span><span class="eyebrow">Console</span>
+    </button>
+    <div id="console-body" class="console-body">
     <div class="sect">
       <p class="eyebrow">Scene</p>
       <div class="date-row">
@@ -92,6 +105,13 @@
       <button class="eyebrow sect-toggle" data-target="sect-depth" aria-expanded="false">
         <span class="sect-caret">▸</span>Depth
       </button>
+      <!-- always visible, even with the rest of the section collapsed -->
+      <div class="field cc-field">
+        <div class="label-row"><span class="label">Custom contours</span></div>
+        <div id="cc-ruler" class="cc-ruler" title="Click to trace a contour at that depth"></div>
+        <div class="cc-ruler-scale"><span>0 ft</span><span>50 ft</span><span>100 ft</span></div>
+        <div class="hint">Click the line to trace a depth. Drag a marker to move it, click it for colour, right-click to remove.</div>
+      </div>
       <div id="sect-depth" class="sect-body" hidden>
       <div class="field">
         <label class="check">
@@ -111,15 +131,6 @@
         <div class="label-row"><span class="label">Depth opacity</span><span id="depth-op-val" class="value">45%</span></div>
         <input id="depth-op" type="range" min="0.1" max="1" step="0.05" value="0.45">
         <div class="hint">Lower this if the kelp layer is hard to read over the relief.</div>
-      </div>
-      <div class="field">
-        <div class="label-row"><span class="label">Custom contours</span></div>
-        <div class="cc-add">
-          <input id="cc-depth" type="number" step="5" min="0" placeholder="depth in ft" aria-label="Contour depth in feet">
-          <button id="cc-add" class="cc-plus" title="Trace this depth across the current view">+</button>
-        </div>
-        <div id="cc-list" class="cc-list"></div>
-        <div class="hint">Traced over the current view and extended as you pan.</div>
       </div>
       </div>
     </div>
@@ -158,12 +169,15 @@
       </div>
       </div>
     </div>
+    </div>
   </aside>
 
   <div class="legend">
-    <div class="eyebrow">Kelp</div>
-    <div class="ramp"></div>
-    <div class="ramp-labels"><span>High</span><span>Low</span></div>
+    <span class="eyebrow">Kelp</span>
+    <div class="ramp-wrap">
+      <div class="ramp"></div>
+      <div class="ramp-labels"><span>Low</span><span>High</span></div>
+    </div>
   </div>
 
   <aside class="paths-panel" aria-label="Paths">
@@ -171,15 +185,17 @@
          panel instead of scrolling away with a long path list -->
     <div class="pp-inner">
       <div class="pp-head">
-        <span class="eyebrow">Paths</span>
+        <button id="pp-collapse" class="eyebrow" aria-expanded="true" title="Collapse this panel">Paths</button>
         <div class="pp-tools">
           <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
           <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
           <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
         </div>
       </div>
+      <div id="pp-body">
       <div id="pp-list" class="pp-list"></div>
       <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
+      </div>
       <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
     </div>
     <span class="pp-grip nw" data-corner="nw"></span>
@@ -189,10 +205,11 @@
   </aside>
 
   <div class="activity" aria-live="polite">
-    <div class="act-head">
+    <button id="act-toggle" class="act-head" aria-expanded="true" title="Collapse this panel">
+      <span class="sect-caret">▾</span>
       <span class="eyebrow">Activity</span>
       <span id="act-dot" class="act-dot" aria-hidden="true"></span>
-    </div>
+    </button>
     <ul id="act-log" class="act-log"></ul>
   </div>
 

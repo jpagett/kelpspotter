@@ -1144,42 +1144,73 @@
    * the first drag it is pinned to explicit left/top and the anchor dropped —
    * otherwise dragging a west or north edge would fight the anchor.
    */
-  (function initPanelResize() {
+  (function initPanelChrome() {
     const panel = document.querySelector('.paths-panel');
-    let start = null;
+    const MIN_W = 240, MIN_H = 120;
+    let drag = null;
+
+    // Anything that does its own thing on a press is not a drag handle.
+    const INTERACTIVE = 'button, input, select, textarea, a, svg, .pp-grip, .pp-row, .pp-menu';
+
+    // Switch from the top-right anchor to explicit left/top on the first
+    // interaction; otherwise moving or resizing a west/north edge fights it.
+    function unpin() {
+      const r = panel.getBoundingClientRect();
+      panel.style.left = r.left + 'px';
+      panel.style.top = r.top + 'px';
+      panel.style.right = 'auto';
+      return r;
+    }
 
     function onMove(ev) {
-      if (!start) return;
-      const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
-      const west = start.corner === 'nw' || start.corner === 'sw';
-      const north = start.corner === 'nw' || start.corner === 'ne';
-      let w = start.w + (west ? -dx : dx);
-      let h = start.h + (north ? -dy : dy);
-      w = Math.max(240, Math.min(window.innerWidth * 0.7, w));
-      h = Math.max(120, Math.min(window.innerHeight * 0.8, h));
-      panel.style.width = w + 'px';
-      panel.style.height = h + 'px';
-      if (west) panel.style.left = (start.left + (start.w - w)) + 'px';
-      if (north) panel.style.top = (start.top + (start.h - h)) + 'px';
+      if (!drag) return;
+      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+
+      if (drag.corner) {
+        const west = drag.corner === 'nw' || drag.corner === 'sw';
+        const north = drag.corner === 'nw' || drag.corner === 'ne';
+        const w = Math.max(MIN_W, Math.min(window.innerWidth * 0.7, drag.w + (west ? -dx : dx)));
+        const h = Math.max(MIN_H, Math.min(window.innerHeight * 0.8, drag.h + (north ? -dy : dy)));
+        panel.style.width = w + 'px';
+        panel.style.height = h + 'px';
+        if (west) panel.style.left = (drag.left + (drag.w - w)) + 'px';
+        if (north) panel.style.top = (drag.top + (drag.h - h)) + 'px';
+      } else {
+        // Keep a grabbable strip on screen rather than allowing it to be lost.
+        const maxL = window.innerWidth - 60, maxT = window.innerHeight - 40;
+        panel.style.left = Math.max(60 - drag.w, Math.min(maxL, drag.left + dx)) + 'px';
+        panel.style.top = Math.max(0, Math.min(maxT, drag.top + dy)) + 'px';
+      }
       ev.preventDefault();
     }
+
     function onUp() {
-      start = null;
+      drag = null;
+      panel.classList.remove('dragging');
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
     }
+
+    function begin(ev, corner) {
+      const r = unpin();
+      drag = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height,
+               left: r.left, top: r.top, corner: corner };
+      panel.classList.add('dragging');
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      ev.preventDefault();
+    }
+
     panel.querySelectorAll('.pp-grip').forEach((grip) => {
-      grip.addEventListener('pointerdown', (ev) => {
-        const r = panel.getBoundingClientRect();
-        panel.style.left = r.left + 'px';
-        panel.style.top = r.top + 'px';
-        panel.style.right = 'auto';
-        start = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height, left: r.left, top: r.top,
-                  corner: grip.dataset.corner };
-        document.addEventListener('pointermove', onMove);
-        document.addEventListener('pointerup', onUp);
-        ev.preventDefault();
-      });
+      grip.addEventListener('pointerdown', (ev) => begin(ev, grip.dataset.corner));
+    });
+
+    // Drag from any background area — the padding, the header bar behind its
+    // buttons, the note, the gaps between path rows.
+    panel.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target.closest(INTERACTIVE)) return;
+      begin(ev, null);
     });
   })();
 

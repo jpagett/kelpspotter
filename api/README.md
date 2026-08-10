@@ -133,6 +133,68 @@ curl -s "$API/scenes?start=2026-06-01&end=2026-08-01&maxCloud=100" | head -c 300
 curl -s "$API/layer?mode=single&date=2026-07-05&index=KD&kelpThresh=0.003216&b11Thresh=0.028"
 ```
 
+## Automatic redeploys
+
+GitHub Pages redeploys the static site on push. **Cloud Run does not watch the
+repo**, so `api/` changes need a deploy. `cloudbuild.yaml` in the repo root
+automates that: a Cloud Build trigger rebuilds and redeploys on any push to
+`master` that touches `api/**`.
+
+It runs inside GCP as the Cloud Build service account, so **no key material is
+stored in GitHub** — the same reason the service uses the runtime identity
+rather than a JSON key. (A GitHub Actions workflow would need either a
+service-account key in a repo secret, or Workload Identity Federation to avoid
+one; the Cloud Build trigger sidesteps the choice.)
+
+### One-time setup
+
+**1. Connect the repository.** This step needs the console — it is a GitHub
+OAuth authorisation, not something a command can do on your behalf:
+
+→ https://console.cloud.google.com/cloud-build/repositories?project=kelpscape
+
+*Connect repository* → GitHub → authorise → pick `jpagett/kelpspotter`.
+
+**2. Give Cloud Build permission to deploy.** It needs to update the Cloud Run
+service, and to *act as* the runtime service account:
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe kelpscape --format='value(projectNumber)')
+```
+
+```bash
+gcloud projects add-iam-policy-binding kelpscape --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/run.admin"
+```
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding kelpspotter-api@kelpscape.iam.gserviceaccount.com --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="roles/iam.serviceAccountUser"
+```
+
+Without the second binding the build fails with a `PERMISSION_DENIED` naming
+`iam.serviceaccounts.actAs` — that error means this step, not a broken YAML.
+
+**3. Create the trigger.**
+
+```bash
+gcloud builds triggers create github --name=kelpspotter-api-deploy --region=us-west1 --repo-owner=jpagett --repo-name=kelpspotter --branch-pattern='^master$' --build-config=cloudbuild.yaml --included-files='api/**'
+```
+
+`--included-files='api/**'` is what stops a CSS change from rebuilding a
+container.
+
+### Checking it
+
+```bash
+gcloud builds triggers run kelpspotter-api-deploy --region=us-west1 --branch=master
+```
+
+```bash
+gcloud builds list --region=us-west1 --limit=3
+```
+
+After that, editing anything under `api/` and pushing is the whole workflow —
+no manual deploy. The manual command above still works if you need to force one.
+
 ## Guardrails
 
 The quota is now exposed to the public, so the service:

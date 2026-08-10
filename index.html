@@ -167,17 +167,21 @@
   </div>
 
   <aside class="paths-panel" aria-label="Paths">
-    <div class="pp-head">
-      <span class="eyebrow">Paths</span>
-      <div class="pp-tools">
-        <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
-        <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
-        <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
+    <!-- content scrolls in here so the resize grips below stay pinned to the
+         panel instead of scrolling away with a long path list -->
+    <div class="pp-inner">
+      <div class="pp-head">
+        <span class="eyebrow">Paths</span>
+        <div class="pp-tools">
+          <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
+          <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
+          <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
+        </div>
       </div>
+      <div id="pp-list" class="pp-list"></div>
+      <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
+      <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
     </div>
-    <div id="pp-list" class="pp-list"></div>
-    <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
-    <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
     <span class="pp-grip nw" data-corner="nw"></span>
     <span class="pp-grip ne" data-corner="ne"></span>
     <span class="pp-grip sw" data-corner="sw"></span>

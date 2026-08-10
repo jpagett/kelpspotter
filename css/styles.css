@@ -356,12 +356,23 @@ input[type=range]::-moz-range-thumb {
   position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
   width: 360px; height: 320px;
   min-width: 240px; min-height: 120px; max-width: 70vw; max-height: 80vh;
-  overflow: auto;                        /* resized via the corner handles below */
+  /* The panel itself never scrolls — .pp-inner does. If it did, the corner grips
+     (absolutely positioned children) would scroll out of reach on a long list. */
+  overflow: visible;
   background: rgba(10,40,48,0.94); border: 1px solid var(--line); border-radius: 4px;
-  padding: 12px 14px; backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  cursor: move;                          /* drag the panel by its background */
 }
-.paths-panel::-webkit-scrollbar { width: 8px; }
-.paths-panel::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
+.pp-inner {
+  height: 100%; overflow-y: auto; overflow-x: hidden;
+  padding: 12px 14px; border-radius: 4px;
+}
+.pp-inner::-webkit-scrollbar { width: 8px; }
+.pp-inner::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
+/* interactive children keep their own cursors so "move" only reads as the background */
+.paths-panel button, .paths-panel input, .paths-panel select { cursor: pointer; }
+.paths-panel .pp-profile svg { cursor: crosshair; }
+.paths-panel.dragging { user-select: none; }
 /* header matches the console section eyebrows */
 .pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .pp-head .eyebrow {

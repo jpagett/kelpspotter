@@ -1,0 +1,52 @@
+# Redeploys the Cloud Run backend whenever api/ changes on master.
+#
+# GitHub Pages already redeploys the static site on push; Cloud Run does not
+# watch the repo at all, so without this every api/ change needs a manual
+# `gcloud run deploy`. The trigger is filtered to api/** so a CSS tweak does not
+# rebuild a container.
+#
+# Runs inside GCP as the Cloud Build service account, so no key material is
+# stored in GitHub — which is the same reason the service itself uses the
+# runtime identity rather than a JSON key.
+
+substitutions:
+  _SERVICE: kelpspotter-api
+  _REGION: us-west1
+  _RUNTIME_SA: kelpspotter-api@kelpscape.iam.gserviceaccount.com
+  # Reuses the repository `gcloud run deploy --source` created on the first deploy.
+  _IMAGE: us-west1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/kelpspotter-api
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}:${SHORT_SHA}', '-t', '${_IMAGE}:latest', 'api']
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_IMAGE}']
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_SERVICE}'
+      - '--image=${_IMAGE}:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--allow-unauthenticated'
+      # ^##^ redefines the separator: ALLOWED_ORIGINS contains a comma, which
+      # --set-env-vars would otherwise read as the start of the next variable.
+      - '--set-env-vars=^##^EE_PROJECT=kelpscape##ALLOWED_ORIGINS=https://jpagett.github.io,http://localhost:8000'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--timeout=120'
+      - '--max-instances=5'
+
+images:
+  - '${_IMAGE}:${SHORT_SHA}'
+  - '${_IMAGE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

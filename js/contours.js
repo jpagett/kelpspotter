@@ -105,8 +105,11 @@ const CustomContours = (function () {
       lastKey = key;
       items.forEach((it) => draw(it, grid));
       if (grid.stats.fetched) {
+        const fine = grid.stats.fineHits
+          ? ', ' + grid.stats.fineHits + ' from survey grids'
+          : '';
         say('Sampled ' + grid.stats.fetched + ' new depth points (' +
-            grid.stats.cached + ' cached)', 'ok');
+            grid.stats.cached + ' cached' + fine + ')', 'ok');
       }
     } catch (err) {
       console.warn(err);

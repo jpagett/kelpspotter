@@ -34,14 +34,14 @@ const DemSampler = (function () {
     return Math.pow(2, Math.max(-14, Math.min(0, p)));   // ~0.00006° .. 1°
   }
 
-  async function postSamples(points) {
+  async function postTo(baseUrl, points) {
     const body = new URLSearchParams({
       geometry: JSON.stringify({ points: points, spatialReference: { wkid: 4326 } }),
       geometryType: 'esriGeometryMultipoint',
       returnFirstValueOnly: 'true',
       f: 'json'
     });
-    const res = await fetch(cfg.DEPTH.probe.url + '/getSamples', {
+    const res = await fetch(baseUrl + '/getSamples', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
@@ -55,6 +55,63 @@ const DemSampler = (function () {
       if (isFinite(v)) out[s.locationId] = v;
     });
     return out;
+  }
+
+  // Running tally so callers can report how much of a grid came from survey data.
+  let fineHits = 0, fineTotal = 0;
+
+  /*
+   * Sample both sources at once and prefer the survey grid where it has data.
+   * Parallel, not sequential: survey coverage is a few percent on the mainland,
+   * so a miss must not add a round trip on top of the mosaic lookup. A failure
+   * of the high-resolution source degrades to the mosaic rather than the whole
+   * request failing.
+   */
+  async function postSamples(points) {
+    const hi = cfg.DEPTH.hires;
+    if (!hi || !hi.url) return postTo(cfg.DEPTH.probe.url, points);
+
+    const [fine, coarse] = await Promise.all([
+      postTo(hi.url, points).catch(() => new Array(points.length).fill(null)),
+      postTo(cfg.DEPTH.probe.url, points)
+    ]);
+    let hits = 0;
+    const out = points.map((_, i) => {
+      if (fine[i] !== null) { hits++; return fine[i]; }
+      return coarse[i];
+    });
+    fineHits += hits;
+    fineTotal += points.length;
+    return out;
+  }
+
+  // Single-point lookup, used by the cursor readout. Same two-source rule, and
+  // it reports which one answered so the readout can say so.
+  async function identifyAt(baseUrl, lat, lng, signal) {
+    const geom = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
+    const url = baseUrl + '/identify?f=json&geometryType=esriGeometryPoint' +
+                '&returnGeometry=false&returnCatalogItems=false&geometry=' +
+                encodeURIComponent(geom);
+    const res = await fetch(url, { signal: signal });
+    if (!res.ok) throw new Error('identify ' + res.status);
+    const v = parseFloat((await res.json()).value);   // "NoData" parses to NaN
+    return isFinite(v) ? v : null;
+  }
+
+  async function identify(lat, lng, signal) {
+    const hi = cfg.DEPTH.hires;
+    if (!hi || !hi.url) {
+      return { metres: await identifyAt(cfg.DEPTH.probe.url, lat, lng, signal), fine: false };
+    }
+    const [fine, coarse] = await Promise.all([
+      identifyAt(hi.url, lat, lng, signal).catch((e) => {
+        if (e.name === 'AbortError') throw e;
+        return null;
+      }),
+      identifyAt(cfg.DEPTH.probe.url, lat, lng, signal)
+    ]);
+    if (fine !== null) return { metres: fine, fine: true };
+    return { metres: coarse, fine: false };
   }
 
   /*
@@ -110,7 +167,10 @@ const DemSampler = (function () {
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) cells.push({ gx: gx0 + i, gy: gy0 + j });
     }
+    const before = { h: fineHits, t: fineTotal };
     const stats = await ensure(step, cells, onProgress);
+    stats.fineHits = fineHits - before.h;      // how much of this fetch was survey data
+    stats.fineOf = fineTotal - before.t;
 
     const values = new Array(nx * ny);
     for (let j = 0; j < ny; j++) {
@@ -164,9 +224,12 @@ const DemSampler = (function () {
   return {
     init: init,
     grid: grid,
+    identify: identify,
     alongPath: alongPath,
     haversine: haversine,
     M_TO_FT: M_TO_FT,
+    // share of all samples answered by the survey grid rather than the mosaic
+    get fineShare() { return fineTotal ? fineHits / fineTotal : 0; },
     get cacheSize() { return cache.size; },
     clearCache: function () { cache.clear(); }
   };

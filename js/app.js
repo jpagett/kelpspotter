@@ -170,19 +170,21 @@
     el.textContent = '…';
     el.className = 'depth-probe show loading';
   }
-  function renderProbe(metres) {
+  function renderProbe(result) {
     const el = $('depth-probe');
+    const metres = result && result.metres;
     el.textContent = '';
     const main = document.createElement('span');
     const sub = document.createElement('span');
     sub.className = 'dp-sub';
-    if (metres === null || metres === undefined) {
+    if (!result || metres === null || metres === undefined) {
       main.textContent = '—';
       sub.textContent = 'no data';
     } else {
       const ft = Math.round(Math.abs(metres) * M_TO_FT);
       main.textContent = ft.toLocaleString() + ' ft';
-      sub.textContent = metres < 0 ? 'depth' : 'elev.';
+      // flag the 0.2 m survey grids — they only cover a few percent of the coast
+      sub.textContent = (metres < 0 ? 'depth' : 'elev.') + (result.fine ? ' · survey' : '');
     }
     el.appendChild(main); el.appendChild(sub);
     el.className = 'depth-probe show';
@@ -194,18 +196,12 @@
 
     if (probeAbort) probeAbort.abort();
     probeAbort = new AbortController();
-    const geom = JSON.stringify({ x: latlng.lng, y: latlng.lat, spatialReference: { wkid: 4326 } });
-    const url = cfg.DEPTH.probe.url + '/identify?f=json&geometryType=esriGeometryPoint' +
-                '&returnGeometry=false&returnCatalogItems=false&geometry=' + encodeURIComponent(geom);
-
-    const res = await fetch(url, { signal: probeAbort.signal });
-    if (!res.ok) throw new Error('identify ' + res.status);
-    const json = await res.json();
-    const v = parseFloat(json.value);            // "NoData" parses to NaN
-    const metres = isFinite(v) ? v : null;
+    // DemSampler queries the survey grid and the mosaic together and reports
+    // which answered, so the readout can mark the high-resolution hits.
+    const result = await DemSampler.identify(latlng.lat, latlng.lng, probeAbort.signal);
     if (probeCache.size > 800) probeCache.clear();
-    probeCache.set(key, metres);
-    return metres;
+    probeCache.set(key, result);
+    return result;
   }
 
   map.on('mousemove', (ev) => {

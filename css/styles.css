@@ -119,7 +119,52 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .date-display .big {
   font-family: var(--mono); font-size: 19px; color: var(--foam); letter-spacing: 0.02em;
 }
+.date-display .big {
+  display: block; width: 100%; padding: 0; cursor: pointer;
+  background: none; border: none; border-bottom: 1px dotted transparent;
+}
+.date-display .big:hover { color: var(--kelp); border-bottom-color: var(--kelp); }
+.date-display .big[aria-expanded="true"] { color: var(--kelp); }
 .date-display .meta { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); margin-top: 2px; }
+
+/* ---------- date picker ---------- */
+.cal { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cal[hidden] { display: none; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-title { font-family: var(--mono); font-size: 12px; color: var(--foam); }
+.cal-nav {
+  width: 22px; height: 22px; cursor: pointer; display: grid; place-items: center;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 13px; line-height: 1;
+}
+.cal-nav:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
+.cal-nav:disabled { opacity: 0.25; cursor: not-allowed; }
+
+.cal-dow, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-dow {
+  font-family: var(--mono); font-size: 9px; color: var(--tide-dim);
+  text-align: center; margin-bottom: 4px;
+}
+.cal-day {
+  aspect-ratio: 1; display: grid; place-items: center; position: relative;
+  font-family: var(--mono); font-size: 10px; border-radius: 2px;
+  background: none; border: 1px solid transparent; color: var(--tide-dim);
+  padding: 0; cursor: default;
+}
+.cal-day.blank { visibility: hidden; }
+/* a pass exists but it is cloudier than the ceiling */
+.cal-day.over { color: var(--tide-dim); opacity: 0.55; text-decoration: line-through; }
+/* a usable pass */
+.cal-day.has { color: var(--foam); cursor: pointer; background: rgba(242,177,52,0.10); border-color: rgba(242,177,52,0.35); }
+.cal-day.has:hover { background: rgba(242,177,52,0.28); border-color: var(--kelp); }
+.cal-day.sel { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+.cal-day:disabled { cursor: default; }
+
+.cal-cloud { margin-top: 10px; }
+.cal-cloud .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.cal-cloud .label { font-size: 11px; color: var(--tide); }
+.cal-cloud .value { font-family: var(--mono); font-size: 11px; color: var(--kelp); }
+.cal .hint { font-size: 10px; color: var(--tide-dim); margin-top: 7px; line-height: 1.4; }
 
 /* segmented control */
 .seg { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
@@ -229,6 +274,67 @@ input[type=range]::-moz-range-thumb {
   height: 88px; margin-top: -88px; padding-left: 34px;
   font-family: var(--mono); font-size: 9px; color: var(--tide);
 }
+
+/* ENC contours are drawn as black lines on transparent, which vanish against the
+   dark basemap — invert flips them to white without touching the clear areas. */
+.leaflet-contour-pane { filter: invert(1); opacity: 0.6; }
+
+/* crosshair over the map — Leaflet's own grab/grabbing cursors have to be beaten */
+.leaflet-container,
+.leaflet-grab,
+.leaflet-dragging .leaflet-grab,
+.leaflet-dragging .leaflet-container { cursor: crosshair; }
+/* ...but real controls stay clickable-looking */
+.leaflet-control a, .leaflet-control button, .leaflet-interactive { cursor: pointer; }
+
+/* ---------- depth-at-cursor readout ---------- */
+.depth-probe {
+  position: fixed; z-index: 1000; pointer-events: none;
+  transform: translate(15px, 15px);
+  background: rgba(5,22,28,0.92); border: 1px solid var(--line);
+  border-left: 2px solid var(--kelp);
+  padding: 4px 8px; border-radius: 3px;
+  font-family: var(--mono); font-size: 11px; color: var(--foam);
+  white-space: nowrap; opacity: 0; transition: opacity 120ms ease;
+}
+.depth-probe.show { opacity: 1; }
+.depth-probe.pending { opacity: 0.45; }   /* dim the stale value while re-reading */
+.depth-probe .dp-sub { color: var(--tide-dim); margin-left: 5px; }
+
+/* ---------- activity readout ---------- */
+/* sits above the legend (~132px tall at bottom:16) and clear of the scrubber */
+.activity {
+  position: fixed; z-index: 900; right: 16px; bottom: 160px; width: 268px;
+  background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
+  padding: 9px 11px 8px; backdrop-filter: blur(6px);
+}
+.act-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+.act-head .eyebrow {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--tide-dim);
+}
+.act-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--tide-dim); opacity: 0.5;
+  transition: background 150ms ease, opacity 150ms ease;
+}
+.act-dot.on { background: var(--kelp); opacity: 1; box-shadow: 0 0 8px var(--kelp); animation: act-pulse 1.1s ease-in-out infinite; }
+@keyframes act-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.act-log { list-style: none; margin: 0; padding: 0; max-height: 92px; overflow-y: auto; }
+.act-log::-webkit-scrollbar { width: 6px; }
+.act-log::-webkit-scrollbar-thumb { background: var(--current); border-radius: 3px; }
+.act-line {
+  display: flex; gap: 7px; font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  color: var(--tide-dim);
+}
+.act-line + .act-line { margin-top: 2px; }
+.act-line .act-t { color: var(--current); flex: none; }
+.act-line .act-m { min-width: 0; word-break: break-word; }
+.act-log .act-line:last-child { color: var(--tide); }
+.act-log .act-line.ok:last-child { color: var(--foam); }
+.act-line.warn .act-m, .act-log .act-line.warn:last-child { color: #e2725b; }
+
+@media (max-height: 720px) { .activity { display: none; } }
 
 /* ---------- toast ---------- */
 .toast {

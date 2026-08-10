@@ -36,8 +36,15 @@ window.KELP_CONFIG = {
    *
    * `thresh` is the paper's Table 2 masking threshold (a pixel is kelp when the
    * index is >= this). They are calibrated on TOA reflectance scaled to 0..1, so
-   * they only mean anything against the L1C product ee-kelp.js loads. min/max
-   * just bound the slider either side of the published value.
+   * they only mean anything against the L1C product ee-kelp.js loads.
+   *
+   * min/max bound the slider. KD and FAI floor at 0 on purpose: both are defined
+   * as one band exceeding another (red edge over red; NIR over the red-SWIR
+   * baseline), so a negative cutoff would admit pixels that are not vegetation at
+   * all. NDVI is the exception and keeps a small negative floor, because its
+   * published threshold is itself just below zero — over water in TOA reflectance,
+   * path radiance lifts the red band while NIR is nearly black, putting kelp
+   * pixels right at the NDVI zero crossing.
    *
    * `ramp` is not from the paper: it is how far above the threshold the index has
    * to climb before the overlay reaches full opacity, so thin canopy fades out
@@ -46,17 +53,18 @@ window.KELP_CONFIG = {
   INDICES: {
     KD: {
       thresh: 0.003216,    // Table 2: KD >= 0.003216 (set by max River grass value)
-      min: -0.02, max: 0.05, ramp: 0.02,
-      hint: 'KD = B6 − B4 (Mora-Soto et al. 2020). The paper’s own index — best kappa of the three.'
+      min: 0, max: 0.05, ramp: 0.02,
+      hint: 'KD (Kelp Difference) = B6 − B4. The paper’s own index, best kappa of the three. ' +
+            'Mora-Soto et al. (2020), Remote Sens. 12(4), 694. doi:10.3390/rs12040694'
     },
     FAI: {
       thresh: 0.005352,    // Table 2: FAI >= 0.005352 (set by max Organic water value)
-      min: -0.02, max: 0.05, ramp: 0.02,
+      min: 0, max: 0.05, ramp: 0.02,
       hint: 'FAI: floating-algae index, tolerant of sun glint.'
     },
     NDVI: {
       thresh: -0.0003411,  // as published in the authors' GEE script (see README caveat)
-      min: -0.05, max: 0.30, ramp: 0.15,
+      min: -0.01, max: 0.30, ramp: 0.15,   // negative floor: the published value is below zero
       hint: 'NDVI: canopy vs. dark water. Simple and robust.'
     }
   },
@@ -68,11 +76,42 @@ window.KELP_CONFIG = {
    * the shaded depth/relief rendering. (NCEI's higher-resolution Coastal Relief
    * Model was the first choice but returns blank tiles below ~2° extent.)
    */
-  BATHYMETRY: {
-    url: 'https://gis.ngdc.noaa.gov/arcgis/services/DEM_mosaics/DEM_global_mosaic/ImageServer/WMSServer',
-    layers: 'DEM_global_mosaic:ColorHillshade',
-    opacity: 0.65,
-    attribution: 'Depth: NOAA NCEI DEM global mosaic'
+  DEPTH: {
+    // Shaded relief from the elevation/bathymetry mosaic.
+    relief: {
+      url: 'https://gis.ngdc.noaa.gov/arcgis/services/DEM_mosaics/DEM_global_mosaic/ImageServer/WMSServer',
+      layers: 'DEM_global_mosaic:ColorHillshade',
+      attribution: 'Depth: NOAA NCEI DEM global mosaic'
+    },
+    /*
+     * Charted depth contours from NOAA's ENC (Electronic Navigational Chart)
+     * coastal service. WMS layer 95 is Coastal.Depth_Contour_line — note the WMS
+     * numbering is NOT the same as the REST layer ids (there it is layer 82).
+     * The service draws black lines on transparent, which are invisible on this
+     * basemap, so the pane is inverted to white in CSS.
+     */
+    contours: {
+      url: 'https://gis.charttools.noaa.gov/arcgis/services/encdirect/enc_coastal/MapServer/WMSServer',
+      layers: '95',
+      attribution: 'Contours: NOAA ENC'
+    },
+    /*
+     * Point lookup for the cursor readout. The same ImageServer exposes an
+     * `identify` endpoint returning the raw pixel value (elevation in metres,
+     * negative below sea level), and it sends Access-Control-Allow-Origin: *, so
+     * the browser can query it directly with no proxy.
+     */
+    probe: { url: 'https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/DEM_global_mosaic/ImageServer' },
+
+    /*
+     * NOAA sends `cache-control: private` with no max-age, ETag or Last-Modified,
+     * so browsers have no freshness signal and re-request aggressively. These
+     * cut the number of requests rather than trying to cache harder: 512 px tiles
+     * mean a quarter as many, and holding off until the map settles avoids firing
+     * requests for tiles that scroll past. keepBuffer retains offscreen tiles so
+     * panning back is free.
+     */
+    tuning: { tileSize: 512, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 4 }
   },
 
   // Default model parameters (all adjustable live in the console)
@@ -83,6 +122,8 @@ window.KELP_CONFIG = {
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
     mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
-    showBathymetry: false   // NOAA depth overlay, off until asked for
+    showRelief: true,       // NOAA shaded-relief depth overlay
+    showContours: false,    // NOAA ENC charted depth contours
+    depthOpacity: 0.45      // kept well under 1 so the kelp layer still reads over it
   }
 };

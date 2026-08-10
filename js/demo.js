@@ -47,7 +47,8 @@ const DemoEngine = (function () {
     let t = EPOCH + Math.ceil((start - EPOCH) / step) * step;
     for (; t <= end && out.length < MAX_SCENES; t += step) {
       const d = new Date(t).toISOString().slice(0, 10);
-      out.push({ id: 'demo_' + d, date: d, cloud: Math.round(Math.pow(rand(dateSeed(d)), 1.7) * 85) });
+      // one decimal, matching the precision of the real CLOUDY_PIXEL_PERCENTAGE
+      out.push({ id: 'demo_' + d, date: d, cloud: Math.round(Math.pow(rand(dateSeed(d)), 1.7) * 850) / 10 });
     }
     return out;
   }

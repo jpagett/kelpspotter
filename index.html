@@ -33,10 +33,26 @@
       <div class="date-row">
         <button id="prev" class="step" aria-label="Previous scene">‹</button>
         <div class="date-display">
-          <div id="date-big" class="big">—</div>
+          <button id="date-big" class="big" aria-haspopup="dialog" aria-expanded="false"
+                  title="Pick a date">—</button>
           <div id="date-meta" class="meta">no scene</div>
         </div>
         <button id="next" class="step" aria-label="Next scene">›</button>
+      </div>
+
+      <div id="cal" class="cal" role="dialog" aria-label="Pick a scene date" hidden>
+        <div class="cal-head">
+          <button id="cal-prev" class="cal-nav" aria-label="Previous month">‹</button>
+          <span id="cal-title" class="cal-title"></span>
+          <button id="cal-next" class="cal-nav" aria-label="Next month">›</button>
+        </div>
+        <div class="cal-dow"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div id="cal-grid" class="cal-grid"></div>
+        <div class="cal-cloud">
+          <div class="label-row"><span class="label">Cloud ceiling</span><span id="cal-cloud-val" class="value">40%</span></div>
+          <input id="cal-cloud" type="range" min="0" max="90" step="5" value="40">
+        </div>
+        <div id="cal-note" class="hint"></div>
       </div>
     </div>
 
@@ -60,12 +76,28 @@
         <input id="cloud" type="range" min="0" max="90" step="5" value="40">
         <div class="hint">Scenes cloudier than this are dropped from the timeline.</div>
       </div>
+    </div>
+
+    <div class="sect">
+      <p class="eyebrow">Depth</p>
       <div class="field">
         <label class="check">
-          <input id="bathy" type="checkbox">
-          <span class="label">Depth (NOAA bathymetry)</span>
+          <input id="relief" type="checkbox" checked>
+          <span class="label">Shaded relief</span>
         </label>
-        <div class="hint">Shaded relief from the NOAA NCEI DEM global mosaic.</div>
+        <div class="hint">NOAA NCEI DEM global mosaic.</div>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input id="contours" type="checkbox">
+          <span class="label">Depth contours</span>
+        </label>
+        <div class="hint">Charted contours from NOAA ENC coastal charts.</div>
+      </div>
+      <div class="field">
+        <div class="label-row"><span class="label">Depth opacity</span><span id="depth-op-val" class="value">45%</span></div>
+        <input id="depth-op" type="range" min="0.1" max="1" step="0.05" value="0.45">
+        <div class="hint">Lower this if the kelp layer is hard to read over the relief.</div>
       </div>
     </div>
 
@@ -78,7 +110,7 @@
           <button id="idx-fai" data-index="FAI" aria-pressed="false">FAI</button>
           <button id="idx-ndvi" data-index="NDVI" aria-pressed="false">NDVI</button>
         </div>
-        <div id="idx-hint" class="hint">KD = B6 − B4 (Mora-Soto et al. 2020). The paper’s own index — best kappa of the three.</div>
+        <div id="idx-hint" class="hint">KD (Kelp Difference) = B6 − B4. The paper’s own index, best kappa of the three. Mora-Soto et al. (2020), Remote Sens. 12(4), 694. doi:10.3390/rs12040694</div>
       </div>
       <div class="field">
         <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.003216</span></div>
@@ -93,11 +125,6 @@
       <div class="field">
         <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
         <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
-      </div>
-      <div class="hint">
-        Detection after
-        <a href="https://doi.org/10.3390/rs12040694" target="_blank" rel="noopener">Mora-Soto et al. 2020</a>,
-        <em>Remote Sens.</em> 12, 694.
       </div>
     </div>
 
@@ -116,6 +143,16 @@
     <div class="ramp"></div>
     <div class="ramp-labels"><span>High</span><span>Low</span></div>
   </div>
+
+  <div class="activity" aria-live="polite">
+    <div class="act-head">
+      <span class="eyebrow">Activity</span>
+      <span id="act-dot" class="act-dot" aria-hidden="true"></span>
+    </div>
+    <ul id="act-log" class="act-log"></ul>
+  </div>
+
+  <div id="depth-probe" class="depth-probe" aria-hidden="true"></div>
 
   <div id="toast" class="toast"></div>
 

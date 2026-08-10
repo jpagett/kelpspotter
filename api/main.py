@@ -16,9 +16,11 @@ Credentials, so no key material is committed, built into the image, or shipped
 to the browser.
 """
 import datetime as dt
+import logging
 import os
 import threading
 import time
+import traceback
 
 import ee
 import google.auth
@@ -197,7 +199,29 @@ def render(kelp, idx, params):
     hi = lo + ramp
     strength = idx.subtract(lo).divide(ramp).clamp(0, 1)
     alpha = strength.pow(0.7).multiply(kelp)
-    return idx.visualize(min=lo, max=hi, palette=KELP_PALETTE).updateMask(alpha)
+    # visualize() takes a params dict here rather than keywords: `min`/`max` as
+    # kwargs collide with the builtins in some earthengine-api versions.
+    visual = idx.visualize({"min": lo, "max": hi, "palette": KELP_PALETTE})
+    return visual.updateMask(alpha)
+
+
+def tile_url(image):
+    """Mint a tile template, tolerating both getMapId return shapes.
+
+    Recent earthengine-api returns a `tile_fetcher` object carrying the full
+    template; older builds return only a `mapid` string to interpolate. Reading
+    just one of them is what makes this fail on a version bump."""
+    mapid = image.getMapId({})
+    fetcher = mapid.get("tile_fetcher") if isinstance(mapid, dict) else None
+    if fetcher is not None and getattr(fetcher, "url_format", None):
+        return fetcher.url_format
+    raw = mapid["mapid"]
+    if raw.startswith("projects/"):
+        return "https://earthengine.googleapis.com/v1/%s/tiles/{z}/{x}/{y}" % raw
+    return (
+        "https://earthengine.googleapis.com/map/%s/{z}/{x}/{y}?token=%s"
+        % (raw, mapid.get("token", ""))
+    )
 
 
 # ------------------------------------------------------------------ validation
@@ -326,23 +350,29 @@ def layer():
     if cached is not None:
         return jsonify(dict(cached, cached=True))
 
-    ensure_ee()
-    if mode == "composite":
-        # median, not mean — see the note in js/ee-kelp.js compositeLayer
-        clear = collection(start, end, max_cloud).map(
-            lambda img: reflectance(img).updateMask(clear_sky(img))
-        )
-        kelp, idx = classify(clear.median(), params, None)
-    else:
-        day = ee.Date(date)
-        img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
-        kelp, idx = classify(reflectance(img), params, clear_sky(img))
+    try:
+        ensure_ee()
+        if mode == "composite":
+            # median, not mean — see the note in js/ee-kelp.js compositeLayer
+            clear = collection(start, end, max_cloud).map(
+                lambda img: reflectance(img).updateMask(clear_sky(img))
+            )
+            kelp, idx = classify(clear.median(), params, None)
+        else:
+            day = ee.Date(date)
+            img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
+            kelp, idx = classify(reflectance(img), params, clear_sky(img))
 
-    mapid = render(kelp, idx, params).getMapId({})
-    payload = {
-        "urlFormat": mapid["tile_fetcher"].url_format,
-        "expiresIn": MAPID_TTL_SECONDS,
-    }
+        payload = {
+            "urlFormat": tile_url(render(kelp, idx, params)),
+            "expiresIn": MAPID_TTL_SECONDS,
+        }
+    except Exception as err:                    # noqa: BLE001 — reported, not hidden
+        # A bare 500 page says nothing, and this service is remote by design, so
+        # the reason has to travel back with the response as well as to the log.
+        logging.exception("layer failed")
+        return jsonify({"error": "%s: %s" % (type(err).__name__, err)}), 500
+
     cache_put(cache_key, payload, MAPID_TTL_SECONDS)
     return jsonify(payload)
 

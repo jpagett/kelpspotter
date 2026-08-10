@@ -236,8 +236,7 @@
     }
     state.range.start = start;
     state.range.end = end;
-    $('date-start').value = start;
-    $('date-end').value = end;
+    showRange();
     state.idx = -1;      // the old scene index means nothing in a new window
     loadScenes();
   }

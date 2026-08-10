@@ -1591,7 +1591,8 @@
       ev.preventDefault();
     });
   }
-  makeDraggable($('console-toggle').closest('.console'), 'button, input, select, textarea, a');
+  makeDraggable($('console-toggle').closest('.console'),
+    'button, input, select, textarea, a, .cc-marker, .cc-ruler, .cc-menu');
   makeDraggable($('act-toggle').closest('.activity'), 'button, input, select, textarea, a');
 
   function collapseToggle(panel, headBtn, expandedTitle, collapsedTitle) {

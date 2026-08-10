@@ -50,7 +50,6 @@
     </button>
     <div id="console-body" class="console-body">
     <div class="sect">
-      <p class="eyebrow">Scene</p>
       <div class="date-row">
         <button id="prev" class="step" aria-label="Previous scene">‹</button>
         <div class="date-display">
@@ -95,7 +94,6 @@
     </div>
 
     <div class="sect">
-      <p class="eyebrow">View</p>
       <div class="seg" role="group" aria-label="View mode">
         <button id="mode-single" data-mode="single" aria-pressed="true">Single day</button>
         <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>
@@ -108,7 +106,6 @@
       </button>
       <!-- always visible, even with the rest of the section collapsed -->
       <div class="field cc-field">
-        <div class="label-row"><span class="label">Custom contours</span></div>
         <div id="cc-ruler" class="cc-ruler" title="Click to trace a contour at that depth"></div>
         <div class="cc-ruler-scale"><span>0 ft</span><span>50 ft</span><span>100 ft</span></div>
         <div class="hint">Click the line to trace a depth. Drag a marker to move it, click it for colour, right-click to remove.</div>
@@ -194,16 +191,24 @@
         </div>
       </div>
       <div id="pp-global-tools" class="pp-global-tools">
-        <label id="pp-sac-field" class="pp-field" title="Surface air consumption rate">
-          <span>SAC</span>
-          <input id="pp-sac-input" type="number" class="pp-num" min="0" aria-label="Surface air consumption rate">
-          <span id="pp-sac-unit" class="pp-field-unit"></span>
-        </label>
-        <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
-        <button id="pp-speed-btn" class="pp-mode-btn" type="button" aria-pressed="true">Speed</button>
-        <input id="pp-mode-input" type="number" class="pp-num" min="0" aria-label="Time or speed value">
-        <span id="pp-mode-unit" class="pp-field-unit"></span>
-        <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false" title="Overlay estimated gas consumption on every path">Gas</button>
+        <div class="pp-tool-group">
+          <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false" title="Overlay estimated gas consumption on every path">Gas</button>
+          <label id="pp-sac-field" class="pp-field pp-field-below" title="Surface air consumption rate">
+            <span>SAC</span>
+            <input id="pp-sac-input" type="number" class="pp-num" min="0" aria-label="Surface air consumption rate">
+            <span id="pp-sac-unit" class="pp-field-unit"></span>
+          </label>
+        </div>
+        <div class="pp-tool-group pp-tool-group-wide">
+          <div class="pp-mode-btns">
+            <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
+            <button id="pp-speed-btn" class="pp-mode-btn" type="button" aria-pressed="true">Speed</button>
+          </div>
+          <label class="pp-field pp-field-below">
+            <input id="pp-mode-input" type="number" class="pp-num" min="0" aria-label="Time or speed value">
+            <span id="pp-mode-unit" class="pp-field-unit"></span>
+          </label>
+        </div>
       </div>
       <div id="pp-body">
       <div id="pp-list" class="pp-list"></div>

@@ -160,7 +160,32 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .cal[hidden] { display: none; }
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.cal-title { font-family: var(--mono); font-size: 12px; color: var(--foam); }
+.cal-title {
+  display: flex; align-items: baseline; gap: 5px;
+  font-family: var(--mono); font-size: 12px; color: var(--foam);
+}
+.cal-year {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--mono); font-size: 12px; color: var(--foam);
+  border-bottom: 1px dotted var(--tide-dim);
+}
+.cal-year:hover, .cal-year[aria-expanded="true"] { color: var(--kelp); border-bottom-color: var(--kelp); }
+/* year jump — months are useless for moving back years */
+.cal-years {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px;
+  max-height: 116px; overflow-y: auto; margin-bottom: 8px;
+  padding: 6px; border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(5,22,28,0.6);
+}
+.cal-years[hidden] { display: none; }
+.cal-year-opt {
+  padding: 4px 0; cursor: pointer;
+  background: var(--current); color: var(--tide);
+  border: 1px solid transparent; border-radius: 2px;
+  font-family: var(--mono); font-size: 10px;
+}
+.cal-year-opt:hover { color: var(--kelp); border-color: var(--kelp); }
+.cal-year-opt.sel { background: var(--kelp); color: var(--abyss); }
 .cal-nav {
   width: 22px; height: 22px; cursor: pointer; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
@@ -191,11 +216,14 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 
 .cal-actions { display: flex; gap: 6px; margin-top: 10px; }
 .cal-act {
-  flex: 1; padding: 6px 0; cursor: pointer;
+  flex: 1; padding: 5px 0; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
   background: var(--current); color: var(--tide);
   border: 1px solid var(--line); border-radius: 3px;
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
 }
+.cal-act-label { letter-spacing: 0.1em; }
+.cal-act-date { font-size: 9px; opacity: 0.75; }
 .cal-act:hover { color: var(--foam); border-color: var(--tide-dim); }
 /* armed: the next day clicked sets this end of the range */
 .cal-act[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
@@ -260,32 +288,6 @@ input[type=range]::-moz-range-thumb {
 .run { width: 100%; padding: 11px; font-size: 12px; margin-top: 4px; }
 
 /* ---------- scene scrubber (signature) ---------- */
-.scrubber {
-  position: fixed; z-index: 900; bottom: 16px;
-  left: calc(var(--console-w) + 34px); right: 128px; height: 58px;
-  background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
-  backdrop-filter: blur(6px);
-  display: flex; flex-direction: column; justify-content: center; padding: 8px 14px 6px;
-}
-.scrubber .scrub-head {
-  display: flex; justify-content: space-between; font-family: var(--mono);
-  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tide-dim);
-  margin-bottom: 6px;
-}
-.ticks { position: relative; height: 22px; }
-.ticks .axis { position: absolute; left: 0; right: 0; top: 11px; height: 1px; background: var(--line); }
-.tick {
-  position: absolute; top: 3px; width: 2px; height: 16px; background: var(--tide-dim);
-  transform: translateX(-1px); cursor: pointer; transition: background 120ms ease, height 120ms ease;
-}
-.tick:hover { background: var(--tide); }
-.tick.clouded { opacity: 0.28; }
-.tick.active {
-  background: var(--kelp); height: 22px; top: 0;
-  box-shadow: 0 0 8px var(--kelp);
-}
-
-/* ---------- legend ---------- */
 .legend {
   position: fixed; z-index: 900; right: 16px; bottom: 16px; width: 96px;
   background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;

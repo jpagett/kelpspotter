@@ -17,7 +17,16 @@
  * Leave CLIENT_ID as the placeholder to stay in demo mode.
  */
 window.KELP_CONFIG = {
-  // Earth Engine / Google Cloud
+  /*
+   * Public kelp backend (api/main.py on Cloud Run). When this answers, visitors
+   * get live imagery with NO sign-in: the service holds the Earth Engine
+   * credential and returns tile URLs. Leave as the placeholder to fall back to
+   * per-user OAuth, then demo mode.
+   *   e.g. 'https://kelpspotter-api-abc123-uw.a.run.app'
+   */
+  API_URL: '<your-cloud-run-url>',
+
+  // Earth Engine / Google Cloud (only used when API_URL is not reachable)
   CLIENT_ID: '651837907269-341ri4qffbcl6pqq5su2144dlno4smq5.apps.googleusercontent.com',      // e.g. '1234-abcd.apps.googleusercontent.com'
   PROJECT_ID: 'kelpscape',    // e.g. 'kelpspotter-jp'
 

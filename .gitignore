@@ -1,3 +1,8 @@
 node_modules/
 .DS_Store
 *.log
+__pycache__/
+*.pyc
+# never commit a service-account key — the deploy uses the runtime identity
+*-key.json
+service-account*.json

@@ -352,8 +352,6 @@
       state.idx = -1;
       $('date-big').textContent = '—';
       $('date-meta').textContent = 'no clear scenes';
-      $('scrub-range').textContent = '0 scenes';
-      renderTicks();
       renderCalendar();
       say('No passes at or under ' + state.params.maxCloud + '% cloud', 'warn');
       toast('No scenes under ' + state.params.maxCloud + '% cloud. Raise the ceiling.', true);
@@ -362,7 +360,7 @@
     }
     const at = want ? scenes.findIndex((s) => s.date === want) : -1;
     state.idx = at >= 0 ? at : scenes.length - 1;
-    renderTicks();
+    
     updateDate();
     renderCalendar();
 
@@ -421,7 +419,8 @@
     const ceiling = state.params.maxCloud;
 
     const y = calMonth.getFullYear(), m = calMonth.getMonth();
-    $('cal-title').textContent = MONTHS[m] + ' ' + y;
+    $('cal-month').textContent = MONTHS[m];
+    $('cal-year').textContent = y;
     ensureMonth(y, m);      // fills in and redraws if this month is new to us
 
     // Monday-first column offset
@@ -470,6 +469,8 @@
     $('cal-next').disabled = false;
     $('cal-set-start').setAttribute('aria-pressed', calMode === 'start');
     $('cal-set-end').setAttribute('aria-pressed', calMode === 'end');
+    $('cal-start-date').textContent = rs;
+    $('cal-end-date').textContent = re;
     $('cal-note').textContent = picking
       ? 'Click a day to set the range ' + calMode + '. Currently ' + rs + ' → ' + re + '.'
       : (usable ? usable + ' selectable pass' + (usable === 1 ? '' : 'es') + ' this month'
@@ -517,7 +518,7 @@
     const at = state.scenes.findIndex((s) => s.date === date);
     if (at < 0) return;
     state.idx = at;
-    updateDate(); renderTicks();
+    updateDate();
     setCalendar(false);
     run();
   }
@@ -536,6 +537,7 @@
     } else {
       calMode = 'scene';
       cal.setAttribute('hidden', '');
+      setYearList(false);
       $('date-big').setAttribute('aria-expanded', 'false');
     }
   }
@@ -548,6 +550,37 @@
   $('date-big').addEventListener('click', () => setCalendar(!calOpen()));
   $('cal-prev').addEventListener('click', () => shiftMonth(-1));
   $('cal-next').addEventListener('click', () => shiftMonth(1));
+  /*
+   * Year jump. Months are fine for stepping a season, useless for going back
+   * years — this lists from the present back to the start of the Sentinel-2
+   * archive, so any year is one click away.
+   */
+  const S2_FIRST_YEAR = 2015;
+  function renderYearList() {
+    const box = $('cal-years');
+    box.textContent = '';
+    const now = new Date().getFullYear();
+    for (let y = now; y >= S2_FIRST_YEAR; y--) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cal-year-opt' + (calMonth && y === calMonth.getFullYear() ? ' sel' : '');
+      b.textContent = y;
+      b.setAttribute('role', 'option');
+      b.addEventListener('click', () => {
+        calMonth = new Date(y, calMonth.getMonth(), 1);
+        setYearList(false);
+        renderCalendar();
+      });
+      box.appendChild(b);
+    }
+  }
+  function setYearList(on) {
+    $('cal-years').hidden = !on;
+    $('cal-year').setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) renderYearList();
+  }
+  $('cal-year').addEventListener('click', () => setYearList($('cal-years').hidden));
+
   $('cal-set-start').addEventListener('click', () => setCalMode('start'));
   $('cal-set-end').addEventListener('click', () => setCalMode('end'));
   $('cal-reset').addEventListener('click', () => {
@@ -570,25 +603,6 @@
     if ($('cal').contains(ev.target) || $('date-big').contains(ev.target)) return;
     setCalendar(false);
   }, true);
-
-  function renderTicks() {
-    const box = $('ticks');
-    box.querySelectorAll('.tick').forEach((t) => t.remove());
-    const nS = state.scenes.length;
-    $('scrub-range').textContent = nS + (nS === 1 ? ' scene' : ' scenes');
-    state.scenes.forEach((sc, i) => {
-      const tick = document.createElement('button');
-      tick.className = 'tick' + (i === state.idx ? ' active' : '');
-      tick.style.left = (nS === 1 ? 50 : (i / (nS - 1)) * 100) + '%';
-      tick.title = sc.date + ' · ' + pct(sc.cloud) + '% cloud';
-      tick.setAttribute('aria-label', 'Scene ' + sc.date);
-      tick.addEventListener('click', () => {
-        if (state.params.mode !== 'single') setMode('single');
-        state.idx = i; updateDate(); renderTicks(); run();
-      });
-      box.appendChild(tick);
-    });
-  }
 
   function updateDate() {
     const sc = state.scenes[state.idx];
@@ -706,7 +720,7 @@
     const next = state.idx + delta;
     if (next < 0 || next >= state.scenes.length) return false;
     state.idx = next;
-    updateDate(); renderTicks(); run();
+    updateDate(); run();
     return true;
   }
   $('prev').addEventListener('click', () => stepScene(-1));
@@ -1233,7 +1247,9 @@
 
   function activateEngine(engine) {
     state.engine = engine;
-    const live = engine.name === 'earth-engine';
+    // Both real engines are "live"; only the demo isn't. The public API engine
+    // needs no sign-in, so the Connect button and notice stay hidden for it.
+    const live = engine.name !== 'demo';
     $('status').className = 'status ' + (live ? 'is-live' : 'is-demo');
     $('status-label').textContent = live ? 'LIVE · SENTINEL-2' : 'DEMO DATA';
     $('connect').style.display = live ? 'none' : '';
@@ -1273,14 +1289,26 @@
     renderPaths();
 
     say('Starting up…');
+    /*
+     * Engine preference, best first:
+     *   1. the public API   — live imagery, no sign-in, everyone sees the same map
+     *   2. per-user OAuth   — for a signed-in owner when no backend is deployed
+     *   3. demo             — synthetic, always works
+     */
     let engine = DemoEngine;
+    busy(true);
     try {
-      busy(true);
-      const live = await KelpEngine.init(cfg);
-      if (live) engine = KelpEngine;
-    } catch (err) { console.warn('EE init skipped:', err); }
+      if (await ApiKelpEngine.init(cfg)) {
+        engine = ApiKelpEngine;
+      } else if (await KelpEngine.init(cfg)) {
+        engine = KelpEngine;
+      }
+    } catch (err) { console.warn('engine probe skipped:', err); }
     finally { busy(false); }
-    say(engine === DemoEngine ? 'Demo mode — synthetic kelp' : 'Earth Engine connected — live Sentinel-2', 'ok');
+
+    say(engine === ApiKelpEngine ? 'Live Sentinel-2 via the public backend — no sign-in needed'
+      : engine === KelpEngine ? 'Earth Engine connected — live Sentinel-2'
+      : 'Demo mode — synthetic kelp', 'ok');
     if (engine === DemoEngine) await DemoEngine.init(cfg, L);
     activateEngine(engine);
     if (engine === DemoEngine && !(cfg.CLIENT_ID.indexOf('<') === 0)) {

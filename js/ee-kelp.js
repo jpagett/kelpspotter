@@ -237,15 +237,19 @@ const KelpEngine = (function () {
     },
 
     /*
-     * The paper's own preprocessing: a mean cloud-free reflectance composite over
-     * the window, filtered once. Cloudy pixels are masked per scene before the
-     * mean, so the composite is built only from clear observations.
+     * Cloud-free reflectance composite over the window, filtered once.
+     *
+     * MEDIAN, not mean — this matches the authors' released script, and it
+     * matters here. A mean drags every residual cloud edge, glint and haze into
+     * the composite, and averaging a canopy that drifts with tide and current
+     * between passes smears it below the KD threshold. Over a short window that
+     * is enough to wipe out the detection entirely. The median throws out those
+     * outliers, so thin canopy survives.
      */
     compositeLayer(startISO, endISO, maxCloud, p) {
       const clear = collection(startISO, endISO, maxCloud)
         .map((img) => reflectance(img).updateMask(clearSky(img)));
-      const mean = clear.mean();
-      return tileLayerFromImage(renderKelp(classify(mean, p, null), p), {});
+      return tileLayerFromImage(renderKelp(classify(clear.median(), p, null), p), {});
     }
   };
 })();

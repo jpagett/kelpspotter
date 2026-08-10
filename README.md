@@ -80,7 +80,9 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Depth contours** | Charted depth contours from NOAA ENC (off by default). |
 | **Depth → Depth opacity** | Dims the relief so the kelp layer stays readable over it. |
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
-| **Paths** (top right) | **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. |
+| **Paths** (top right) | **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. Hovering the profile drops a dot on the map at that distance along the path. The panel is resizable from its bottom-right corner. |
+| **Rerun kelp map** | Greyed out while the map matches the settings; turns kelp-yellow once the index, kelp threshold or B11 filter changes. Layer opacity does not count — it restyles the existing layer rather than recomputing it. |
+| **Section headers** | **Depth** and **Kelp model** collapse and expand. |
 | **Depth at the cursor** | With either depth layer on, the depth (or land elevation) under the pointer is read out in feet beside the crosshair. |
 | **Index: KD / FAI / NDVI** | Which spectral index defines "kelp" (see below). |
 | **Kelp threshold** | Index value at or above which a pixel counts as canopy. Snaps back to the published value each time you switch index. |
@@ -119,6 +121,12 @@ so the basemap and the depth overlay stay visible underneath.
 pixels are classified as kelp — only how strongly they are shaded.
 
 ### Depth overlays
+
+**None of this needs Earth Engine.** The NOAA layers are plain WMS tiles plus REST
+`identify` / `getSamples` calls, so relief, contours, the cursor readout, custom contours
+and path profiles all work while signed out — only the kelp imagery needs Google. That is
+why the sign-in notice says *kelp imagery* rather than *data*.
+
 
 Two independent NOAA layers, each in its own Leaflet pane so they toggle separately and
 always sit beneath the kelp:

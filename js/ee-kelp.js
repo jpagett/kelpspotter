@@ -175,15 +175,33 @@ const KelpEngine = (function () {
       });
     },
 
-    // Interactive popup sign-in (called from the "Connect" button).
+    /*
+     * Interactive popup sign-in, called straight from the Connect button.
+     *
+     * The popup must be opened inside the click's own call stack — browsers drop
+     * the user-gesture grant across an await, and the popup is then blocked
+     * silently. So this stays synchronous up to authenticateViaPopup, and the
+     * caller must not await anything before invoking it.
+     *
+     * Errors are reported rather than swallowed: an origin that isn't registered
+     * on the OAuth client fails here with origin_mismatch, and a blocked popup
+     * fails with nothing visible at all unless we say so.
+     */
     login() {
-      return new Promise((resolve) => {
-        ee.data.authenticateViaPopup(() => ee.initialize(
-          null, null,
-          () => { ready = true; this.needsLogin = false; resolve(true); },
-          () => resolve(false),
-          null, cfg.PROJECT_ID
-        ));
+      return new Promise((resolve, reject) => {
+        try {
+          ee.data.authenticateViaPopup(
+            () => ee.initialize(
+              null, null,
+              () => { ready = true; this.needsLogin = false; resolve(true); },
+              (e) => reject(new Error('Earth Engine init failed: ' + (e && e.message ? e.message : e))),
+              null, cfg.PROJECT_ID
+            ),
+            (e) => reject(new Error(e && e.message ? e.message : String(e)))
+          );
+        } catch (e) {
+          reject(e);
+        }
       });
     },
 

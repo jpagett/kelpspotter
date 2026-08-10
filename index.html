@@ -28,7 +28,7 @@
   <div id="sweep" class="sweep"></div>
 
   <button id="signin-notice" class="signin-notice" hidden>
-    Not signed into Google — data cannot be loaded
+    Not signed into Google — kelp imagery cannot be loaded. Click to connect.
   </button>
 
   <aside class="console">
@@ -96,7 +96,7 @@
       </div>
       <div class="field">
         <label class="check">
-          <input id="contours" type="checkbox">
+          <input id="contours" type="checkbox" checked>
           <span class="label">Depth contours</span>
         </label>
         <div class="hint">Charted contours from NOAA ENC coastal charts.</div>
@@ -146,11 +146,11 @@
         <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
         <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
       </div>
+      <div class="field">
+        <button id="run" class="btn run" disabled>Rerun kelp map</button>
+        <div id="run-hint" class="hint">Up to date with the current settings.</div>
       </div>
-    </div>
-
-    <div class="sect">
-      <button id="run" class="btn run">Run kelp map</button>
+      </div>
     </div>
   </aside>
 

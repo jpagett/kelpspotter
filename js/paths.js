@@ -38,6 +38,28 @@ const Paths = (function () {
 
   const selected = () => paths.find((p) => p.id === selectedId) || null;
 
+  /*
+   * Marker tying the profile chart back to the map: hovering the plot at some
+   * distance along the path shows where that distance actually is on the water.
+   */
+  let hoverDot = null;
+  function hoverAt(id, sample) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !sample) return;
+    const ll = L.latLng(sample.lat, sample.lng);
+    if (!hoverDot) {
+      hoverDot = L.circleMarker(ll, {
+        pane: PANE, radius: 5, weight: 2, color: '#ffffff',
+        fillColor: p.color, fillOpacity: 1, interactive: false
+      }).addTo(map);
+    } else {
+      hoverDot.setLatLng(ll).setStyle({ fillColor: p.color });
+    }
+  }
+  function hoverOff() {
+    if (hoverDot) { map.removeLayer(hoverDot); hoverDot = null; }
+  }
+
   /* ---------- geometry ---------- */
 
   function redraw(p) {
@@ -255,6 +277,8 @@ const Paths = (function () {
     exportPath: exportPath,
     importFile: importFile,
     lengthOf: lengthOf,
+    hoverAt: hoverAt,
+    hoverOff: hoverOff,
     get list() { return paths; },
     get selectedId() { return selectedId; },
     get drawing() { return !!drawing; }

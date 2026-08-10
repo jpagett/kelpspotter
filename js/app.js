@@ -599,6 +599,7 @@
       toast('Kelp computation failed — see console.', true);
     } finally {
       busy(false);
+      setDirty(false);        // whatever just rendered now matches the settings
       setTimeout(() => sweep(false), 350);
     }
   }
@@ -644,7 +645,7 @@
   }
 
   function setIndex(kind) {
-    if (applyIndex(kind)) run();
+    if (applyIndex(kind)) setDirty(true);
   }
 
   $('mode-single').addEventListener('click', () => setMode('single'));
@@ -698,9 +699,9 @@
   $('cloud').addEventListener('input', (ev) => setCloudCeiling(ev.target.value));
   $('cal-cloud').addEventListener('input', (ev) => setCloudCeiling(ev.target.value));
   bindSlider('kelp', 'kelp-val', fmtIndex,
-    (v) => (state.params.kelpThresh = +v), () => run());
+    (v) => (state.params.kelpThresh = +v), () => setDirty(true));
   bindSlider('b11', 'b11-val', (v) => (+v).toFixed(3),
-    (v) => (state.params.b11Thresh = +v), () => run());
+    (v) => (state.params.b11Thresh = +v), () => setDirty(true));
   bindSlider('opacity', 'op-val', (v) => Math.round(v * 100) + '%',
     (v) => {
       state.params.opacity = +v;
@@ -770,7 +771,9 @@
       color.type = 'color';
       color.value = it.color;
       color.title = 'Contour colour';
-      color.addEventListener('input', () => {
+      // 'change', not 'input': commit on release rather than restyling on every
+      // pixel the user drags through the picker
+      color.addEventListener('change', () => {
         CustomContours.setColor(it.id, color.value);
         sw.style.background = color.value;
       });
@@ -815,6 +818,24 @@
     if (ev.target.closest && ev.target.closest('.cc-tile')) return;
     $('cc-list').querySelectorAll('.cc-menu').forEach((m) => { m.hidden = true; });
   });
+
+  /*
+   * ---- model-dirty tracking ----
+   * Index, kelp threshold and B11 no longer recompute on release; they mark the
+   * map stale and light up Rerun instead. In live mode every run is an Earth
+   * Engine request, so firing one per slider release was wasteful — and it also
+   * meant the button could never usefully show a changed state. Layer opacity is
+   * excluded: it restyles the existing layer and needs no recomputation.
+   */
+  function setDirty(on) {
+    state.dirty = on;
+    const btn = $('run');
+    btn.disabled = !on;
+    btn.className = 'btn run' + (on ? ' dirty' : '');
+    $('run-hint').textContent = on
+      ? 'Model settings changed — rerun to apply them.'
+      : 'Up to date with the current settings.';
+  }
 
   // ---- collapsible console sections ----
   document.querySelectorAll('.sect-toggle').forEach((btn) => {
@@ -876,6 +897,52 @@
     dist.setAttribute('text-anchor', 'end');
     dist.textContent = Math.round(maxX) + ' m';
     svg.appendChild(dist);
+
+    /*
+     * Hovering the plot drops a dot on the map at the matching point along the
+     * path, so a feature in the profile can be located on the water. The svg is
+     * preserveAspectRatio="none", so a fraction across the element maps straight
+     * onto a fraction across the viewBox.
+     */
+    const guide = document.createElementNS(NS, 'line');
+    guide.setAttribute('stroke', p.color);
+    guide.setAttribute('stroke-width', '1');
+    guide.setAttribute('stroke-dasharray', '2 2');
+    guide.setAttribute('y1', PADT); guide.setAttribute('y2', H - PADB);
+    guide.setAttribute('opacity', '0');
+    svg.appendChild(guide);
+
+    const readout = document.createElementNS(NS, 'text');
+    readout.setAttribute('class', 'pp-axis');
+    readout.setAttribute('y', PADT + 7);
+    readout.setAttribute('opacity', '0');
+    svg.appendChild(readout);
+
+    svg.addEventListener('mousemove', (ev) => {
+      const r = svg.getBoundingClientRect();
+      if (!r.width) return;
+      const vx = ((ev.clientX - r.left) / r.width) * W;
+      const dm = ((vx - PADL) / (W - PADL - 4)) * maxX;
+      let best = 0, bestD = Infinity;
+      pts.forEach((s, i) => {
+        const d = Math.abs(s.distance - dm);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      const s = pts[best];
+      const sx = x(s.distance);
+      guide.setAttribute('x1', sx); guide.setAttribute('x2', sx);
+      guide.setAttribute('opacity', '0.8');
+      readout.setAttribute('x', sx < W / 2 ? sx + 4 : sx - 4);
+      readout.setAttribute('text-anchor', sx < W / 2 ? 'start' : 'end');
+      readout.setAttribute('opacity', '1');
+      readout.textContent = Math.round(-s.feet) + ' ft @ ' + Math.round(s.distance) + ' m';
+      Paths.hoverAt(p.id, s);
+    });
+    svg.addEventListener('mouseleave', () => {
+      guide.setAttribute('opacity', '0');
+      readout.setAttribute('opacity', '0');
+      Paths.hoverOff();
+    });
     return svg;
   }
 
@@ -926,7 +993,7 @@
       menu.className = 'pp-menu'; menu.hidden = true;
       const color = document.createElement('input');
       color.type = 'color'; color.value = p.color; color.title = 'Path colour';
-      color.addEventListener('input', () => { Paths.setColor(p.id, color.value); });
+      color.addEventListener('change', () => { Paths.setColor(p.id, color.value); });
       const del = document.createElement('button');
       del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
       del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
@@ -972,20 +1039,52 @@
     $('pp-list').querySelectorAll('.pp-menu').forEach((m) => { m.hidden = true; });
   });
 
-  // ---- Earth Engine connect ----
-  $('connect').addEventListener('click', async () => {
+  /*
+   * ---- Earth Engine connect ----
+   * Deliberately NOT an async function. Browsers only allow window.open from
+   * inside a user gesture, and that grant is lost across an await — so the popup
+   * has to be kicked off in the same tick as the click, before any awaiting.
+   */
+  function connectEE() {
     if (!cfg.CLIENT_ID || cfg.CLIENT_ID.indexOf('<') === 0) {
       toast('Add your OAuth client ID and project in js/config.js first.', true);
       return;
     }
     if (typeof ee === 'undefined') { toast('Earth Engine library did not load.', true); return; }
-    toast('Opening Google sign-in…');
+
+    let pending;
     try {
-      const ok = await KelpEngine.login();
-      if (ok) { activateEngine(KelpEngine); toast('Connected to Earth Engine — live imagery.'); }
-      else toast('Sign-in did not complete.', true);
-    } catch (err) { console.warn(err); toast('Sign-in failed — see console.', true); }
-  });
+      pending = KelpEngine.login();       // first thing, still inside the gesture
+    } catch (err) {
+      console.warn(err);
+      say('Sign-in could not start — ' + err.message, 'warn');
+      toast('Sign-in could not start — see console.', true);
+      return;
+    }
+    say('Opening Google sign-in…');
+    busy(true);
+    pending.then((ok) => {
+      if (ok) {
+        activateEngine(KelpEngine);
+        say('Earth Engine connected — live Sentinel-2', 'ok');
+        toast('Connected to Earth Engine — live imagery.');
+      } else {
+        say('Sign-in did not complete', 'warn');
+        toast('Sign-in did not complete.', true);
+      }
+    }).catch((err) => {
+      console.warn(err);
+      const msg = String(err && err.message || err);
+      // the two failures that actually happen, named plainly
+      const hint = /origin/i.test(msg)
+        ? 'This origin is not registered on the OAuth client.'
+        : (/popup/i.test(msg) ? 'The sign-in popup was blocked.' : msg);
+      say('Sign-in failed — ' + hint, 'warn');
+      toast('Sign-in failed: ' + hint, true);
+    }).then(() => busy(false));
+  }
+  $('connect').addEventListener('click', connectEE);
+  $('signin-notice').addEventListener('click', connectEE);
 
   function activateEngine(engine) {
     state.engine = engine;
@@ -1014,6 +1113,7 @@
     showRange();
 
     setCloudCeiling(state.params.maxCloud, true);   // sync both sliders, no refilter yet
+    setDirty(false);
 
     $('depth-op').value = state.params.depthOpacity;
     $('depth-op-val').textContent = Math.round(state.params.depthOpacity * 100) + '%';

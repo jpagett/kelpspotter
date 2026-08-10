@@ -69,6 +69,10 @@ body {
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:active { transform: translateY(1px); }
+/* rerun: grey while the map matches the settings, kelp-yellow once it doesn't */
+.btn.run { width: 100%; background: var(--current); color: var(--tide-dim); }
+.btn.run:disabled { cursor: not-allowed; }
+.btn.run.dirty { background: var(--kelp); color: var(--abyss); cursor: pointer; }
 .btn.ghost { background: transparent; color: var(--tide); border: 1px solid var(--line); }
 .btn.ghost:hover { color: var(--foam); border-color: var(--tide-dim); }
 /* not signed in — make the way out of demo mode obvious */
@@ -330,15 +334,18 @@ input[type=range]::-moz-range-thumb {
 /* ---------- paths panel ---------- */
 .paths-panel {
   position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
-  width: 268px; max-height: 42vh; overflow-y: auto;
+  width: 288px; height: 240px;
+  min-width: 210px; min-height: 96px; max-width: 60vw; max-height: 70vh;
+  resize: both; overflow: auto;          /* drag the bottom-right corner */
   background: rgba(10,40,48,0.94); border: 1px solid var(--line); border-radius: 4px;
-  padding: 10px 11px; backdrop-filter: blur(8px);
+  padding: 12px 14px; backdrop-filter: blur(8px);
 }
 .paths-panel::-webkit-scrollbar { width: 8px; }
 .paths-panel::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
-.pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+/* header matches the console section eyebrows */
+.pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .pp-head .eyebrow {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--tide-dim);
 }
 .pp-tools { display: flex; gap: 4px; }
@@ -357,15 +364,18 @@ input[type=range]::-moz-range-thumb {
   position: relative;
 }
 .pp-item.sel { border-color: var(--kelp); background: rgba(242,177,52,0.10); }
-.pp-row { display: flex; align-items: center; gap: 6px; padding: 5px 6px; cursor: pointer; }
+/* row text follows the console: 12px label, 10px mono meta */
+.pp-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; cursor: pointer; }
 .pp-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
-.pp-name { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10px; color: var(--foam);
+.pp-name { flex: 1; min-width: 0; font-size: 12px; color: var(--tide);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pp-meta { font-family: var(--mono); font-size: 9px; color: var(--tide-dim); flex: none; }
+.pp-item.sel .pp-name { color: var(--foam); }
+.pp-meta { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); flex: none; }
 .pp-cog, .pp-caret {
-  background: none; border: none; cursor: pointer; padding: 0 1px;
+  background: none; border: none; cursor: pointer; padding: 0 2px;
   color: var(--tide-dim); font-size: 11px; line-height: 1;
 }
+.paths-panel .hint { font-size: 10px; color: var(--tide-dim); margin-top: 8px; line-height: 1.4; }
 .pp-cog:hover, .pp-caret:hover { color: var(--kelp); }
 .pp-menu {
   position: absolute; top: 26px; right: 4px; z-index: 20;

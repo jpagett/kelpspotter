@@ -188,6 +188,13 @@ const Paths = (function () {
     if (p) { p.expanded = !p.expanded; onChange(); }
   }
 
+  function rename(id, name) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !name) return;
+    p.name = name;
+    onChange();
+  }
+
   function setColor(id, color) {
     const p = paths.find((x) => x.id === id);
     if (!p) return;
@@ -271,6 +278,7 @@ const Paths = (function () {
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,
     select: select,
+    rename: rename,
     toggleExpand: toggleExpand,
     setColor: setColor,
     remove: remove,

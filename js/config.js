@@ -126,6 +126,8 @@ window.KELP_CONFIG = {
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
     mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
+    distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
+    depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45      // kept well under 1 so the kelp layer still reads over it

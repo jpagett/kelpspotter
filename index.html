@@ -75,18 +75,13 @@
         <button id="mode-single" data-mode="single" aria-pressed="true">Single day</button>
         <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>
       </div>
-      <div class="field">
-        <div class="label-row"><span class="label">Cloud cover ceiling</span><span id="cloud-val" class="value">40%</span></div>
-        <input id="cloud" type="range" min="0" max="90" step="5" value="40">
-        <div class="hint">Scenes cloudier than this are dropped from the timeline.</div>
-      </div>
     </div>
 
     <div class="sect">
-      <button class="eyebrow sect-toggle" data-target="sect-depth" aria-expanded="true">
-        <span class="sect-caret">▾</span>Depth
+      <button class="eyebrow sect-toggle" data-target="sect-depth" aria-expanded="false">
+        <span class="sect-caret">▸</span>Depth
       </button>
-      <div id="sect-depth" class="sect-body">
+      <div id="sect-depth" class="sect-body" hidden>
       <div class="field">
         <label class="check">
           <input id="relief" type="checkbox" checked>
@@ -119,10 +114,10 @@
     </div>
 
     <div class="sect">
-      <button class="eyebrow sect-toggle" data-target="sect-kelp" aria-expanded="true">
-        <span class="sect-caret">▾</span>Kelp model
+      <button class="eyebrow sect-toggle" data-target="sect-kelp" aria-expanded="false">
+        <span class="sect-caret">▸</span>Kelp model
       </button>
-      <div id="sect-kelp" class="sect-body">
+      <div id="sect-kelp" class="sect-body" hidden>
       <div class="field">
         <div class="label-row"><span class="label">Index</span></div>
         <div class="seg" role="group" aria-label="Index type">
@@ -177,6 +172,10 @@
     <div id="pp-list" class="pp-list"></div>
     <div id="pp-note" class="hint">No paths yet — press + and click the map.</div>
     <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
+    <span class="pp-grip nw" data-corner="nw"></span>
+    <span class="pp-grip ne" data-corner="ne"></span>
+    <span class="pp-grip sw" data-corner="sw"></span>
+    <span class="pp-grip se" data-corner="se"></span>
   </aside>
 
   <div class="activity" aria-live="polite">

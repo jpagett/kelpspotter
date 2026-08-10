@@ -262,7 +262,44 @@
   const rawScenes = new Map();    // 'start|end'        -> every scene in range
   const filtScenes = new Map();   // 'start|end|ceil'   -> scenes at/under ceiling
 
-  function clearSceneCache() { rawScenes.clear(); filtScenes.clear(); }
+  /*
+   * The calendar is NOT limited to the current date range. It draws from its own
+   * index of every pass we have ever heard about, filled in a month at a time as
+   * the user navigates. Without this, browsing to a month outside the window
+   * showed no passes at all — not because there were none, but because nothing
+   * had ever asked for them.
+   */
+  const sceneIndex = new Map();   // 'YYYY-MM-DD' -> {date, cloud}
+  const loadedMonths = new Map(); // 'YYYY-MM'    -> true once fetched
+
+  function mergeScenes(list) {
+    (list || []).forEach((s) => {
+      const cur = sceneIndex.get(s.date);
+      if (!cur || s.cloud < cur.cloud) sceneIndex.set(s.date, s);   // keep the clearest
+    });
+  }
+
+  // Pull a month's passes on demand, then redraw. Fire-and-forget by design:
+  // the calendar renders immediately with whatever is known and fills in after.
+  async function ensureMonth(y, m) {
+    const key = y + '-' + String(m + 1).padStart(2, '0');
+    if (loadedMonths.has(key)) return;
+    loadedMonths.set(key, true);
+    const last = new Date(y, m + 1, 0).getDate();
+    try {
+      const list = await state.engine.listScenes(ymd(y, m, 1), ymd(y, m, last), 100);
+      mergeScenes(list);
+      renderCalendar();
+    } catch (err) {
+      loadedMonths.delete(key);         // let it retry next time
+      console.warn(err);
+    }
+  }
+
+  function clearSceneCache() {
+    rawScenes.clear(); filtScenes.clear();
+    sceneIndex.clear(); loadedMonths.clear();
+  }
 
   async function fetchAllScenes(start, end) {
     const key = start + '|' + end;
@@ -272,6 +309,7 @@
     try {
       const list = await state.engine.listScenes(start, end, 100);
       rawScenes.set(key, list);
+      mergeScenes(list);          // the calendar sees these too
       say(list.length + ' pass' + (list.length === 1 ? '' : 'es') + ' in range', 'ok');
       return list;
     } finally { busy(false); }
@@ -305,7 +343,8 @@
    */
   function applyCloudCeiling(preferDate) {
     const was = state.scenes[state.idx] && state.scenes[state.idx].date;
-    const want = preferDate || was;
+    const want = preferDate || pendingPick || was;
+    pendingPick = null;
     const scenes = scenesAtCeiling(state.params.maxCloud);
     state.scenes = scenes;
 
@@ -361,6 +400,7 @@
    *                 point is to reach dates outside the current window.
    */
   let calMode = 'scene';
+  let pendingPick = null;   // a date to select once a wider range has loaded
 
   const ymd = (y, m, d) =>
     y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
@@ -377,14 +417,12 @@
     const grid = $('cal-grid');
     grid.textContent = '';
 
-    // every pass in range, by date, whatever the ceiling
-    const byDate = {};
-    (state.allScenes || []).forEach((s) => { byDate[s.date] = s; });
     const selected = state.scenes[state.idx] && state.scenes[state.idx].date;
     const ceiling = state.params.maxCloud;
 
     const y = calMonth.getFullYear(), m = calMonth.getMonth();
     $('cal-title').textContent = MONTHS[m] + ' ' + y;
+    ensureMonth(y, m);      // fills in and redraws if this month is new to us
 
     // Monday-first column offset
     const lead = (new Date(y, m, 1).getDay() + 6) % 7;
@@ -399,7 +437,7 @@
     let usable = 0;
     for (let d = 1; d <= days; d++) {
       const date = ymd(y, m, d);
-      const sc = byDate[date];
+      const sc = sceneIndex.get(date);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = d;
@@ -426,9 +464,10 @@
       grid.appendChild(btn);
     }
 
-    // month nav is clamped to the window only while picking a scene
-    $('cal-prev').disabled = !picking && monthKey(calMonth) <= monthKey(parseISO(rs));
-    $('cal-next').disabled = !picking && monthKey(calMonth) >= monthKey(parseISO(re));
+    // Navigation is never clamped: the calendar indexes every month it has seen,
+    // not just the current window, so browsing outside the range is meaningful.
+    $('cal-prev').disabled = false;
+    $('cal-next').disabled = false;
     $('cal-set-start').setAttribute('aria-pressed', calMode === 'start');
     $('cal-set-end').setAttribute('aria-pressed', calMode === 'end');
     $('cal-note').textContent = picking
@@ -442,34 +481,41 @@
   // Arm / disarm the Start and End buttons.
   function setCalMode(mode) {
     calMode = calMode === mode ? 'scene' : mode;
-    if (calMode === 'scene') clampCalMonth();
     renderCalendar();
   }
 
-  // Applying a new edge leaves the calendar open so you can set the other one.
+  /*
+   * Setting one edge advances to the other, so the natural flow after opening the
+   * picker is: click a start, click an end, done. Setting the end drops back to
+   * scene picking. Picking a start also pushes the end out if it would otherwise
+   * be left behind, so the intermediate state is never invalid.
+   */
   function setRangeEdge(date) {
     const [rs, re] = dateRangeISO();
-    const next = calMode === 'start' ? [date, re] : [rs, date];
+    const next = calMode === 'start'
+      ? [date, date > re ? date : re]
+      : [date < rs ? date : rs, date];
     const ok = applyRange(next[0], next[1], true);
-    if (!ok) return;                 // invalid (start after end) — stay armed
-    calMode = 'scene';
-    clampCalMonth();
+    if (!ok) return;                 // rejected — stay armed and let them retry
+    calMode = calMode === 'start' ? 'end' : 'scene';
     renderCalendar();
-  }
-
-  // Keep the displayed month inside the window once we're back to picking scenes.
-  function clampCalMonth() {
-    if (!calMonth) return;
-    const [rs, re] = dateRangeISO();
-    const lo = parseISO(rs), hi = parseISO(re);
-    if (monthKey(calMonth) < monthKey(lo)) calMonth = new Date(lo.getFullYear(), lo.getMonth(), 1);
-    if (monthKey(calMonth) > monthKey(hi)) calMonth = new Date(hi.getFullYear(), hi.getMonth(), 1);
   }
 
   function pickDate(date) {
+    if (state.params.mode !== 'single') setMode('single');
+
+    // A pass outside the current window is still a legitimate choice — widen the
+    // window to reach it rather than refusing the click. applyCloudCeiling picks
+    // the date up once the new scene list lands.
+    const [rs, re] = dateRangeISO();
+    if (date < rs || date > re) {
+      pendingPick = date;
+      setCalendar(false);
+      applyRange(date < rs ? date : rs, date > re ? date : re, true);
+      return;
+    }
     const at = state.scenes.findIndex((s) => s.date === date);
     if (at < 0) return;
-    if (state.params.mode !== 'single') setMode('single');
     state.idx = at;
     updateDate(); renderTicks();
     setCalendar(false);
@@ -481,7 +527,7 @@
     if (on) {
       const sel = state.scenes[state.idx];
       const [rs] = dateRangeISO();
-      calMode = 'scene';                 // always open ready to pick a scene
+      calMode = 'start';                 // opens armed to set the range start
       calMonth = parseISO(sel ? sel.date : rs);
       calMonth.setDate(1);
       cal.removeAttribute('hidden');
@@ -508,7 +554,6 @@
     const [ds, de] = defaultRange();
     applyRange(ds, de, true);
     calMode = 'scene';
-    clampCalMonth();
     renderCalendar();
   });
   document.addEventListener('keydown', (ev) => {
@@ -690,13 +735,13 @@
    * write the same state and mirror each other. Filtering is now cache-backed,
    * so this can react live on 'input' instead of waiting for 'change'.
    */
+  // The ceiling now lives only inside the date picker, where the days it filters
+  // are visible right next to it.
   function setCloudCeiling(v, quiet) {
     state.params.maxCloud = +v;
-    $('cloud').value = v; $('cloud-val').textContent = v + '%';
     $('cal-cloud').value = v; $('cal-cloud-val').textContent = v + '%';
     if (!quiet) applyCloudCeiling();
   }
-  $('cloud').addEventListener('input', (ev) => setCloudCeiling(ev.target.value));
   $('cal-cloud').addEventListener('input', (ev) => setCloudCeiling(ev.target.value));
   bindSlider('kelp', 'kelp-val', fmtIndex,
     (v) => (state.params.kelpThresh = +v), () => setDirty(true));
@@ -850,6 +895,42 @@
 
   $('run').addEventListener('click', run);
 
+  /*
+   * ---- paths panel ----
+   * Profiles are stored in metres and feet and converted only for display, so
+   * changing units is a re-render and never touches the sampled data. The
+   * exported spreadsheet keeps its fixed distance_m / depth_ft columns for the
+   * same reason — the file schema shouldn't shift with a UI preference.
+   */
+  const DIST_UNITS = {
+    mi: { label: 'mi', from: (m) => m / 1609.344, dp: 2 },
+    km: { label: 'km', from: (m) => m / 1000, dp: 2 },
+    m:  { label: 'm',  from: (m) => m, dp: 0 },
+    ft: { label: 'ft', from: (m) => m * 3.280839895, dp: 0 }
+  };
+  const DEPTH_UNITS = {
+    ft: { label: 'ft', from: (ft) => ft, dp: 0 },
+    m:  { label: 'm',  from: (ft) => ft / 3.280839895, dp: 0 }
+  };
+  const distU = () => DIST_UNITS[state.params.distUnit] || DIST_UNITS.mi;
+  const depthU = () => DEPTH_UNITS[state.params.depthUnit] || DEPTH_UNITS.ft;
+  const fmtDist = (metres) => { const u = distU(); return u.from(metres).toFixed(u.dp) + ' ' + u.label; };
+  const fmtDepth = (feet) => { const u = depthU(); return u.from(feet).toFixed(u.dp) + ' ' + u.label; };
+
+  function unitSelect(kind, current, onPick) {
+    const sel = document.createElement('select');
+    sel.className = 'pp-units';
+    sel.title = kind === 'dist' ? 'Distance units' : 'Depth units';
+    Object.keys(kind === 'dist' ? DIST_UNITS : DEPTH_UNITS).forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = k;
+      if (k === current) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => onPick(sel.value));
+    return sel;
+  }
+
   // ---- paths panel ----
   // Depth-vs-distance sparkline. Depth increases downward, which is the way a
   // profile is conventionally read.
@@ -883,7 +964,7 @@
     line.setAttribute('stroke-width', '1.4');
     svg.appendChild(line);
 
-    [[0, '0'], [maxD, Math.round(maxD) + ' ft']].forEach(([v, label], i) => {
+    [[0, '0'], [maxD, fmtDepth(maxD)]].forEach(([v, label], i) => {
       const t = document.createElementNS(NS, 'text');
       t.setAttribute('class', 'pp-axis');
       t.setAttribute('x', '2');
@@ -895,7 +976,7 @@
     dist.setAttribute('class', 'pp-axis');
     dist.setAttribute('x', W - 4); dist.setAttribute('y', H - 2);
     dist.setAttribute('text-anchor', 'end');
-    dist.textContent = Math.round(maxX) + ' m';
+    dist.textContent = fmtDist(maxX);
     svg.appendChild(dist);
 
     /*
@@ -935,7 +1016,7 @@
       readout.setAttribute('x', sx < W / 2 ? sx + 4 : sx - 4);
       readout.setAttribute('text-anchor', sx < W / 2 ? 'start' : 'end');
       readout.setAttribute('opacity', '1');
-      readout.textContent = Math.round(-s.feet) + ' ft @ ' + Math.round(s.distance) + ' m';
+      readout.textContent = fmtDepth(-s.feet) + ' @ ' + fmtDist(s.distance);
       Paths.hoverAt(p.id, s);
     });
     svg.addEventListener('mouseleave', () => {
@@ -966,7 +1047,7 @@
       const row = document.createElement('div');
       row.className = 'pp-row';
       row.addEventListener('click', (ev) => {
-        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret')) return;
+        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil')) return;
         Paths.select(p.id);
       });
 
@@ -976,9 +1057,22 @@
       const name = document.createElement('span');
       name.className = 'pp-name'; name.textContent = p.name;
 
+      // rename in place; the name is also the export filename
+      const pencil = document.createElement('button');
+      pencil.className = 'pp-pencil'; pencil.type = 'button';
+      pencil.textContent = '✎'; pencil.title = 'Rename this path';
+      pencil.addEventListener('click', () => {
+        const next = window.prompt('Rename path', p.name);
+        if (next === null) return;
+        const clean = next.trim();
+        if (!clean) { toast('A path needs a name.', true); return; }
+        Paths.rename(p.id, clean);
+        say('Renamed to ' + clean);
+      });
+
       const meta = document.createElement('span');
       meta.className = 'pp-meta';
-      meta.textContent = p.nodes.length + 'n · ' + Math.round(Paths.lengthOf(p)) + 'm';
+      meta.textContent = p.nodes.length + 'n · ' + fmtDist(Paths.lengthOf(p));
 
       const caret = document.createElement('button');
       caret.className = 'pp-caret'; caret.type = 'button';
@@ -997,14 +1091,20 @@
       const del = document.createElement('button');
       del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
       del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
-      menu.appendChild(color); menu.appendChild(del);
+      const du = unitSelect('dist', state.params.distUnit, (v) => {
+        state.params.distUnit = v; renderPaths();
+      });
+      const zu = unitSelect('depth', state.params.depthUnit, (v) => {
+        state.params.depthUnit = v; renderPaths();
+      });
+      menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu); menu.appendChild(del);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = !menu.hidden;
       });
 
-      row.appendChild(sw); row.appendChild(name); row.appendChild(meta);
-      row.appendChild(caret); row.appendChild(cog);
+      row.appendChild(sw); row.appendChild(name); row.appendChild(pencil);
+      row.appendChild(meta); row.appendChild(caret); row.appendChild(cog);
       item.appendChild(row); item.appendChild(menu);
 
       if (p.expanded) {
@@ -1023,6 +1123,51 @@
       box.appendChild(item);
     });
   }
+
+  /*
+   * Corner resizing. CSS `resize` only ever gives you the bottom-right, so the
+   * other three corners are done by hand. The panel is anchored top-right, so on
+   * the first drag it is pinned to explicit left/top and the anchor dropped —
+   * otherwise dragging a west or north edge would fight the anchor.
+   */
+  (function initPanelResize() {
+    const panel = document.querySelector('.paths-panel');
+    let start = null;
+
+    function onMove(ev) {
+      if (!start) return;
+      const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+      const west = start.corner === 'nw' || start.corner === 'sw';
+      const north = start.corner === 'nw' || start.corner === 'ne';
+      let w = start.w + (west ? -dx : dx);
+      let h = start.h + (north ? -dy : dy);
+      w = Math.max(240, Math.min(window.innerWidth * 0.7, w));
+      h = Math.max(120, Math.min(window.innerHeight * 0.8, h));
+      panel.style.width = w + 'px';
+      panel.style.height = h + 'px';
+      if (west) panel.style.left = (start.left + (start.w - w)) + 'px';
+      if (north) panel.style.top = (start.top + (start.h - h)) + 'px';
+      ev.preventDefault();
+    }
+    function onUp() {
+      start = null;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+    panel.querySelectorAll('.pp-grip').forEach((grip) => {
+      grip.addEventListener('pointerdown', (ev) => {
+        const r = panel.getBoundingClientRect();
+        panel.style.left = r.left + 'px';
+        panel.style.top = r.top + 'px';
+        panel.style.right = 'auto';
+        start = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height, left: r.left, top: r.top,
+                  corner: grip.dataset.corner };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        ev.preventDefault();
+      });
+    });
+  })();
 
   $('pp-add').addEventListener('click', () => {
     if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();

@@ -711,7 +711,7 @@
   // ---- date range ----
   // Read-only in the console; edited from the calendar's Start / End buttons.
   function showRange() {
-    $('range-value').textContent = state.range.start + '  →  ' + state.range.end;
+    $('range-value').textContent = state.range.start + ' → ' + state.range.end;
   }
   function applyRange(start, end, keepCalendar) {
     if (!start || !end) { showRange(); return false; }
@@ -814,6 +814,17 @@
   document.addEventListener('click', (ev) => {
     if (ev.target.closest && ev.target.closest('.cc-tile')) return;
     $('cc-list').querySelectorAll('.cc-menu').forEach((m) => { m.hidden = true; });
+  });
+
+  // ---- collapsible console sections ----
+  document.querySelectorAll('.sect-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const body = $(btn.dataset.target);
+      const open = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      body.hidden = open;
+      btn.querySelector('.sect-caret').textContent = open ? '▸' : '▾';
+    });
   });
 
   $('run').addEventListener('click', run);
@@ -982,6 +993,8 @@
     $('status').className = 'status ' + (live ? 'is-live' : 'is-demo');
     $('status-label').textContent = live ? 'LIVE · SENTINEL-2' : 'DEMO DATA';
     $('connect').style.display = live ? 'none' : '';
+    $('connect').className = 'btn ghost' + (live ? '' : ' disconnected');
+    $('signin-notice').hidden = live;
     clearSceneCache();   // demo and live scene lists are not interchangeable
     state.scenes = []; state.allScenes = [];
     state.idx = -1;

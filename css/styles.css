@@ -18,6 +18,7 @@
 
   --console-w: 322px;
   --header-h: 52px;
+  --activity-h: 134px;   /* reserved at the bottom left, under the console */
 }
 
 * { box-sizing: border-box; }
@@ -70,6 +71,20 @@ body {
 .btn:active { transform: translateY(1px); }
 .btn.ghost { background: transparent; color: var(--tide); border: 1px solid var(--line); }
 .btn.ghost:hover { color: var(--foam); border-color: var(--tide-dim); }
+/* not signed in — make the way out of demo mode obvious */
+.btn.ghost.disconnected { color: var(--kelp); border-color: var(--kelp); }
+.btn.ghost.disconnected:hover { background: var(--kelp); color: var(--abyss); }
+
+.signin-notice {
+  position: fixed; z-index: 950; top: calc(var(--header-h) + 14px);
+  left: 50%; transform: translateX(-50%); cursor: pointer;
+  background: rgba(5,22,28,0.92); color: var(--kelp);
+  border: 1px solid var(--kelp); border-radius: 3px;
+  padding: 7px 14px; font-size: 12px; backdrop-filter: blur(6px);
+  box-shadow: 0 10px 26px -12px rgba(0,0,0,0.9);
+}
+.signin-notice:hover { background: var(--kelp); color: var(--abyss); }
+.signin-notice[hidden] { display: none; }
 .btn:focus-visible, .seg button:focus-visible, .step:focus-visible,
 input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 2px; }
 
@@ -89,7 +104,8 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .console {
   position: fixed; z-index: 900;
   top: calc(var(--header-h) + 14px); left: 14px; width: var(--console-w);
-  max-height: calc(100vh - var(--header-h) - 28px); overflow-y: auto;
+  /* leave room for the activity panel sitting below it */
+  max-height: calc(100vh - var(--header-h) - 38px - var(--activity-h)); overflow-y: auto;
   background: linear-gradient(180deg, rgba(10,40,48,0.94), rgba(8,32,39,0.94));
   border: 1px solid var(--line); border-radius: 4px;
   box-shadow: 0 18px 50px -20px rgba(0,0,0,0.8);
@@ -104,6 +120,15 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--tide-dim); margin: 0 0 10px;
 }
+/* collapsible section headers */
+.sect-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+}
+.sect-toggle:hover { color: var(--kelp); }
+.sect-toggle .sect-caret { font-size: 9px; line-height: 1; }
+.sect-toggle[aria-expanded="false"] { margin-bottom: 0; }
+.sect-body[hidden] { display: none; }
 
 /* date stepper */
 .date-row { display: flex; align-items: center; gap: 8px; }
@@ -201,15 +226,13 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .field .hint { font-size: 10px; color: var(--tide-dim); margin-top: 5px; line-height: 1.4; }
 
 /* read-only date range, under the date button */
+/* one centred line, matching the scene meta text under the date */
 .range-readout {
-  display: flex; align-items: baseline; justify-content: center; gap: 7px;
   margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+  text-align: center; font-family: var(--mono); font-size: 10px; line-height: 1.5;
 }
-.range-readout .range-label {
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--tide-dim);
-}
-.range-readout .range-value { font-family: var(--mono); font-size: 10px; color: var(--tide); }
+.range-readout .range-label { color: var(--tide-dim); margin-right: 6px; }
+.range-readout .range-value { color: var(--tide); }
 
 /* checkbox row */
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -423,7 +446,7 @@ input[type=range]::-moz-range-thumb {
 /* ---------- activity readout ---------- */
 /* sits above the legend (~132px tall at bottom:16) and clear of the scrubber */
 .activity {
-  position: fixed; z-index: 900; right: 16px; bottom: 160px; width: 268px;
+  position: fixed; z-index: 900; left: 14px; bottom: 16px; width: var(--console-w);
   background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
   padding: 9px 11px 8px; backdrop-filter: blur(6px);
 }
@@ -453,7 +476,11 @@ input[type=range]::-moz-range-thumb {
 .act-log .act-line.ok:last-child { color: var(--foam); }
 .act-line.warn .act-m, .act-log .act-line.warn:last-child { color: #e2725b; }
 
-@media (max-height: 720px) { .activity { display: none; } }
+/* too short for both — drop the activity panel and give the console the space back */
+@media (max-height: 720px) {
+  .activity { display: none; }
+  .console { max-height: calc(100vh - var(--header-h) - 28px); }
+}
 
 /* ---------- toast ---------- */
 .toast {

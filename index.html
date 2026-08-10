@@ -20,12 +20,16 @@
     </div>
     <div class="header-right">
       <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
-      <button id="connect" class="btn ghost">Connect Earth Engine</button>
+      <button id="connect" class="btn ghost disconnected">Connect Earth Engine</button>
     </div>
   </header>
 
   <div id="map"></div>
   <div id="sweep" class="sweep"></div>
+
+  <button id="signin-notice" class="signin-notice" hidden>
+    Not signed into Google — data cannot be loaded
+  </button>
 
   <aside class="console">
     <div class="sect">
@@ -79,7 +83,10 @@
     </div>
 
     <div class="sect">
-      <p class="eyebrow">Depth</p>
+      <button class="eyebrow sect-toggle" data-target="sect-depth" aria-expanded="true">
+        <span class="sect-caret">▾</span>Depth
+      </button>
+      <div id="sect-depth" class="sect-body">
       <div class="field">
         <label class="check">
           <input id="relief" type="checkbox" checked>
@@ -108,10 +115,14 @@
         <div id="cc-list" class="cc-list"></div>
         <div class="hint">Traced over the current view and extended as you pan.</div>
       </div>
+      </div>
     </div>
 
     <div class="sect">
-      <p class="eyebrow">Kelp model</p>
+      <button class="eyebrow sect-toggle" data-target="sect-kelp" aria-expanded="true">
+        <span class="sect-caret">▾</span>Kelp model
+      </button>
+      <div id="sect-kelp" class="sect-body">
       <div class="field">
         <div class="label-row"><span class="label">Index</span></div>
         <div class="seg" role="group" aria-label="Index type">
@@ -134,6 +145,7 @@
       <div class="field">
         <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
         <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
+      </div>
       </div>
     </div>
 

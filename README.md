@@ -322,6 +322,14 @@ in `config.js`.
 
 ---
 
+## Deferred designs
+
+- [`docs/share-link-import.md`](docs/share-link-import.md) — importing Google Earth
+  project / Google Maps list share links. Not built: every one of those URLs is
+  CORS-blocked, so it needs a server-side proxy and would end pure-Pages hosting.
+  The note records the proxy shape, which provider to use, and why Google Maps
+  *lists* are not reliably extractable even with one.
+
 ## Notes & caveats
 
 - **One deliberate deviation from the paper**, in `js/ee-kelp.js`: the authors ran an

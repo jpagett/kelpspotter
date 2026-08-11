@@ -34,14 +34,23 @@ const Paths = (function () {
     initBoxSelect();
     document.addEventListener('keydown', (ev) => {
       if ((ev.key === 'Escape' || ev.key === 'Enter') && drawing) { finishDrawing(); return; }
+      // a sticky node menu is dismissed by Escape as well as by clicking away
+      if (ev.key === 'Escape' && nodePopup) { closeNodeEditor(); return; }
       if (ev.key === 'Escape' && picked.size) { clearPicked(); return; }
       // Delete/Backspace clears the whole selection at once, but not while
       // the user is typing into the coordinate editor
-      if ((ev.key === 'Delete' || ev.key === 'Backspace') && picked.size) {
+      if (ev.key === 'Delete' || ev.key === 'Backspace') {
         const tag = ev.target && ev.target.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        ev.preventDefault();
-        removePicked();
+        if (ev.target && ev.target.isContentEditable) return;
+        if (picked.size) { ev.preventDefault(); removePicked(); return; }
+        // nothing picked, but a path is selected: Delete means the whole path
+        const sel = selected();
+        if (sel) {
+          ev.preventDefault();
+          say(sel.name + ' deleted');
+          remove(sel.id);
+        }
       }
     });
   }
@@ -195,13 +204,18 @@ const Paths = (function () {
    * a new position (any format parseCoords accepts) moves the node there.
    */
   let nodePopup = null, nodeCloseTimer = null;
+  // set when the menu was opened deliberately (right-click / long-press) rather
+  // than by hover — it must then survive the pointer leaving the node
+  let nodeSticky = false;
 
   function closeNodeEditor() {
+    nodeSticky = false;
     if (nodeCloseTimer) { clearTimeout(nodeCloseTimer); nodeCloseTimer = null; }
     if (nodePopup) { map.closePopup(nodePopup); nodePopup = null; }
   }
 
   function scheduleNodeEditorClose() {
+    if (nodeSticky) return;      // opened as a context menu; dismiss explicitly
     if (nodeCloseTimer) clearTimeout(nodeCloseTimer);
     nodeCloseTimer = setTimeout(() => {
       const el = nodePopup && nodePopup.getElement();
@@ -248,7 +262,7 @@ const Paths = (function () {
         timer = null;
         fired = true;
         if (marker.dragging) marker.dragging.disable();
-        showNodeEditor(p, i);
+        showNodeEditor(p, i, true);
         if (navigator.vibrate) navigator.vibrate(12);   // confirm the press landed
       }, LONG_PRESS_MS);
     });
@@ -264,8 +278,9 @@ const Paths = (function () {
     el.addEventListener('contextmenu', (ev) => ev.preventDefault());
   }
 
-  function showNodeEditor(p, i) {
+  function showNodeEditor(p, i, sticky) {
     closeNodeEditor();
+    nodeSticky = !!sticky;
     const ll = p.nodes[i];
     const wrap = document.createElement('div');
     wrap.className = 'node-coord';
@@ -340,8 +355,14 @@ const Paths = (function () {
     const p = selected();
     if (!p || pickedPathId !== p.id || !picked.size) return;
     const keep = p.nodes.filter((_, i) => !picked.has(i));
+    // selecting the whole path (or enough of it) and pressing Delete means
+    // "get rid of this", not "error at me"
     if (keep.length < 2) {
-      toast('A path needs at least two nodes — that selection would empty it.', true);
+      const n = picked.size;
+      picked.clear(); pickedPathId = null;
+      closeNodeEditor();
+      say(p.name + ' deleted (' + n + ' of ' + p.nodes.length + ' nodes selected)');
+      remove(p.id);
       return;
     }
     const n = picked.size;
@@ -517,7 +538,9 @@ const Paths = (function () {
         p.profile = null;
         refreshProfile(p);
       });
-      m.on('contextmenu', () => removeNode(p, i));
+      // Right-click opens the node menu rather than deleting outright — a single
+      // click should not destroy geometry. Delete is the x inside that menu.
+      m.on('contextmenu', (ev) => { L.DomEvent.stop(ev); showNodeEditor(p, i, true); });
       m.on('click', (ev) => {
         const oe = ev.originalEvent;
         if (oe && oe.shiftKey) { snapNodeToContour(p, i); L.DomEvent.stop(ev); }
@@ -532,7 +555,17 @@ const Paths = (function () {
   }
 
   function removeNode(p, i) {
-    if (p.nodes.length <= 2) { toast('A path needs at least two nodes.', true); return; }
+    /*
+     * A path needs two nodes to exist, so removing one from a two-node path
+     * removes the path. Refusing used to leave the user stuck: the only way to
+     * clear the last stub was to find its row in the panel and delete it there.
+     */
+    if (p.nodes.length <= 2) {
+      closeNodeEditor();
+      say(p.name + ' deleted — a path cannot have fewer than two nodes');
+      remove(p.id);
+      return;
+    }
     p.nodes.splice(i, 1);
     p.profile = null;
     closeNodeEditor();

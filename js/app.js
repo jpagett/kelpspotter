@@ -203,8 +203,18 @@
     return res;
   }
 
+  /*
+   * Which scene true colour should show. A composite spans the whole window
+   * and has no single day, so it falls back to the most recent pass in range
+   * — the freshest look at the water the composite was built from.
+   */
+  function trueColorScene() {
+    if (state.params.mode === 'composite') return state.scenes[state.scenes.length - 1];
+    return state.scenes[state.idx];
+  }
+
   async function ensureTrueColor(prewarm) {
-    const sc = state.scenes[state.idx];
+    const sc = trueColorScene();
     if (!sc || trueColorLoading) return;
     if (trueColorLayer && trueColorDate === sc.date) return;   // already built for this date
     if (typeof state.engine.trueColorLayer !== 'function') return;
@@ -212,7 +222,7 @@
     if (!prewarm) say('Loading true color · ' + sc.date + '…');
     try {
       const res = await mintTrueColor(sc.date);
-      const now = state.scenes[state.idx];
+      const now = trueColorScene();
       if (!now || now.date !== sc.date) return;   // scene changed mid-mint; next call rebuilds
       if (trueColorLayer) map.removeLayer(trueColorLayer);
       trueColorLayer = toLeafletLayer(res, { pane: 'truecolor', opacity: state.params.trueColorOpacity });
@@ -1096,7 +1106,12 @@
     const picker = document.querySelector('.overlay-picker');
     let dragKey = null;
     picker.querySelectorAll('.ov-item').forEach((item) => {
-      item.addEventListener('dragstart', (ev) => {
+      /*
+       * Only the icon is draggable, not the whole item: the flyout holds a
+       * range slider, and with the item draggable the browser treated a
+       * slider drag as the start of a reorder instead of moving the thumb.
+       */
+      item.querySelector('.ov-icon').addEventListener('dragstart', (ev) => {
         dragKey = item.dataset.overlay;
         item.classList.add('ov-dragging');
         ev.dataTransfer.effectAllowed = 'move';
@@ -2547,6 +2562,9 @@
   });
   $('pp-gas-btn').addEventListener('click', () => {
     state.params.showGas = !state.params.showGas;
+    // enabling the planner opens the options it plans with; disabling leaves
+    // the disclosure wherever the user had it
+    if (state.params.showGas && $('pp-opts').hidden) $('pp-opts-toggle').click();
     syncGasBar();
     renderPaths();
   });

@@ -198,7 +198,7 @@
       <!-- always-visible strip: the gas toggle plus the options disclosure -->
       <div id="pp-global-tools" class="pp-global-tools">
         <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false"
-                title="Overlay estimated gas consumption on every path">Gas</button>
+                title="Plan cylinder gas across every path">Gas planner</button>
         <button id="pp-opts-toggle" class="pp-opts-toggle" type="button" aria-expanded="false"
                 title="Diver and cylinder settings"><span class="sect-caret">&#9656;</span> Path options</button>
       </div>
@@ -292,20 +292,20 @@
     </div>
 
     <div class="overlay-picker" aria-label="Map overlays">
-      <div class="ov-item" data-overlay="kelp" draggable="true">
-        <button id="ov-kelp" class="ov-icon ov-icon-kelp" type="button" aria-pressed="false" title="Kelp overlay"></button>
+      <div class="ov-item" data-overlay="kelp">
+        <button id="ov-kelp" class="ov-icon ov-icon-kelp" draggable="true" type="button" aria-pressed="false" title="Kelp overlay"></button>
         <div class="ov-flyout">
           <input id="ov-kelp-slider" type="range" min="0" max="1" step="0.05" value="0.85" aria-label="Kelp overlay opacity">
         </div>
       </div>
-      <div class="ov-item" data-overlay="truecolor" draggable="true">
-        <button id="ov-eye" class="ov-icon" type="button" aria-pressed="false" title="True color (Sentinel-2 B4/B3/B2)">👁</button>
+      <div class="ov-item" data-overlay="truecolor">
+        <button id="ov-eye" class="ov-icon" draggable="true" type="button" aria-pressed="false" title="True color (Sentinel-2 B4/B3/B2)">👁</button>
         <div class="ov-flyout">
           <input id="ov-eye-slider" type="range" min="0" max="1" step="0.05" value="0.3" aria-label="True color opacity">
         </div>
       </div>
-      <div class="ov-item" data-overlay="depth" draggable="true">
-        <button id="ov-ruler" class="ov-icon" type="button" aria-pressed="false" title="Depth overlay">📏</button>
+      <div class="ov-item" data-overlay="depth">
+        <button id="ov-ruler" class="ov-icon" draggable="true" type="button" aria-pressed="false" title="Depth overlay">📏</button>
         <div class="ov-flyout">
           <input id="ov-ruler-slider" type="range" min="0" max="1" step="0.05" value="0.45" aria-label="Depth overlay opacity">
         </div>

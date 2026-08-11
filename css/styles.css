@@ -1100,3 +1100,35 @@ input[type=range]::-moz-range-thumb {
  * jumping as the label grows from "min".
  */
 #pp-mode-unit { display: inline-block; min-width: 5ch; }
+
+/* cylinder capacity + fill sit side by side; they describe one thing */
+.pp-cyl-spec { display: flex; gap: 8px; }
+.pp-cyl-spec .pp-field { flex: 1; min-width: 0; }
+.pp-cyl-spec .pp-num { flex: 1; min-width: 0; width: auto; }
+/* no spinners on cylinder numbers — they crowd a narrow field and the values
+   are typed, not nudged (same treatment as the SAC input) */
+.pp-cyl .pp-num { -moz-appearance: textfield; }
+.pp-cyl .pp-num::-webkit-inner-spin-button,
+.pp-cyl .pp-num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* preset picker beside the gas-source name */
+.pp-cyl-preset { position: relative; flex: none; }
+.pp-cyl-preset-btn {
+  width: 18px; height: 18px; cursor: pointer; display: grid; place-items: center;
+  background: var(--current); color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 9px; line-height: 1;
+}
+.pp-cyl-preset-btn:hover { border-color: var(--kelp); color: var(--kelp); }
+.pp-cyl-preset-list {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+  display: flex; flex-direction: column; min-width: 168px;
+  background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+}
+.pp-cyl-preset-list[hidden] { display: none; }
+.pp-cyl-preset-opt {
+  cursor: pointer; text-align: left; white-space: nowrap;
+  background: none; color: var(--tide); border: none;
+  padding: 5px 8px; font-family: var(--mono); font-size: 10px;
+}
+.pp-cyl-preset-opt:hover { background: rgba(242,177,52,0.15); color: var(--foam); }

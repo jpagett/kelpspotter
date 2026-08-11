@@ -1,13 +1,15 @@
-# Share-link import — design, deferred
+# Share-link import — design
 
-**Status: not built. Deliberately suppressed.** This is the design so it can be
-picked up later without re-doing the investigation.
+**Status: BUILT.** The proxy lives in [`proxy/`](../proxy/) as a Cloudflare
+Worker; see [`proxy/README.md`](../proxy/README.md) for deployment. This page is
+kept as the reasoning behind it — the CORS findings and the per-source verdicts
+are still the whole story.
 
 The goal was to let a user paste a Google Earth project or Google Maps list
 share link and have its places arrive as POI markers, alongside the KML/KMZ file
 import that *is* built (`js/poi.js`).
 
-## Why it isn't built: CORS
+## Why a proxy is required: CORS
 
 A browser cannot fetch these URLs. Probed with an `Origin` header on
 2026-08-11; **none returns an `access-control-allow-origin` header**:
@@ -37,21 +39,16 @@ and imports the file, which already works.
 ## The hosting cost, stated plainly
 
 KelpSpotter is a static GitHub Pages site. A proxy is server-side, so **this
-feature ends pure-Pages hosting.** The mitigation is to keep the proxy tiny and
-isolated so the *app* stays static and merely calls out to it.
+feature ends pure-Pages hosting** *if you enable it*. The mitigation, and what
+was built: the proxy is a separate Worker and the app treats it as optional, so
+with `PROXY_URL` unset the site is exactly as static as it was.
 
-## Recommended shape
+## What was built
 
-Two options, both viable:
-
-1. **A route on the existing Cloud Run service** (`api/main.py`) —
-   `GET /fetch?url=…`. No new infrastructure, one less thing to deploy and pay
-   attention to. The cost is coupling an unrelated concern to the kelp backend.
-   **This is the recommendation** purely because that service already exists.
-2. **A separate Cloudflare Worker** — cleaner separation, free tier of 100k
-   req/day, no build step, deploys with one `wrangler deploy`. Needs a
-   Cloudflare account, `npm i -g wrangler`, `wrangler login`, and a
-   `wrangler.toml`. Roughly 40 lines.
+**A separate Cloudflare Worker** (`proxy/`), chosen over a route on the existing
+Cloud Run service: it keeps an unrelated concern out of the kelp backend, and its
+free tier (100k req/day) suits a call made once per import. Deploy is
+`wrangler deploy`; see `proxy/README.md`.
 
 ### The proxy itself
 
@@ -81,9 +78,13 @@ is not configured, keep today's behaviour — a message telling the user to expo
 the KML and import the file. So the app degrades to the current state rather
 than breaking.
 
-## Not affected by this deferral
+## How the app behaves now
 
-The **Import from URL…** item in the ⚙ menu stays. It is a direct fetch of a
-`.kml`/`.kmz` URL, which works today for any host that sends CORS headers
-(GitHub raw, most open-data portals) — it is only Google's endpoints that
-require the proxy.
+**Import from URL…** in the ⚙ menu tries a direct fetch first — plenty of hosts
+(GitHub raw, open-data portals) send CORS headers and need no relay. Only when
+that fails, and only if `PROXY_URL` is set, does it spend a proxy request. With
+no proxy configured the message names the config setting and the manual export.
+
+Google Earth projects and Google Maps saved lists are refused with an
+explanation rather than a generic failure — see the table above for why neither
+is fixable by relaying alone.

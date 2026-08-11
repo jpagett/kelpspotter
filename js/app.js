@@ -2628,6 +2628,37 @@
     return wrap;
   }
 
+  /*
+   * Declination from the path's mean position.
+   *
+   * Computed locally from WMM 2025 (js/wmm.js) rather than fetched: NOAA's
+   * calculator now needs a registered API key, which cannot stay secret in a
+   * static page, and a boat is exactly where the network isn't. The model
+   * expires 2029-12-31, so an out-of-date answer says so instead of pretending.
+   */
+  function autoDeclination() {
+    const p = Paths.list.find((x) => x.id === Paths.selectedId) || Paths.list[0];
+    if (!p || !p.nodes.length) { toast('Draw or select a path first.', true); return; }
+    const mean = p.nodes.reduce((a, n) => ({ lat: a.lat + n.lat, lng: a.lng + n.lng }),
+                                { lat: 0, lng: 0 });
+    mean.lat /= p.nodes.length; mean.lng /= p.nodes.length;
+
+    const dec = WMM.declination(mean.lat, mean.lng);
+    state.params.declination = Math.round(dec * 10) / 10;
+    $('pp-decl-input').value = state.params.declination;
+    // no explicit save needed: the debounced writer fires on this click
+
+    const where = mean.lat.toFixed(4) + ', ' + mean.lng.toFixed(4);
+    say('Declination ' + state.params.declination + '°E at ' + p.name +
+        ' mean position ' + where + ' (WMM ' + WMM.EPOCH + ')', 'ok');
+    if (WMM.isExpired()) {
+      toast('WMM 2025 expired after ' + (WMM.VALID_UNTIL - 1) + ' — declination may be stale.', true);
+      say('WMM model out of date — coefficients need replacing', 'warn');
+    }
+    renderPaths();
+  }
+  $('pp-decl-auto').addEventListener('click', autoDeclination);
+
   $('pp-decl-input').addEventListener('change', () => {
     const v = parseFloat($('pp-decl-input').value);
     if (isFinite(v)) state.params.declination = v;

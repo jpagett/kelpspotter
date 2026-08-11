@@ -985,6 +985,15 @@ input[type=range]::-moz-range-thumb {
 }
 
 
+.pp-decl-auto {
+  margin-left: 4px; padding: 3px 6px; cursor: pointer;
+  background: var(--current); color: var(--tide);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em;
+}
+.pp-decl-auto:hover { color: var(--kelp); border-color: var(--kelp); }
+.pp-decl-auto:disabled { opacity: 0.35; cursor: not-allowed; }
+
 /* ---------- points of interest ---------- */
 .poi-panel {
   position: fixed; z-index: 900; left: 14px; width: var(--console-w);

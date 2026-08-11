@@ -221,10 +221,33 @@ const POI = (function () {
    * share links do not, which is why the failure message names that case
    * explicitly rather than just saying "failed".
    */
+  const proxyConfigured = () => {
+    const u = cfg && cfg.PROXY_URL;
+    return !!u && u.indexOf('<') !== 0;
+  };
+  const viaProxy = (url) => cfg.PROXY_URL.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
+
+  /*
+   * Direct fetch first — plenty of hosts (GitHub raw, open-data portals) send
+   * CORS headers and need no relay. Only when that fails do we spend a proxy
+   * request, and only if one is configured.
+   */
   async function importUrl(url) {
     try {
-      const res = await fetch(url, { mode: 'cors' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      let res;
+      try {
+        res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      } catch (direct) {
+        if (!proxyConfigured()) throw direct;
+        say('Direct fetch blocked — retrying through the import proxy…');
+        res = await fetch(viaProxy(url), { mode: 'cors' });
+        if (!res.ok) {
+          let why = 'HTTP ' + res.status;
+          try { why = (await res.json()).error || why; } catch (e) { /* not json */ }
+          throw new Error(why);
+        }
+      }
       const buf = await res.arrayBuffer();
       const isKmz = /\.kmz(\?|$)/i.test(url) ||
                     (new Uint8Array(buf, 0, 2)[0] === 0x50 && new Uint8Array(buf, 1, 1)[0] === 0x4b);
@@ -233,8 +256,8 @@ const POI = (function () {
     } catch (err) {
       console.warn(err);
       const blocked = /Failed to fetch|NetworkError|CORS/i.test(String(err.message));
-      const msg = blocked
-        ? 'That host blocks browser downloads (CORS). Google Earth and Google Maps links always do — export the KML and import the file instead.'
+      const msg = blocked && !proxyConfigured()
+        ? 'That host blocks browser downloads (CORS). Set PROXY_URL in js/config.js to import share links, or export the KML and import the file.'
         : err.message;
       toast(msg, true);
       say('URL import failed — ' + (blocked ? 'blocked by CORS' : err.message), 'warn');

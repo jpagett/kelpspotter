@@ -1,0 +1,8 @@
+name = "kelpspotter-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Origins allowed to call this proxy. Comma separated, no spaces needed.
+# Anything not listed gets the first entry back, so a stray caller fails CORS.
+[vars]
+ALLOWED_ORIGINS = "https://jpagett.github.io,http://localhost:8000"

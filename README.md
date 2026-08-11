@@ -322,13 +322,35 @@ in `config.js`.
 
 ---
 
-## Deferred designs
+## Import proxy (optional)
 
-- [`docs/share-link-import.md`](docs/share-link-import.md) — importing Google Earth
-  project / Google Maps list share links. Not built: every one of those URLs is
-  CORS-blocked, so it needs a server-side proxy and would end pure-Pages hosting.
-  The note records the proxy shape, which provider to use, and why Google Maps
-  *lists* are not reliably extractable even with one.
+Google's KML endpoints send no CORS headers, so share links can only be fetched
+through a relay. [`proxy/`](proxy/) is a small Cloudflare Worker that does this;
+[`proxy/README.md`](proxy/README.md) covers deployment and the free-tier limits,
+and [`docs/share-link-import.md`](docs/share-link-import.md) records why.
+
+**The app does not depend on it.** With `PROXY_URL` unset in `js/config.js`,
+share-link import is unavailable and the KML/KMZ file importer works as before,
+so the site stays a pure static Pages deployment unless you choose otherwise.
+
+Google **My Maps** links work through the proxy. Google **Earth projects** have
+no stable export URL, and Google **Maps saved lists** are not extractable at all
+— that page is rendered by script, so no proxy helps. Both cases return a
+message naming the export that does work.
+
+## Magnetic declination
+
+Path options can derive declination from the mean position of the selected path
+(the **auto** button next to the field). Computed locally from **WMM 2025**
+(`js/wmm.js`) rather than fetched: NOAA's calculator now needs a registered API
+key, which cannot stay secret in a static page, and a boat is exactly where the
+network isn't. Verified against all 100 cases in NOAA's official
+`WMM2025_TestValues.txt` — worst declination error 0.005°, which is the rounding
+in the published file.
+
+**The model expires 2029-12-31.** After that `WMM.isExpired()` returns true and
+the app warns rather than quietly returning stale values; replacing
+`js/wmm.js`'s coefficient block with the next WMM release is the fix.
 
 ## Notes & caveats
 

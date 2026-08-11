@@ -233,6 +233,8 @@
             <input id="pp-decl-input" type="number" class="pp-num" step="0.1"
                    aria-label="Magnetic declination, degrees east">
             <span class="pp-field-unit">&#176;E</span>
+            <button id="pp-decl-auto" class="pp-decl-auto" type="button"
+                    title="Compute from the selected path's mean position (WMM 2025)">auto</button>
           </label>
           <label class="pp-field"
                  title="Distance covered per kick cycle — leave blank to omit kicks from the leg table">
@@ -381,6 +383,7 @@
   <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <script src="js/config.js"></script>
+  <script src="js/wmm.js"></script>
   <script src="js/dem.js"></script>
   <script src="js/contours.js"></script>
   <script src="js/paths.js"></script>

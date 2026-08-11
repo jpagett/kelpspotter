@@ -1,90 +1,54 @@
-# Share-link import — design
+# Share-link import — built, then removed
 
-**Status: BUILT.** The proxy lives in [`proxy/`](../proxy/) as a Cloudflare
-Worker; see [`proxy/README.md`](../proxy/README.md) for deployment. This page is
-kept as the reasoning behind it — the CORS findings and the per-source verdicts
-are still the whole story.
+**Status: removed.** The app imports KML/KMZ **files** only. This note exists so
+the investigation is not repeated.
 
-The goal was to let a user paste a Google Earth project or Google Maps list
-share link and have its places arrive as POI markers, alongside the KML/KMZ file
-import that *is* built (`js/poi.js`).
+A Cloudflare Worker proxy was written, deployed and wired up; it worked for
+Google My Maps. It was then removed because the two sources actually wanted —
+Google Earth projects and Google Maps saved lists — cannot be made to work well,
+and a feature that handles only the case nobody asked for is not worth an extra
+service, an extra hosting dependency, and an allowlist to maintain.
 
-## Why a proxy is required: CORS
+## What a proxy does and does not fix
 
-A browser cannot fetch these URLs. Probed with an `Origin` header on
-2026-08-11; **none returns an `access-control-allow-origin` header**:
+CORS is a *browser* rule: the server sends the bytes, the browser refuses to let
+the page read them without an `Access-Control-Allow-Origin` header. A proxy
+sidesteps that because servers have no such rule.
+
+So a proxy fixes exactly one thing: *the data is in the response, but the browser
+will not hand it over.* It cannot conjure data that is absent, and it cannot
+guess an address that was never published.
+
+Probed with an `Origin` header on 2026-08-11 — none of these send CORS headers:
 
 | URL | Result |
 |---|---|
-| `earth.google.com/earth/d/<id>` | 302 → HTML app, no CORS header |
-| `www.google.com/maps/d/kml?mid=<id>` | reachable, no CORS header |
-| `maps.app.goo.gl/<id>` | 302 → HTML, no CORS header |
+| `earth.google.com/earth/d/<id>` | 302 → HTML app shell |
+| `www.google.com/maps/d/kml?mid=<id>` | reachable, real KML |
+| `maps.app.goo.gl/<id>` | 302 → HTML |
 
-This is not a bug to work around. A cross-origin `fetch` without that header is
-blocked by the browser regardless of what the server returns, so **any** version
-of this feature needs something server-side to relay the request.
+## Per source
 
-## Feasibility per source, assuming a proxy exists
+| Source | Data in the response? | Stable public URL? | Needs the viewer's session? | Verdict |
+|---|---|---|---|---|
+| **My Maps** | yes | yes (`/maps/d/kml?mid=`) | no | a proxy fixes it — this is the only one that worked |
+| **Earth project** | yes, as KML | **no** — the web app calls an internal, unversioned endpoint | often | possible but a maintenance liability; would fail silently when Google changes it |
+| **Maps saved list** | **no** — places are rendered by script after load | no | — | no proxy can fix this; it needs a headless browser, which is a different class of service |
 
-| Source | With a proxy |
-|---|---|
-| **Google My Maps** (`/maps/d/kml?mid=…`) | **Works.** Returns real KML. CORS was the only obstacle. This is the one worth building. |
-| **Google Earth project** (`earth.google.com/earth/d/…`) | **Probably.** The web UI's "Export as KML" calls an internal, undocumented endpoint. Usable, but unversioned and liable to break without notice — needs a clear failure path. |
-| **Google Maps saved list** (`maps.app.goo.gl`, shared lists) | **No — do not build.** There is no public API, and the page is JS-rendered: the places are not in the HTML the proxy would receive. Extracting them means headless-browser rendering or scraping an obfuscated internal payload that changes without warning. Flaky by construction. |
+## What replaced it
 
-**The realistic path for Maps lists stays what it is today:** the user exports to
-KML (My Maps → ⋮ → *Download KML*; Google Earth → *Project* → *Export as KML*)
-and imports the file, which already works.
+The manual export, which is one click and produces exactly the same data:
 
-## The hosting cost, stated plainly
+- Earth: **Project → Export as KML file**
+- Maps list: rebuild once in My Maps, then **Download KML**
 
-KelpSpotter is a static GitHub Pages site. A proxy is server-side, so **this
-feature ends pure-Pages hosting** *if you enable it*. The mitigation, and what
-was built: the proxy is a separate Worker and the app treats it as optional, so
-with `PROXY_URL` unset the site is exactly as static as it was.
+## If this is ever revisited
 
-## What was built
+The Worker was ~150 lines: host allowlist, My Maps viewer→KML rewrite, 8 MB cap,
+20 s timeout, GET only, CORS restricted to the site origin. It lived at
+`proxy/worker.js` and is in the history — recover it with
+`git log --diff-filter=D -- proxy/worker.js`. The client side hooked in at
+`POI.importUrl()`, which tried a direct fetch first and fell back to the relay.
 
-**A separate Cloudflare Worker** (`proxy/`), chosen over a route on the existing
-Cloud Run service: it keeps an unrelated concern out of the kelp backend, and its
-free tier (100k req/day) suits a call made once per import. Deploy is
-`wrangler deploy`; see `proxy/README.md`.
-
-### The proxy itself
-
-Small and, importantly, **not an open relay**:
-
-- Accept `?url=` and allow **only** an explicit host allowlist:
-  `earth.google.com`, `www.google.com/maps/d/`, `drive.google.com`.
-- Follow redirects, cap the response (a few MB), enforce a timeout.
-- Return the bytes with `Access-Control-Allow-Origin:` set to the site origin.
-- No credentials forwarded, no cookies, `GET` only.
-
-Without the allowlist this becomes an open proxy that anyone can point at
-anything, attributed to your account.
-
-### How the app would call it
-
-`js/config.js` gains one setting, and the feature is absent when it is unset:
-
-```js
-PROXY_URL: '<your-proxy-url>',   // blank/placeholder disables share-link import
-```
-
-`js/poi.js` already has `importUrl(url)` and already distinguishes a CORS failure
-from other errors. The change is: when a direct fetch fails **and** `PROXY_URL`
-is configured, retry via `PROXY_URL + '?url=' + encodeURIComponent(url)`. When it
-is not configured, keep today's behaviour — a message telling the user to export
-the KML and import the file. So the app degrades to the current state rather
-than breaking.
-
-## How the app behaves now
-
-**Import from URL…** in the ⚙ menu tries a direct fetch first — plenty of hosts
-(GitHub raw, open-data portals) send CORS headers and need no relay. Only when
-that fails, and only if `PROXY_URL` is set, does it spend a proxy request. With
-no proxy configured the message names the config setting and the manual export.
-
-Google Earth projects and Google Maps saved lists are refused with an
-explanation rather than a generic failure — see the table above for why neither
-is fixable by relaying alone.
+Whatever the shape, **the allowlist is not optional**: without it the proxy is an
+open relay anyone can point anywhere, attributed to your account.

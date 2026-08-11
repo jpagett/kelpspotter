@@ -24,14 +24,6 @@ window.KELP_CONFIG = {
    * per-user OAuth, then demo mode.
    *   e.g. 'https://kelpspotter-api-abc123-uw.a.run.app'
    */
-  /*
-   * Optional import proxy (proxy/worker.js on Cloudflare Workers). Google's KML
-   * endpoints send no CORS headers, so share links can only be fetched through
-   * a relay. Leave as the placeholder to disable share-link import — the file
-   * importer is unaffected either way.
-   */
-  PROXY_URL: 'https://kelpspotter-proxy.pagett-jared.workers.dev',
-
   API_URL: 'https://kelpspotter-api-mjhkueccia-uw.a.run.app',
 
   // Earth Engine / Google Cloud (only used when API_URL is not reachable)

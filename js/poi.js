@@ -6,6 +6,11 @@
  * That keeps the site deployable on GitHub Pages with no server and no new
  * dependency.
  *
+ * File import only, by design. Fetching share links was built and then removed:
+ * see docs/share-link-import.md — no proxy can make Google Maps saved lists work
+ * (the places are not in the document a proxy would receive), and Earth projects
+ * would need an undocumented endpoint that breaks without warning.
+ *
  * Points are the priority — dive sites, landmarks — but LineStrings and Polygons
  * are drawn too, since a dive-site KML often carries a boundary or a track and
  * silently dropping them would look like a broken import.
@@ -221,49 +226,6 @@ const POI = (function () {
    * share links do not, which is why the failure message names that case
    * explicitly rather than just saying "failed".
    */
-  const proxyConfigured = () => {
-    const u = cfg && cfg.PROXY_URL;
-    return !!u && u.indexOf('<') !== 0;
-  };
-  const viaProxy = (url) => cfg.PROXY_URL.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(url);
-
-  /*
-   * Direct fetch first — plenty of hosts (GitHub raw, open-data portals) send
-   * CORS headers and need no relay. Only when that fails do we spend a proxy
-   * request, and only if one is configured.
-   */
-  async function importUrl(url) {
-    try {
-      let res;
-      try {
-        res = await fetch(url, { mode: 'cors' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-      } catch (direct) {
-        if (!proxyConfigured()) throw direct;
-        say('Direct fetch blocked — retrying through the import proxy…');
-        res = await fetch(viaProxy(url), { mode: 'cors' });
-        if (!res.ok) {
-          let why = 'HTTP ' + res.status;
-          try { why = (await res.json()).error || why; } catch (e) { /* not json */ }
-          throw new Error(why);
-        }
-      }
-      const buf = await res.arrayBuffer();
-      const isKmz = /\.kmz(\?|$)/i.test(url) ||
-                    (new Uint8Array(buf, 0, 2)[0] === 0x50 && new Uint8Array(buf, 1, 1)[0] === 0x4b);
-      const text = isKmz ? await unzipFirstKml(buf) : new TextDecoder().decode(buf);
-      ingest(parseKml(text), url.split('/').pop().slice(0, 40) || 'link');
-    } catch (err) {
-      console.warn(err);
-      const blocked = /Failed to fetch|NetworkError|CORS/i.test(String(err.message));
-      const msg = blocked && !proxyConfigured()
-        ? 'That host blocks browser downloads (CORS). Set PROXY_URL in js/config.js to import share links, or export the KML and import the file.'
-        : err.message;
-      toast(msg, true);
-      say('URL import failed — ' + (blocked ? 'blocked by CORS' : err.message), 'warn');
-    }
-  }
-
   /* ------------------------------------------------------------------ panel */
 
   function fitAll() {
@@ -364,13 +326,6 @@ const POI = (function () {
       if (f) importFile(f);
       ev.target.value = '';
     });
-    const urlBtn = document.getElementById('poi-import-url');
-    if (urlBtn) urlBtn.addEventListener('click', () => {
-      const u = window.prompt('Direct URL to a .kml or .kmz file:\n\n' +
-        'Google Earth / Google Maps share links will not work — they block browser ' +
-        'downloads. Export the KML from those and use Import KML / KMZ instead.');
-      if (u && u.trim()) importUrl(u.trim());
-    });
     const clr = document.getElementById('poi-clear');
     if (clr) clr.addEventListener('click', clearAll);
     const fit = document.getElementById('poi-fit');
@@ -432,7 +387,6 @@ const POI = (function () {
     removeByUid: removeByUid,
     restore: restore,
     importFile: importFile,
-    importUrl: importUrl,
     clearAll: clearAll,
     fitAll: fitAll,
     parseKml: parseKml,          // exported for testing

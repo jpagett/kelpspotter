@@ -324,65 +324,26 @@ in `config.js`.
 
 ---
 
-## Import proxy (optional)
+## Points of interest (KML / KMZ import)
 
-Google's KML endpoints send no CORS headers, so share links can only be fetched
-through a relay. [`proxy/`](proxy/) is a small Cloudflare Worker that does this;
-[`proxy/README.md`](proxy/README.md) covers deployment and the free-tier limits,
-and [`docs/share-link-import.md`](docs/share-link-import.md) records why.
+⚙ → **Import KML / KMZ…** drops markers on the map for dive sites and other
+features. Parsed entirely in the browser — KML is XML for `DOMParser`, and KMZ is
+a ZIP unpacked with `DecompressionStream` rather than a library — so the site
+stays a dependency-free static deployment.
 
-**The app does not depend on it.** With `PROXY_URL` unset in `js/config.js`,
-share-link import is unavailable and the KML/KMZ file importer works as before,
-so the site stays a pure static Pages deployment unless you choose otherwise.
+**File import only.** Fetching Google share links was built, deployed behind a
+Cloudflare Worker, and then removed: see
+[`docs/share-link-import.md`](docs/share-link-import.md). The short version is
+that a proxy solves exactly one problem — a browser refusing to *read* a response
+— and neither remaining case is that problem. Google Maps saved lists render
+their places by script, so the document a proxy receives contains none of them;
+Google Earth projects would need an undocumented internal endpoint that can break
+without notice, and often the viewer's own session.
 
-Google **My Maps** links work through the proxy. Google **Earth projects** have
-no stable export URL, and Google **Maps saved lists** are not extractable at all
-— that page is rendered by script, so no proxy helps. Both cases return a
-message naming the export that does work.
+Both export KML in one click, which imports cleanly:
 
-## Map overlays
-
-The three overlay icons (kelp / true colour / depth) are **independent
-toggles**: each turns only its own layer on and off, restoring the opacity it
-last had. Earlier they behaved as a *solo* control — clicking one zeroed the
-other two, which made kelp opacity a hostage of the basemap toggles and left no
-way to view kelp over true colour at all.
-
-True colour is **on by default**, so the real view is what you land on. In demo
-mode it self-disables with a message, since there is no real imagery to show.
-
-On mobile the on-screen zoom buttons are dropped (pinch-zoom is the native
-gesture) and the overlay toggles are compact — deliberately under the 44 px
-touch standard, since they sit alone against the map with nothing adjacent to
-mis-hit.
-
-## Sessions
-
-**⚙ → Export session…** writes a JSON file holding POIs, paths, view settings and
-diver settings, stamped with a schema version. **Import session…** reads one back
-and shows a **diff to review before anything is applied** — importing someone
-else's session is destructive if it simply overwrites.
-
-Records are matched across files by a **content hash** of what makes them that
-thing — a POI's name and position, a path's name and nodes. The in-memory ids are
-session-local and meaningless in someone else's file; matching on those, every
-import would read as 100% additions and the diff would be worthless.
-
-Four sections, each with its own mode:
-
-| Section | Granularity | Default |
-|---|---|---|
-| Points of interest | per row: `+` add, `~` change, `−` remove | changes and additions ticked |
-| Paths | per row | changes and additions ticked |
-| View settings | **one tick for the whole block** — they only mean anything together | **off**, opt in |
-| Diver settings (SAC, declination, cylinders…) | per row | ticked |
-
-**Merge is the default everywhere and can never delete.** Removal rows only
-apply under **replace**, which is opt-in per section. Clicking a POI or path row
-shows it on the map before you decide. Nothing is applied until *Import*.
-
-POIs now persist to `localStorage` alongside settings and paths, and are dropped
-by *Clear persistent data*.
+- **Earth:** open the project → **⋮ → Export as KML file**
+- **Maps list:** rebuild once in [My Maps](https://www.google.com/mymaps) → **⋮ → Download KML**
 
 ## Magnetic declination
 

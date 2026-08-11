@@ -21,24 +21,33 @@
     </div>
     <div class="header-right">
       <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
-      <div class="hdr-menu">
+      <div class="hdr-menu view-menu">
         <button id="view-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false">View <span class="sect-caret">▾</span></button>
         <div id="view-list" class="hdr-menu-list" hidden>
           <label class="check"><input type="checkbox" id="view-console" checked><span class="label">Console</span></label>
           <label class="check"><input type="checkbox" id="view-paths" checked><span class="label">Paths</span></label>
           <label class="check"><input type="checkbox" id="view-activity" checked><span class="label">Activity</span></label>
           <label class="check"><input type="checkbox" id="view-legend" checked><span class="label">Legend</span></label>
+          <label class="check"><input type="checkbox" id="view-poi" checked><span class="label">Points of interest</span></label>
         </div>
       </div>
       <div class="hdr-menu">
         <button id="settings-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false"
                 title="Settings">⚙</button>
         <div id="settings-list" class="hdr-menu-list" hidden>
+          <button id="poi-import" class="menu-action" type="button"
+                  title="Add markers from a KML or KMZ file">Import KML / KMZ…</button>
+          <button id="poi-import-url" class="menu-action" type="button"
+                  title="Fetch a KML or KMZ from a direct link">Import from URL…</button>
+          <button id="poi-clear" class="menu-action" type="button"
+                  title="Remove every imported point of interest">Clear POIs</button>
           <button id="clear-data" class="menu-action danger" type="button"
                   title="Forget saved settings and paths, then reload">Clear persistent data</button>
         </div>
       </div>
-      <button id="connect" class="btn ghost disconnected">Connect Earth Engine</button>
+      <!-- Two labels, switched by CSS. app.js only ever sets this button's class
+           and display, so the markup is safe from it. -->
+      <button id="connect" class="btn ghost disconnected"><span class="lbl-wide">Connect Earth Engine</span><span class="lbl-narrow">Sign in</span></button>
     </div>
   </header>
 
@@ -255,6 +264,21 @@
     <span class="pp-edge" aria-hidden="true"></span>
   </aside>
 
+  <aside class="poi-panel" aria-label="Points of interest">
+    <div class="poi-head">
+      <button id="poi-collapse" class="eyebrow" aria-expanded="true" title="Collapse this panel">POI</button>
+      <div class="poi-tools">
+        <button id="poi-add-btn" class="pp-tool" title="Import a KML or KMZ file">⤓</button>
+        <button id="poi-fit" class="pp-tool" title="Zoom to fit every point">⤢</button>
+      </div>
+    </div>
+    <div id="poi-body">
+      <div id="poi-list" class="poi-list"></div>
+      <div id="poi-note" class="hint">No points yet — import a KML from the ⚙ menu.</div>
+    </div>
+    <input id="poi-file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
+  </aside>
+
   <div class="activity" aria-live="polite">
     <button id="act-toggle" class="act-head" aria-expanded="true" title="Collapse this panel">
       <span class="sect-caret">▾</span>
@@ -291,6 +315,13 @@
       <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </div>
 
+    <!-- Mobile only: the desktop equivalent is the Paths panel's + button, which
+         is behind a tab on a phone. Same Paths.startDrawing() underneath. -->
+    <div class="map-actions">
+      <button id="map-draw-path" class="ov-icon map-action" type="button"
+              aria-pressed="false" title="Draw a path">⤳</button>
+    </div>
+
     <div class="overlay-picker" aria-label="Map overlays">
       <div class="ov-item" data-overlay="kelp">
         <button id="ov-kelp" class="ov-icon ov-icon-kelp" draggable="true" type="button" aria-pressed="false" title="Kelp overlay"></button>
@@ -315,6 +346,27 @@
 
   <div id="depth-probe" class="depth-probe" aria-hidden="true"></div>
 
+  <!-- Mobile only. One sheet at a time, so panels can never overlap on a phone;
+       tapping the active tab returns to the full-screen map. Mirrors the desktop
+       View menu so the two layouts share a vocabulary. -->
+  <nav id="tabbar" class="tabbar" aria-label="Panels">
+    <button class="tab" data-sheet="console" aria-pressed="false">
+      <span class="tab-ico">◧</span><span class="tab-label">Console</span>
+    </button>
+    <button class="tab" data-sheet="paths" aria-pressed="false">
+      <span class="tab-ico">⤳</span><span class="tab-label">Paths</span>
+    </button>
+    <button class="tab" data-sheet="legend" aria-pressed="false">
+      <span class="tab-ico">▤</span><span class="tab-label">Legend</span>
+    </button>
+    <button class="tab" data-sheet="poi" aria-pressed="false">
+      <span class="tab-ico">⚑</span><span class="tab-label">POI</span>
+    </button>
+    <button class="tab" data-sheet="activity" aria-pressed="false">
+      <span class="tab-ico">≡</span><span class="tab-label">Log</span>
+    </button>
+  </nav>
+
   <div id="toast" class="toast"></div>
 
 
@@ -332,9 +384,11 @@
   <script src="js/dem.js"></script>
   <script src="js/contours.js"></script>
   <script src="js/paths.js"></script>
+  <script src="js/poi.js"></script>
   <script src="js/api-kelp.js"></script>
   <script src="js/ee-kelp.js"></script>
   <script src="js/demo.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/mobile.js"></script>
 </body>
 </html>

@@ -210,6 +210,60 @@ const Paths = (function () {
     }, 450);
   }
 
+  /*
+   * Long-press a node to open its editor on touch.
+   *
+   * The editor is otherwise hover-only, which does not exist on a phone — so the
+   * delete button inside it was unreachable there. Three collisions to avoid:
+   *
+   *   - Node drag. The same finger-down starts a Leaflet marker drag, so the
+   *     press is abandoned the moment the finger travels (MOVE_TOLERANCE), and
+   *     when it does fire, dragging is disabled for the rest of the gesture so
+   *     the node does not lurch as the menu appears.
+   *   - Map pan. touch-action:none on the node (see .path-node in the CSS) keeps
+   *     the browser from scrolling under the press.
+   *   - The OS text-selection / callout menu, suppressed via contextmenu.
+   *
+   * Mouse pointers are ignored here: they keep hover-to-open and right-click.
+   */
+  const LONG_PRESS_MS = 450;
+  const MOVE_TOLERANCE = 10;
+
+  function bindLongPress(marker, p, i) {
+    const el = marker.getElement();
+    if (!el) return;
+    let timer = null, sx = 0, sy = 0, fired = false;
+
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const restoreDrag = () => {
+      if (fired && marker.dragging) marker.dragging.enable();
+      fired = false;
+    };
+
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType === 'mouse') return;      // desktop keeps hover + right-click
+      sx = ev.clientX; sy = ev.clientY;
+      cancel();
+      timer = setTimeout(() => {
+        timer = null;
+        fired = true;
+        if (marker.dragging) marker.dragging.disable();
+        showNodeEditor(p, i);
+        if (navigator.vibrate) navigator.vibrate(12);   // confirm the press landed
+      }, LONG_PRESS_MS);
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (!timer) return;
+      if (Math.abs(ev.clientX - sx) > MOVE_TOLERANCE ||
+          Math.abs(ev.clientY - sy) > MOVE_TOLERANCE) cancel();   // it's a drag
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => {
+      el.addEventListener(t, () => { cancel(); restoreDrag(); });
+    });
+    // suppress the OS long-press menu on the node itself
+    el.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  }
+
   function showNodeEditor(p, i) {
     closeNodeEditor();
     const ll = p.nodes[i];
@@ -472,6 +526,7 @@ const Paths = (function () {
       m.on('mouseout', scheduleNodeEditorClose);
       m.on('dragstart', closeNodeEditor);
       m.addTo(map);
+      bindLongPress(m, p, i);      // needs the icon element, so after addTo
       p.markers.push(m);
     });
   }

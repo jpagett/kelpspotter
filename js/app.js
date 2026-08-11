@@ -2042,7 +2042,9 @@
     $('pp-note').textContent = !list.length
       ? 'No paths yet — press + or Ctrl-click the map.'
       : (Paths.drawing ? 'Click the map to add nodes. Esc or ✓ to finish.'
-                       : 'Drag a node to move it; right-click a node to delete it.');
+                       : (matchMedia('(max-width: 820px)').matches
+                            ? 'Drag a node to move it; long-press one for coordinates and delete.'
+                            : 'Drag a node to move it; right-click or hover one for coordinates and delete.'));
 
     list.forEach((p) => {
       const item = document.createElement('div');
@@ -2403,6 +2405,9 @@
     }
     panel.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
+      // On a phone these panels are bottom sheets, not floating boxes. Dragging
+      // would write inline left/top that overrides the sheet layout.
+      if (window.matchMedia('(max-width: 820px)').matches) return;
       if (ev.target.closest(interactiveSelector)) return;
       const r = unpin();
       drag = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height, left: r.left, top: r.top };
@@ -2435,7 +2440,7 @@
    * fill the screen (.mobile-full) rather than just revealing the body in
    * place, and it starts collapsed on load rather than open.
    */
-  const mobileQuery = window.matchMedia('(max-width: 860px)');
+  const mobileQuery = window.matchMedia('(max-width: 820px)');
   const pathsPanel = $('pp-collapse').closest('.paths-panel');
   $('pp-collapse').addEventListener('click', () => {
     if (mobileQuery.matches) {
@@ -2465,7 +2470,8 @@
     'view-console': '.console',
     'view-paths': '.paths-panel',
     'view-activity': '.activity',
-    'view-legend': '.legend'
+    'view-legend': '.legend',
+    'view-poi': '.poi-panel'
   };
   Object.keys(VIEW_TARGETS).forEach((id) => {
     $(id).addEventListener('change', () => {
@@ -2945,6 +2951,7 @@
     DemSampler.init(cfg);
     CustomContours.init(cfg, L, map, say);
     Paths.init(cfg, L, map, say, toast, renderPaths);
+    POI.init(cfg, L, map, say, toast);
     // map-hover depth labels borrow the console's unit formatting
     Paths.setDepthFormatter((s) => fmtDepth(-s.feet));
     try {

@@ -160,7 +160,21 @@ const KelpEngine = (function () {
     get available() { return ready; },
     needsLogin: false,
 
-    // Try silent auth with existing credentials. Resolves true if we end up ready.
+    /*
+     * Configure, and report whether Earth Engine is ALREADY usable. This never
+     * prompts.
+     *
+     * It used to call ee.data.authenticate() here, described as "silent auth".
+     * That was true of the old gapi flow, which tried immediate mode first; the
+     * current Google Identity Services client instead opens an account picker
+     * (prompt=select_account) straight away. The effect was that merely opening
+     * the page demanded a Google sign-in — before the visitor had asked for
+     * anything, and for a map that works perfectly well without one.
+     *
+     * So the only thing checked here is whether a token already exists from a
+     * sign-in earlier in this page session. Signing in is now exclusively the
+     * job of login(), reached from the Connect button.
+     */
     init(config) {
       cfg = config;
       return new Promise((resolve) => {
@@ -168,18 +182,15 @@ const KelpEngine = (function () {
             !cfg.CLIENT_ID || cfg.CLIENT_ID.indexOf('<') === 0) {
           ready = false; return resolve(false);
         }
-        const initEE = () => ee.initialize(
+        let token = null;
+        try { token = ee.data.getAuthToken && ee.data.getAuthToken(); } catch (e) { token = null; }
+        if (!token) { ready = false; this.needsLogin = true; return resolve(false); }
+        ee.initialize(
           null, null,
           () => { ready = true; resolve(true); },
           (e) => { console.warn('EE init error:', e); ready = false; resolve(false); },
           null, cfg.PROJECT_ID
         );
-        const onImmediateFail = () => { this.needsLogin = true; ready = false; resolve(false); };
-        try {
-          ee.data.authenticate(cfg.CLIENT_ID, initEE,
-            (e) => { console.warn('EE auth error:', e); resolve(false); },
-            null, onImmediateFail);
-        } catch (e) { console.warn(e); resolve(false); }
       });
     },
 
@@ -196,19 +207,33 @@ const KelpEngine = (function () {
      * fails with nothing visible at all unless we say so.
      */
     login() {
+      const self = this;
       return new Promise((resolve, reject) => {
+        const fail = (e) => reject(new Error(e && e.message ? e.message : String(e)));
+        const finish = () => ee.initialize(
+          null, null,
+          () => { ready = true; self.needsLogin = false; resolve(true); },
+          (e) => reject(new Error('Earth Engine init failed: ' + (e && e.message ? e.message : e))),
+          null, cfg.PROJECT_ID
+        );
         try {
-          ee.data.authenticateViaPopup(
-            () => ee.initialize(
-              null, null,
-              () => { ready = true; this.needsLogin = false; resolve(true); },
-              (e) => reject(new Error('Earth Engine init failed: ' + (e && e.message ? e.message : e))),
-              null, cfg.PROJECT_ID
-            ),
-            (e) => reject(new Error(e && e.message ? e.message : String(e)))
-          );
+          /*
+           * authenticate() rather than authenticateViaPopup(): it is what
+           * registers the client id with the Earth Engine client. The popup
+           * variant takes no client id of its own and fails with "Missing
+           * required parameter client_id" if nothing configured it first —
+           * which is exactly what happened once the boot-time call was removed.
+           *
+           * On an explicit Connect click, this opening an account picker is the
+           * intended behaviour rather than an intrusion. If it declines to do so
+           * silently, the popup fallback runs — still inside the click's call
+           * stack, so the user-gesture grant survives.
+           */
+          ee.data.authenticate(cfg.CLIENT_ID, finish, fail, null, () => {
+            try { ee.data.authenticateViaPopup(finish, fail); } catch (e) { fail(e); }
+          });
         } catch (e) {
-          reject(e);
+          fail(e);
         }
       });
     },

@@ -120,16 +120,17 @@ Commit and push.
 
 **Engine precedence, best first:**
 
-1. **The visitor's own Earth Engine session.** Probed first, so anyone signed in
-   spends their own quota rather than this project's. The probe is raced against
-   a 2.5 s timeout — when Google's popup is blocked its callbacks can simply
-   never fire, and without the race the page would hang at boot instead of
-   falling through.
+1. **The visitor's own Earth Engine session** — but only once they have signed
+   in. Boot checks for an existing token and never prompts: the Earth Engine
+   client's `authenticate()` now opens an account picker immediately rather than
+   attempting silent auth as the old gapi flow did, so calling it at startup
+   demanded a Google account before the visitor had asked for anything.
+   Signing in is exclusively the Connect button's job.
 2. **This backend.** Live imagery for everyone else, no sign-in.
 3. **Demo mode.** Synthetic, always works.
 
-So a missing or broken backend degrades rather than breaks, and signing in
-upgrades a visitor off the shared quota mid-session.
+So the page opens straight into live imagery with no account, and signing in
+upgrades that visitor off the shared quota mid-session.
 
 Because the shared backend is public but rate-limited, the site shows a
 persistent bottom-centre invitation to sign in. It clears when the visitor signs

@@ -3107,9 +3107,13 @@
       syncOverlayPicker();
     }
     activateEngine(engine);
-    if (engine === DemoEngine && !(cfg.CLIENT_ID.indexOf('<') === 0)) {
-      // creds present but silent auth failed → offer popup
-      toast('Sign in with the Connect button to load live imagery.');
-    }
+    /*
+     * No sign-in nag on load. There used to be a toast here, from when boot
+     * attempted authentication and could report that it had failed — but boot no
+     * longer attempts anything, so there is nothing to report. The Connect
+     * button and the dismissible notice are invitation enough; a popup and a
+     * toast before the visitor has asked for either is what made the page feel
+     * like it demanded an account to look at a map.
+     */
   })();
 })();

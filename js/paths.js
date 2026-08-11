@@ -947,8 +947,42 @@ const Paths = (function () {
     }
   }
 
+  const pathUidOf = (p) => (window.Session ? Session.pathUid(p)
+                                          : p.name + '|' + p.nodes.length);
+
+  function upsertPath(rec) {
+    const nodes = (rec.nodes || []).map((n) => L.latLng(n.lat, n.lng));
+    if (nodes.length < 2) return;
+    const existing = paths.find((p) => pathUidOf(p) === (rec.uid || pathUidOf(rec)));
+    if (existing) {
+      existing.name = rec.name || existing.name;
+      existing.color = rec.color || existing.color;
+      existing.nodes = nodes;
+      existing.profile = null;
+      redraw(existing);
+      refreshProfile(existing);
+    } else {
+      const id = nextId++;
+      const p = { id: id, name: rec.name || ('Path ' + id), nodes: nodes,
+                  color: rec.color || COLORS[(id - 1) % COLORS.length],
+                  line: null, markers: [], profile: null, expanded: true };
+      paths.push(p);
+      selectedId = p.id;
+      paths.forEach(redraw);
+      refreshProfile(p);
+    }
+    onChange();
+  }
+
+  function removePathByUid(uid) {
+    const p = paths.find((x) => pathUidOf(x) === uid);
+    if (p) remove(p.id);
+  }
+
   return {
     init: init,
+    upsert: upsertPath,
+    removeByUid: removePathByUid,
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,
     select: select,

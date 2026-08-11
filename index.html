@@ -39,6 +39,10 @@
                   title="Add markers from a KML or KMZ file">Import KML / KMZ…</button>
           <button id="poi-import-url" class="menu-action" type="button"
                   title="Fetch a KML or KMZ from a direct link">Import from URL…</button>
+          <button id="session-export" class="menu-action" type="button"
+                  title="Save POIs, paths and settings to a file">Export session…</button>
+          <button id="session-import" class="menu-action" type="button"
+                  title="Load a session file and review the differences">Import session…</button>
           <button id="poi-clear" class="menu-action" type="button"
                   title="Remove every imported point of interest">Clear POIs</button>
           <button id="clear-data" class="menu-action danger" type="button"
@@ -279,6 +283,7 @@
       <div id="poi-note" class="hint">No points yet — import a KML from the ⚙ menu.</div>
     </div>
     <input id="poi-file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
+    <input id="session-file" type="file" accept=".json,application/json" hidden>
   </aside>
 
   <div class="activity" aria-live="polite">
@@ -388,6 +393,8 @@
   <script src="js/contours.js"></script>
   <script src="js/paths.js"></script>
   <script src="js/poi.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/session-ui.js"></script>
   <script src="js/api-kelp.js"></script>
   <script src="js/ee-kelp.js"></script>
   <script src="js/demo.js"></script>

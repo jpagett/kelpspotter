@@ -30,6 +30,7 @@
     if (localStorage.getItem('kelp.v') !== STORE_V) {
       localStorage.removeItem('kelp.params');
       localStorage.removeItem('kelp.paths');
+      localStorage.removeItem('kelp.pois');
       localStorage.setItem('kelp.v', STORE_V);
     } else {
       const saved = JSON.parse(localStorage.getItem('kelp.params') || 'null');
@@ -2905,6 +2906,7 @@
       // would be discarded as stale on the next load
       localStorage.setItem('kelp.v', STORE_V);
       localStorage.setItem('kelp.params', JSON.stringify(state.params));
+      Session.savePois();          // POIs persist alongside settings and paths
       localStorage.setItem('kelp.paths', JSON.stringify(Paths.list.map((p) => ({
         name: p.name, color: p.color, mirrored: p.mirrored,
         preMirrorNodes: p.preMirrorNodes
@@ -2944,7 +2946,7 @@
     persistDisabled = true;
     clearTimeout(persistTimer);
     try {
-      ['kelp.v', 'kelp.params', 'kelp.paths'].forEach((k) => localStorage.removeItem(k));
+      ['kelp.v', 'kelp.params', 'kelp.paths', 'kelp.pois'].forEach((k) => localStorage.removeItem(k));
       ['kelp.session', 'kelp.tcUsed'].forEach((k) => sessionStorage.removeItem(k));
     } catch (err) { console.warn('clearing stored data failed:', err); }
     location.reload();
@@ -2989,6 +2991,77 @@
     CustomContours.init(cfg, L, map, say);
     Paths.init(cfg, L, map, say, toast, renderPaths);
     POI.init(cfg, L, map, say, toast);
+
+    /*
+     * Session: export/import plus POI persistence. applyState is the single
+     * point where imported settings land — it writes params, then re-syncs the
+     * controls that read them, so the UI can never disagree with state.
+     */
+    Session.init({
+      cfg: cfg, say: say, toast: toast,
+      getState: () => state,
+      applyState: (settings) => {
+        Object.assign(state.params, settings);
+        /*
+         * applyIndex resets the threshold to that index's published value, which
+         * is right when a human switches index but wrong here — it would discard
+         * the threshold the file just supplied. Re-apply it afterwards.
+         */
+        applyIndex(state.params.indexType);
+        if ('kelpThresh' in settings) {
+          state.params.kelpThresh = settings.kelpThresh;
+          $('kelp').value = settings.kelpThresh;
+          $('kelp-val').textContent = fmtIndex(settings.kelpThresh);
+        }
+        $('b11').value = state.params.b11Thresh;
+        $('b11-val').textContent = Number(state.params.b11Thresh).toFixed(3);
+        setKelpOpacity(state.params.opacity);
+        setDepthOpacity(state.params.depthOpacity);
+        setTrueColorOpacity(state.params.trueColorOpacity);
+        setCloudCeiling(state.params.maxCloud, true);
+        $('relief').checked = !!state.params.showRelief;
+        $('contours').checked = !!state.params.showContours;
+        setDepthLayer('relief', !!state.params.showRelief);
+        setDepthLayer('contours', !!state.params.showContours);
+        syncOverlayPicker();
+        syncGasBar();          // SAC, speed/time, declination, kick distance
+        renderCylinders && renderCylinders();
+        renderPaths();
+        setDirty(true);
+        persistNow();
+      }
+    });
+    SessionUI.init({
+      onLocate: (kind, rec) => {
+        if (!rec) return;
+        if (kind === 'pois') map.setView([rec.lat, rec.lng], Math.max(map.getZoom(), 14));
+        else if (rec.nodes && rec.nodes.length) {
+          map.fitBounds(L.latLngBounds(rec.nodes.map((n) => [n.lat, n.lng])).pad(0.3));
+        }
+      }
+    });
+
+    const savedPois = Session.loadPois();
+    if (savedPois.length) {
+      POI.restore(savedPois);
+      say(savedPois.length + ' saved point' + (savedPois.length === 1 ? '' : 's') + ' restored');
+    }
+
+    $('session-export').addEventListener('click', () => Session.exportFile());
+    $('session-import').addEventListener('click', () => $('session-file').click());
+    $('session-file').addEventListener('change', async (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!f) return;
+      try {
+        const data = Session.parse(await f.text());
+        SessionUI.open(Session.diff(data), f.name);
+      } catch (err) {
+        console.warn(err);
+        toast('Could not read that session file — ' + err.message, true);
+        say('Session import failed — ' + err.message, 'warn');
+      }
+    });
     // map-hover depth labels borrow the console's unit formatting
     Paths.setDepthFormatter((s) => fmtDepth(-s.feet));
     try {

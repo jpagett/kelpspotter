@@ -377,8 +377,60 @@ const POI = (function () {
     if (fit) fit.addEventListener('click', fitAll);
   }
 
+  /*
+   * uid-addressed operations, used by session import and by persistence. The
+   * uid is a content hash owned by Session so both sides agree; the fallback
+   * only matters if this module is loaded standalone.
+   */
+  const uidOf = (p) => (window.Session ? Session.poiUid(p)
+                                       : p.name + '|' + p.lat + '|' + p.lng);
+
+  function upsert(rec) {
+    const existing = items.find((i) => uidOf(i) === (rec.uid || uidOf(rec)));
+    if (existing) {
+      Object.assign(existing, {
+        name: rec.name, lat: rec.lat, lng: rec.lng,
+        symbol: rec.symbol || existing.symbol, desc: rec.desc || existing.desc,
+        visible: rec.visible !== false
+      });
+      if (existing.marker) map.removeLayer(existing.marker);
+      existing.marker = addMarker(existing);
+      if (!existing.visible) map.removeLayer(existing.marker);
+    } else {
+      const p = { id: nextId++, name: rec.name, lat: rec.lat, lng: rec.lng,
+                  symbol: rec.symbol || 'marker', desc: rec.desc || '',
+                  visible: rec.visible !== false, source: 'import' };
+      p.marker = addMarker(p);
+      if (!p.visible) map.removeLayer(p.marker);
+      items.push(p);
+    }
+    render();
+  }
+
+  function removeByUid(uid) {
+    const p = items.find((i) => uidOf(i) === uid);
+    if (p) remove(p);
+  }
+
+  // Rebuild from stored records without the import chatter or the auto fit.
+  function restore(records) {
+    (records || []).forEach((rec) => {
+      const p = { id: nextId++, name: rec.name, lat: rec.lat, lng: rec.lng,
+                  symbol: rec.symbol || 'marker', desc: rec.desc || '',
+                  visible: rec.visible !== false, source: 'saved' };
+      p.marker = addMarker(p);
+      if (!p.visible) map.removeLayer(p.marker);
+      items.push(p);
+    });
+    render();
+    return items.length;
+  }
+
   return {
     init: init,
+    upsert: upsert,
+    removeByUid: removeByUid,
+    restore: restore,
     importFile: importFile,
     importUrl: importUrl,
     clearAll: clearAll,

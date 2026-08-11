@@ -354,6 +354,34 @@ gesture) and the overlay toggles are compact — deliberately under the 44 px
 touch standard, since they sit alone against the map with nothing adjacent to
 mis-hit.
 
+## Sessions
+
+**⚙ → Export session…** writes a JSON file holding POIs, paths, view settings and
+diver settings, stamped with a schema version. **Import session…** reads one back
+and shows a **diff to review before anything is applied** — importing someone
+else's session is destructive if it simply overwrites.
+
+Records are matched across files by a **content hash** of what makes them that
+thing — a POI's name and position, a path's name and nodes. The in-memory ids are
+session-local and meaningless in someone else's file; matching on those, every
+import would read as 100% additions and the diff would be worthless.
+
+Four sections, each with its own mode:
+
+| Section | Granularity | Default |
+|---|---|---|
+| Points of interest | per row: `+` add, `~` change, `−` remove | changes and additions ticked |
+| Paths | per row | changes and additions ticked |
+| View settings | **one tick for the whole block** — they only mean anything together | **off**, opt in |
+| Diver settings (SAC, declination, cylinders…) | per row | ticked |
+
+**Merge is the default everywhere and can never delete.** Removal rows only
+apply under **replace**, which is opt-in per section. Clicking a POI or path row
+shows it on the map before you decide. Nothing is applied until *Import*.
+
+POIs now persist to `localStorage` alongside settings and paths, and are dropped
+by *Clear persistent data*.
+
 ## Magnetic declination
 
 Path options can derive declination from the mean position of the selected path

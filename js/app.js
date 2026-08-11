@@ -1522,7 +1522,14 @@
     if (pts.length < 2 || !(speedMiHr > 0) || !(state.params.sac > 0)) return null;
     let cum = 0, prevMi = 0;
     const points = pts.map((s, i) => {
-      const depthFt = -s.feet;
+      /*
+       * Clamp at the surface. A path can cross land or dry reef, where the
+       * DEM reports elevation ABOVE sea level — a negative "depth". Left
+       * unclamped that drives ATA below 1 (and negative for anything over
+       * ~33 ft of elevation), so a leg would consume negative gas and the
+       * running budget would refund itself. Surface pressure is the floor.
+       */
+      const depthFt = Math.max(0, -s.feet);
       const ata = 1 + depthFt / ATA_DEPTH_FT;
       const mi = s.distance / 1609.344;
       const dtMin = i === 0 ? 0 : ((mi - prevMi) / speedMiHr) * 60;

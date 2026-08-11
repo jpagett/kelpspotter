@@ -1,4 +1,4 @@
-# KelpSpotter
+# [KelpSpotter](https://jpagett.github.io/kelpspotter/)
 
 A single-page web app that maps giant-kelp (*Macrocystis pyrifera*) canopy in the
 Santa Barbara Channel from Sentinel-2 imagery. Tab through recent satellite passes,

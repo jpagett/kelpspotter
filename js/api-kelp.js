@@ -75,7 +75,8 @@ const ApiKelpEngine = (function () {
         date: dateISO,
         index: p.indexType,
         kelpThresh: p.kelpThresh,
-        b11Thresh: p.b11Thresh
+        b11Thresh: p.b11Thresh,
+        palette: p.kelpPalette
       }).then((r) => r.urlFormat);
     },
 
@@ -87,7 +88,8 @@ const ApiKelpEngine = (function () {
         maxCloud: maxCloud,
         index: p.indexType,
         kelpThresh: p.kelpThresh,
-        b11Thresh: p.b11Thresh
+        b11Thresh: p.b11Thresh,
+        palette: p.kelpPalette
       }).then((r) => r.urlFormat);
     },
 

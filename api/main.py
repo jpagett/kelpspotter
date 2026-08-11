@@ -52,7 +52,14 @@ RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
 S2_RED, S2_RE6, S2_NIR, S2_SWIR = "B4", "B6", "B8", "B11"
 L_RED, L_NIR, L_SWIR = 0.665, 0.833, 1.612          # µm, as in the paper's code
 DEM_ID = "USGS/SRTMGL1_003"
-KELP_PALETTE = ["7a6a1f", "d9a441", "f2b134", "ffd166"]
+# Mirrors KELP_PALETTES in js/config.js — any change there must land here too.
+KELP_PALETTES = {
+    "amber":   ["7a6a1f", "d9a441", "f2b134", "ffd166"],
+    "viridis": ["440154", "31688e", "35b779", "fde725"],
+    "inferno": ["1b0c41", "781c6d", "ed6925", "fcffa4"],
+    "ice":     ["0d3b66", "3fa7d6", "90e0ef", "caf0f8"],
+}
+KELP_PALETTE = KELP_PALETTES["amber"]
 
 # Bounds mirror the slider ranges in js/config.js. Values outside these are
 # clamped rather than rejected, so a stale client still gets a usable map.
@@ -199,12 +206,13 @@ def render(kelp, idx, params):
     hi = lo + ramp
     strength = idx.subtract(lo).divide(ramp).clamp(0, 1)
     alpha = strength.pow(0.7).multiply(kelp)
+    palette = KELP_PALETTES.get(params.get("palette", "amber"), KELP_PALETTE)
     # Keyword arguments, NOT a params dict. The JavaScript API takes
     # visualize({min, max, palette}); the Python signature is
     # visualize(bands, gain, bias, min, max, gamma, palette, ...), so a dict is
     # swallowed positionally as `bands` and fails with
     #   "Expected a string or list of strings for field 'bands'".
-    visual = idx.visualize(min=lo, max=hi, palette=KELP_PALETTE)
+    visual = idx.visualize(min=lo, max=hi, palette=palette)
     return visual.updateMask(alpha)
 
 
@@ -254,10 +262,14 @@ def read_params(args):
         b11_thresh = float(args.get("b11Thresh", 0.028))
     except ValueError:
         b11_thresh = 0.028
+    palette = args.get("palette", "amber")
+    if palette not in KELP_PALETTES:
+        palette = "amber"
     return {
         "indexType": index_type,
         "kelpThresh": clamp(kelp_thresh, limits["min"], limits["max"]),
         "b11Thresh": clamp(b11_thresh, 0.0, 0.1),
+        "palette": palette,
     }
 
 
@@ -343,9 +355,9 @@ def layer():
     try:
         if mode == "composite":
             start, end = read_dates(request.args)
-            cache_key = "layer|composite|%s|%s|%s|%s|%s|%s" % (
+            cache_key = "layer|composite|%s|%s|%s|%s|%s|%s|%s" % (
                 start, end, max_cloud, params["indexType"],
-                params["kelpThresh"], params["b11Thresh"],
+                params["kelpThresh"], params["b11Thresh"], params["palette"],
             )
         elif mode == "truecolor":
             date = request.args.get("date", "")
@@ -354,8 +366,9 @@ def layer():
         else:
             date = request.args.get("date", "")
             dt.date.fromisoformat(date)          # validate
-            cache_key = "layer|single|%s|%s|%s|%s" % (
-                date, params["indexType"], params["kelpThresh"], params["b11Thresh"],
+            cache_key = "layer|single|%s|%s|%s|%s|%s" % (
+                date, params["indexType"], params["kelpThresh"],
+                params["b11Thresh"], params["palette"],
             )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400

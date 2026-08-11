@@ -63,7 +63,27 @@ const DemoEngine = (function () {
     return (p.kelpThresh - spec.thresh) / (spec.max - spec.min);
   }
 
-  // A Leaflet layer that paints amber kelp glow for a given seed set + params.
+  /*
+   * Colormap support: interpolate along cfg.KELP_PALETTES[p.kelpPalette] by
+   * intensity, so the demo tracks the legend's colormap picker the same way
+   * the live EE/API renderers do. The old procedural ramps remain as the
+   * fallback if no palette resolves.
+   */
+  function hexRGB(h) {
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  function paletteRGB(stops, t) {
+    const n = stops.length - 1;
+    const x = Math.max(0, Math.min(1, t)) * n;
+    const i = Math.min(n - 1, Math.floor(x));
+    const f = x - i;
+    const a = hexRGB(stops[i]), b = hexRGB(stops[i + 1]);
+    return [Math.round(a[0] + (b[0] - a[0]) * f),
+            Math.round(a[1] + (b[1] - a[1]) * f),
+            Math.round(a[2] + (b[2] - a[2]) * f)];
+  }
+
+  // A Leaflet layer that paints kelp glow for a given seed set + params.
   function makeLayer(L, seeds, p, freqMode) {
     return L.Layer.extend({
       onAdd(map) {
@@ -97,6 +117,11 @@ const DemoEngine = (function () {
         const bedRadiusM = 1600;
         const rPx = bedRadiusM / mpp;
 
+        // Non-default colormaps interpolate the shared palette; 'amber' keeps
+        // the hand-tuned procedural ramps below, which it was derived from.
+        const stops = (cfg && cfg.KELP_PALETTES && p.kelpPalette && p.kelpPalette !== 'amber')
+          ? cfg.KELP_PALETTES[p.kelpPalette] : null;
+
         seeds.forEach((seed) => {
           BEDS.forEach(([lng, lat, strength]) => {
             const pt = map.latLngToContainerPoint([lat, lng]);
@@ -116,7 +141,10 @@ const DemoEngine = (function () {
                 const inten = Math.min(1, m * 2.6);
                 const a = Math.min(0.55, m * 2.4) * p.opacity;
                 let r, g, b;
-                if (freqMode) { // cool->amber->gold ramp for composite frequency
+                if (stops) {
+                  const rgb = paletteRGB(stops, inten);
+                  r = rgb[0]; g = rgb[1]; b = rgb[2];
+                } else if (freqMode) { // cool->amber->gold ramp for composite frequency
                   r = Math.round(120 + 135 * inten);
                   g = Math.round(95 + 115 * inten);
                   b = Math.round(60 - 20 * inten);

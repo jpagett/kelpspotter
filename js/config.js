@@ -127,6 +127,20 @@ window.KELP_CONFIG = {
     tuning: { tileSize: 512, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 4 }
   },
 
+  /*
+   * Colormaps for the kelp overlay, dark-to-bright with increasing canopy
+   * density. Shared by all three engines (ee-kelp.js visualize palette,
+   * api/main.py mirror, demo.js canvas interpolation) and the legend ramp,
+   * so adding one here is enough — except main.py, which must mirror the
+   * entries server-side (it cannot read this file).
+   */
+  KELP_PALETTES: {
+    amber:   ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'],   // the original signature look
+    viridis: ['440154', '31688e', '35b779', 'fde725'],
+    inferno: ['1b0c41', '781c6d', 'ed6925', 'fcffa4'],
+    ice:     ['0d3b66', '3fa7d6', '90e0ef', 'caf0f8']
+  },
+
   // Default model parameters (all adjustable live in the console)
   DEFAULTS: {
     indexType: 'KD',        // 'KD', 'FAI' or 'NDVI'
@@ -134,6 +148,7 @@ window.KELP_CONFIG = {
     b11Thresh: 0.028,       // paper step 1: mask out B11 >= 0.028 (coast + land vegetation)
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
+    kelpPalette: 'amber',   // key into KELP_PALETTES above
     mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
@@ -144,11 +159,11 @@ window.KELP_CONFIG = {
      * path). timeMode picks which of time/speed is the input the diver typed
      * in; the other is always derived from it plus each path's own length.
      */
-    sac: 0.75,              // cuft/min
-    speed: 1,                // mi/hr — used when timeMode is 'speed'
-    time: 30,                // minutes — used when timeMode is 'time'
+    sac: 0.6,               // cuft/min
+    speed: 0.5,             // mi/hr — used when timeMode is 'speed'
+    time: 30,               // minutes — used when timeMode is 'time'
     timeMode: 'speed',      // 'speed' | 'time'
-    showGas: false,
+    showGas: true,
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it

@@ -138,6 +138,11 @@
   function setDepthOpacity(v) {
     state.params.depthOpacity = v;
     if (DEPTH_LAYERS.relief.layer) DEPTH_LAYERS.relief.layer.setOpacity(v);
+    // one opacity, two controls — keep the console slider and the corner
+    // flyout showing the same value no matter which one moved
+    $('depth-op').value = v;
+    $('depth-op-val').textContent = Math.round(v * 100) + '%';
+    $('ov-ruler-slider').value = v;
   }
 
   /*
@@ -922,6 +927,47 @@
     syncOverlayPicker();
   });
   syncOverlayPicker();
+
+  /*
+   * ---- kelp colormap picker ----
+   * Hovering the legend reveals one swatch per entry in cfg.KELP_PALETTES.
+   * A palette is display-only, so switching restyles in place where possible
+   * (the demo canvas redraws via setParams) and re-mints tiles otherwise —
+   * no dirty-state / Rerun involvement, unlike the detection parameters.
+   */
+  function updateLegendRamp() {
+    const stops = (cfg.KELP_PALETTES || {})[state.params.kelpPalette];
+    if (stops) {
+      document.querySelector('.legend .ramp').style.background =
+        'linear-gradient(90deg, ' + stops.map((s) => '#' + s).join(', ') + ')';
+    }
+  }
+
+  function setKelpPalette(key) {
+    if (!(cfg.KELP_PALETTES || {})[key] || key === state.params.kelpPalette) return;
+    state.params.kelpPalette = key;
+    updateLegendRamp();
+    $('legend-menu').querySelectorAll('.legend-swatch').forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.palette === key ? 'true' : 'false');
+    });
+    if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
+    else if (state.layer) run();
+    say('Kelp colormap: ' + key);
+  }
+
+  Object.keys(cfg.KELP_PALETTES || {}).forEach((key) => {
+    const stops = cfg.KELP_PALETTES[key];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'legend-swatch';
+    btn.dataset.palette = key;
+    btn.title = key;
+    btn.setAttribute('aria-pressed', key === state.params.kelpPalette ? 'true' : 'false');
+    btn.style.background = 'linear-gradient(90deg, ' + stops.map((s) => '#' + s).join(', ') + ')';
+    btn.addEventListener('click', () => setKelpPalette(key));
+    $('legend-menu').appendChild(btn);
+  });
+  updateLegendRamp();
 
   /*
    * ---- custom contours: draggable depth ruler ----

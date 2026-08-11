@@ -413,10 +413,30 @@ input[type=range]::-moz-range-thumb {
 
 /* ---------- kelp colorbar ---------- */
 .legend {
+  position: relative;   /* anchors the colormap flyout */
   display: flex; align-items: center; gap: 8px;
   background: rgba(5,22,28,0.5); border: 1px solid var(--line); border-radius: 4px;
   padding: 6px 10px; backdrop-filter: blur(6px);
 }
+/* colormap picker — same show-instantly / linger-1s pattern as .ov-flyout */
+.legend-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 5px; padding: 7px;
+  background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+  opacity: 0; visibility: hidden;
+  transition: opacity 150ms ease 1s, visibility 0s linear 1.15s;
+}
+.legend:hover .legend-menu, .legend:focus-within .legend-menu {
+  opacity: 1; visibility: visible;
+  transition: opacity 120ms ease, visibility 0s linear;
+}
+.legend-swatch {
+  width: 96px; height: 16px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 2px; padding: 0;
+}
+.legend-swatch:hover { border-color: var(--kelp); }
+.legend-swatch[aria-pressed="true"] { border-color: var(--kelp); box-shadow: 0 0 0 1px var(--kelp); }
 .legend .eyebrow {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--tide-dim); margin: 0; flex: none;

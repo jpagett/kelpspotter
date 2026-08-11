@@ -115,8 +115,12 @@ const KelpEngine = (function () {
     return { kelp: kelp, index: idx };
   }
 
-  // Amber canopy. Low end is the threshold itself, where the layer is invisible.
+  // Amber canopy fallback; the live palette comes from cfg.KELP_PALETTES
+  // keyed by p.kelpPalette, so the legend's colormap picker steers this too.
   const KELP_VIS = ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'];
+  function paletteFor(p) {
+    return (cfg.KELP_PALETTES && cfg.KELP_PALETTES[p.kelpPalette]) || KELP_VIS;
+  }
 
   /*
    * Paint detected kelp with opacity proportional to index strength. Earth Engine
@@ -134,7 +138,7 @@ const KelpEngine = (function () {
     // gamma < 1 lifts thin canopy just enough to read, still hitting 0 at lo
     const alpha = strength.pow(0.7).multiply(res.kelp);
 
-    return res.index.visualize({ min: lo, max: hi, palette: KELP_VIS })
+    return res.index.visualize({ min: lo, max: hi, palette: paletteFor(p) })
       .updateMask(alpha);
   }
 

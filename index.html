@@ -219,6 +219,13 @@
             <span id="pp-mode-unit" class="pp-field-unit"></span>
           </div>
           <label class="pp-field"
+                 title="Magnetic declination, east positive — leg-table headings are corrected by this">
+            <span class="pp-opts-label">Decl</span>
+            <input id="pp-decl-input" type="number" class="pp-num" step="0.1"
+                   aria-label="Magnetic declination, degrees east">
+            <span class="pp-field-unit">&#176;E</span>
+          </label>
+          <label class="pp-field"
                  title="Distance covered per kick cycle — leave blank to omit kicks from the leg table">
             <span class="pp-opts-label">Kick</span>
             <input id="pp-kick-input" type="number" class="pp-num" min="0" placeholder="&#8212;"

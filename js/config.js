@@ -173,7 +173,14 @@ window.KELP_CONFIG = {
     timeMode: 'speed',      // 'speed' | 'time'
     showGas: true,
     kickDistance: 0,        // metres per kick cycle; 0 = omit kicks from the leg table
-    kickUnit: 'm',          // how that number is typed/shown: 'm' | 'ft'
+    kickUnit: 'ft',         // how that number is typed/shown: 'm' | 'ft'
+    /*
+     * Magnetic declination in degrees, EAST positive. Leg-table headings are
+     * corrected by this so they can be steered directly on a compass:
+     * magnetic = true - declination. Roughly +11.5 deg in the Santa Barbara
+     * Channel; it drifts slowly, so it is a setting rather than a constant.
+     */
+    declination: 11.5,
     /*
      * Gas sources. Each is a cylinder the diver carries; legs in the leg
      * table are assigned to one of them, and a source is "over budget" once

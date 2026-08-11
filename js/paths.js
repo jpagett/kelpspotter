@@ -385,7 +385,9 @@ const Paths = (function () {
     if (p.hitLine) { map.removeLayer(p.hitLine); p.hitLine = null; }
     if (p.nodes.length >= 2 && !drawing) {
       p.hitLine = L.polyline(latlngs, {
-        pane: PANE, weight: 16, opacity: 0, interactive: true
+        // wide catch radius: this line is only a hover/click target, so it can
+        // be far fatter than the stroke the user actually sees
+        pane: PANE, weight: 32, opacity: 0, interactive: true
       }).addTo(map);
       /*
        * Hovering anywhere near a path reads its depth there, the same dot and

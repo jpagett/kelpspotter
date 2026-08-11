@@ -749,21 +749,45 @@ input[type=range]::-moz-range-thumb {
 .legs-tools { display: flex; gap: 6px; margin-bottom: 6px; }
 .legs-tools .menu-action { font-family: var(--mono); font-size: 10px; padding: 3px 8px; }
 /* the table is usually wider than the dock; scroll it here, not the panel */
-.legs-scroll { overflow-x: auto; }
+.legs-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 3px; }
 
-.legs-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 10px; }
-.legs-table th, .legs-table td {
-  padding: 3px 6px; text-align: right; white-space: nowrap;
-  border-bottom: 1px solid var(--line);
+.legs-table {
+  border-collapse: collapse; width: 100%;
+  font-family: var(--mono); font-size: 10px;
+  /* digits line up column-wise even in a proportional fallback face */
+  font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1;
 }
-.legs-table th { color: var(--tide-dim); font-weight: 500; }
-.legs-table td { color: var(--foam); }
+.legs-table th, .legs-table td { padding: 4px 8px; text-align: right; white-space: nowrap; }
+.legs-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--deep); color: var(--tide-dim);
+  font-weight: 500; letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--tide-dim);
+}
+.legs-table tbody td { color: var(--foam); border-bottom: 1px solid var(--line); }
+/* zebra banding: easier to track a row across a wide table than rules alone */
+.legs-table tbody tr:nth-child(even) td { background: rgba(111,183,189,0.045); }
+.legs-table tbody tr:hover td { background: rgba(111,183,189,0.10); }
+/* the leg number reads as a label, not a measurement */
 .legs-table th:first-child, .legs-table td:first-child { text-align: left; }
-.legs-table tfoot td { color: var(--tide); border-bottom: none; border-top: 1px solid var(--line); }
+.legs-table tbody td:first-child { color: var(--tide-dim); }
+.legs-table tfoot td {
+  color: var(--tide); font-weight: 600;
+  border-top: 1px solid var(--tide-dim); border-bottom: none;
+  background: rgba(111,183,189,0.06);
+}
 /* the leg currently under the cursor on the graph above */
-.legs-table tbody tr.leg-active td { background: rgba(242,177,52,0.18); }
-/* a leg whose gas source has already passed its usable volume */
+.legs-table tbody tr.leg-active td {
+  background: rgba(242,177,52,0.20);
+  box-shadow: inset 0 0 0 9999px rgba(242,177,52,0.06);
+}
+.legs-table tbody tr.leg-active td:first-child {
+  box-shadow: inset 2px 0 0 var(--kelp), inset 0 0 0 9999px rgba(242,177,52,0.06);
+  color: var(--kelp);
+}
+/* a leg that has eaten into its gas source's reserve */
 .legs-table tbody tr.over-budget td { color: #e2725b; }
+.legs-table tbody tr.over-budget td:first-child { box-shadow: inset 2px 0 0 #e2725b; }
 .over-budget-cell { color: #e2725b; font-weight: 600; }
 .legs-budget-list { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .legs-budget { font-family: var(--mono); font-size: 10px; color: var(--tide); }
@@ -1067,3 +1091,12 @@ input[type=range]::-moz-range-thumb {
 .pp-cyl-reserve { display: flex; align-items: center; gap: 6px; }
 .pp-cyl-check { font-size: 10px; color: var(--tide-dim); flex: 1; min-width: 0; }
 .pp-cyl-summary { color: var(--tide); }
+
+/* dotted droplines marking node positions on the profile (eye toggle) */
+.pp-node-line { stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.5; }
+/*
+ * Pin the time/speed unit label to the widest unit it can hold ("km/hr"), so
+ * the input beside it keeps its size when the mode is switched instead of
+ * jumping as the label grows from "min".
+ */
+#pp-mode-unit { display: inline-block; min-width: 5ch; }

@@ -1604,15 +1604,29 @@
       const startCuft = gasAt(gp, cum[i]);
       const endCuft = gasAt(gp, cum[i + 1]);
       const spend = (startCuft !== null && endCuft !== null) ? endCuft - startCuft : null;
-      let over = false, drawn = null;
+      /*
+       * The table counts DOWN, the way a submersible pressure gauge does:
+       * each row reports what is LEFT in that leg's cylinder once the leg is
+       * finished, not what has been burned so far. A leg is over budget once
+       * what remains has fallen past the declared reserve.
+       */
+      let over = false, drawn = null, remainCuft = null, remainPsi = null, empty = false;
       if (cyl && spend !== null) {
         used[cylId] = (used[cylId] || 0) + spend;
         drawn = used[cylId];
-        over = drawn > usableCuft(cyl);
+        const raw = (cyl.totalCuft || 0) - drawn;
+        // A cylinder cannot hold less than nothing: the column mimics a gauge,
+        // and a negative reading would be meaningless. Floor it at empty and
+        // let the per-cylinder summary below carry the true shortfall.
+        empty = raw <= 0;
+        remainCuft = Math.max(0, raw);
+        remainPsi = cuftToPressure(cyl, remainCuft);
+        over = raw < reserveCuft(cyl);
       }
       return Object.assign({}, lg, {
         kicks: state.params.kickDistance > 0 ? Math.round(lg.metres / state.params.kickDistance) : null,
         startCuft: startCuft, endCuft: endCuft, drawn: drawn,
+        remainCuft: remainCuft, remainPsi: remainPsi, empty: empty,
         cylId: cylId, cyl: cyl, over: over
       });
     });
@@ -1622,40 +1636,52 @@
    * Both the DOM table and the CSV are generated from this one column
    * description, so the file can never drift from what is on screen.
    */
+  // true -> magnetic. East declination is positive, so it subtracts.
+  function magneticOf(trueDeg) {
+    return ((trueDeg - (state.params.declination || 0)) % 360 + 360) % 360;
+  }
+
   function legColumns() {
     const u = depthU();
     const cols = [
       { key: 'leg', head: 'Leg', get: (r) => String(r.leg) },
-      { key: 'heading', head: 'Heading (T)', get: (r) => Math.round(r.heading) + '°' },
-      { key: 'dist', head: 'Distance (' + u.label + ')',
-        get: (r) => u.from(r.metres * M_TO_FT).toFixed(u.dp === 0 ? 0 : 1) }
+      /*
+       * Magnetic, not true: declination is applied here so the number can be
+       * steered straight off a compass without the diver doing arithmetic on
+       * a slate. magnetic = true - declination (east positive).
+       */
+      { key: 'heading', head: 'Heading (M)',
+        get: (r) => Math.round(magneticOf(r.heading)) + '°' },
+      // distance carries kick cycles alongside it when a kick length is set
+      { key: 'dist',
+        head: 'Distance ' + u.label + (state.params.kickDistance > 0 ? ' / kicks' : ''),
+        get: (r) => {
+          const d = u.from(r.metres * M_TO_FT).toFixed(u.dp === 0 ? 0 : 1);
+          return r.kicks === null ? d : d + ' / ' + r.kicks;
+        } }
     ];
-    if (state.params.kickDistance > 0) {
-      cols.push({ key: 'kicks', head: 'Kicks', get: (r) => (r.kicks === null ? '—' : String(r.kicks)) });
-    }
-    cols.push(
-      { key: 'max', head: 'Max depth (' + u.label + ')',
-        get: (r) => (r.maxFt === null ? '—' : u.from(r.maxFt).toFixed(u.dp)) },
-      { key: 'avg', head: 'Avg depth (' + u.label + ')',
-        get: (r) => (r.avgFt === null ? '—' : u.from(r.avgFt).toFixed(u.dp)) }
-    );
-    if (state.params.showGas) {
-      cols.push(
-        { key: 'gasStart', head: 'Gas in (cuft)', get: (r) => (r.startCuft === null ? '—' : r.startCuft.toFixed(1)) },
-        { key: 'gasEnd', head: 'Gas out (cuft)', get: (r) => (r.endCuft === null ? '—' : r.endCuft.toFixed(1)) }
-      );
-      // pressures only mean something once a cylinder describes the gas
-      if (cylinders().length) {
-        const pl = pressU().label;
-        cols.push(
-          { key: 'psiIn', head: 'In (' + pl + ')',
-            get: (r) => { const v = (r.cyl && r.startCuft !== null) ? cuftToPressure(r.cyl, r.startCuft) : null;
-                          return v === null ? '—' : Math.round(v).toString(); } },
-          { key: 'psiOut', head: 'Out (' + pl + ')',
-            get: (r) => { const v = (r.cyl && r.endCuft !== null) ? cuftToPressure(r.cyl, r.endCuft) : null;
-                          return v === null ? '—' : Math.round(v).toString(); } }
-        );
+    // max and average read together as one figure: "56 (48)"
+    cols.push({
+      key: 'depth', head: 'Depth max (avg) ' + u.label,
+      get: (r) => {
+        if (r.maxFt === null) return '—';
+        const mx = u.from(r.maxFt).toFixed(u.dp);
+        const av = r.avgFt === null ? '—' : u.from(r.avgFt).toFixed(u.dp);
+        return mx + ' (' + av + ')';
       }
+    });
+    if (state.params.showGas) {
+      // what is LEFT at the end of the leg, volume and gauge pressure together
+      const pl = pressU().label;
+      cols.push({
+        key: 'gasLeft', head: 'Gas left cuft / ' + pl,
+        get: (r) => {
+          if (r.remainCuft === null) return '—';
+          if (r.empty) return 'OUT';
+          const psi = r.remainPsi === null ? '—' : Math.round(r.remainPsi).toString();
+          return r.remainCuft.toFixed(1) + ' / ' + psi;
+        }
+      });
       if (cylinders().length > 1) {
         cols.push({ key: 'source', head: 'Gas source', get: (r) => (r.cyl ? r.cyl.name : '—') });
       }
@@ -1736,9 +1762,19 @@
     cols.forEach((c) => {
       const td = document.createElement('td');
       if (c.key === 'leg') td.textContent = 'Total';
-      else if (c.key === 'dist') td.textContent = depthU().from(totalM * M_TO_FT).toFixed(depthU().dp === 0 ? 0 : 1);
-      else if (c.key === 'kicks') td.textContent = String(Math.round(totalM / state.params.kickDistance));
-      else if (c.key === 'gasEnd') td.textContent = last.endCuft === null ? '—' : last.endCuft.toFixed(1);
+      else if (c.key === 'dist') {
+        const d = depthU().from(totalM * M_TO_FT).toFixed(depthU().dp === 0 ? 0 : 1);
+        td.textContent = state.params.kickDistance > 0
+          ? d + ' / ' + Math.round(totalM / state.params.kickDistance) : d;
+      }
+      else if (c.key === 'gasLeft') {
+        // the surfacing figure: what is left when the last leg is done
+        td.textContent = last.remainCuft === null ? '—'
+          : last.empty ? 'OUT'
+          : last.remainCuft.toFixed(1) + ' / ' +
+            (last.remainPsi === null ? '—' : Math.round(last.remainPsi));
+        if (last.over) td.classList.add('over-budget-cell');
+      }
       ftr.appendChild(td);
     });
     tfoot.appendChild(ftr); table.appendChild(tfoot);
@@ -1754,13 +1790,15 @@
       cylinders().forEach((cy) => {
         const need = drawnBy[cy.id];
         if (need === undefined) return;
-        const short = need > usableCuft(cy);
+        const left = (cy.totalCuft || 0) - need;
+        const short = left < reserveCuft(cy);
         const line = document.createElement('div');
         line.className = 'legs-budget' + (short ? ' over-budget-cell' : '');
-        line.textContent = cy.name + ': needs ' + need.toFixed(1) + ' of ' +
-          usableCuft(cy).toFixed(1) + ' cuft usable (' + cy.totalCuft +
-          ' total less ' + reserveCuft(cy).toFixed(1) + ' reserve)' +
-          (short ? ' — OVER BUDGET' : '');
+        line.textContent = left < 0
+          ? cy.name + ': SHORT BY ' + (-left).toFixed(1) + ' cuft — needs ' +
+            need.toFixed(1) + ' of ' + (cy.totalCuft || 0) + ' available'
+          : cy.name + ': ' + left.toFixed(1) + ' cuft left of ' + (cy.totalCuft || 0) +
+            ', reserve ' + reserveCuft(cy).toFixed(1) + (short ? ' — INTO RESERVE' : '');
         sum.appendChild(line);
       });
       host.appendChild(sum);
@@ -1768,7 +1806,7 @@
 
     const note = document.createElement('div');
     note.className = 'legs-note';
-    const bits = ['Headings are TRUE bearings — add local magnetic declination (about 11–12° E in the Santa Barbara Channel) to steer them on a compass.'];
+    const bits = ['Headings are MAGNETIC — true bearings corrected by the ' + state.params.declination + '° E declination set in Path options, so they can be steered directly on a compass.'];
     if (!p.profile) bits.push('Depths are blank until the profile finishes reading.');
     if (state.params.kickDistance <= 0) bits.push('Set a kick distance in Path options to add a kick-cycle column.');
     if (!state.params.showGas) bits.push('Turn Gas on to budget cylinders across the legs.');
@@ -1912,6 +1950,14 @@
           const gap = Math.abs(s.distance - d);
           if (gap < bestD) { bestD = gap; best = s; }
         });
+        // dropline first so the dot sits on top of it
+        const drop = document.createElementNS(NS, 'line');
+        drop.setAttribute('class', 'pp-node-line');
+        drop.setAttribute('x1', x(d).toFixed(1)); drop.setAttribute('x2', x(d).toFixed(1));
+        drop.setAttribute('y1', PADT); drop.setAttribute('y2', H - PADB);
+        drop.setAttribute('stroke', p.color);
+        svg.appendChild(drop);
+
         const dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('class', 'pp-node-dot');
         dot.setAttribute('cx', x(d).toFixed(1));
@@ -2467,6 +2513,7 @@
     $('pp-gas-btn').setAttribute('aria-pressed', state.params.showGas ? 'true' : 'false');
 
     // kick distance is stored in metres; the input shows it in the chosen unit
+    $('pp-decl-input').value = state.params.declination;
     $('pp-kick-unit').value = state.params.kickUnit;
     const kickM = state.params.kickDistance;
     $('pp-kick-input').value = kickM > 0
@@ -2556,6 +2603,13 @@
     wrap.appendChild(box); wrap.appendChild(lab);
     return wrap;
   }
+
+  $('pp-decl-input').addEventListener('change', () => {
+    const v = parseFloat($('pp-decl-input').value);
+    if (isFinite(v)) state.params.declination = v;
+    $('pp-decl-input').value = state.params.declination;
+    renderPaths();
+  });
 
   function renderCylinders() {
     const host = $('pp-cyl-list');

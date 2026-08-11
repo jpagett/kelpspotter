@@ -985,6 +985,18 @@ input[type=range]::-moz-range-thumb {
 }
 
 
+/* draw-path button: outlined, with the glyph filling the face rather than
+   floating in a pool of padding */
+/* 2px, not 1.5: fractional border widths snap to one device pixel and the
+   outline then reads no differently from the plain overlay icons */
+.map-action { border: 2px solid var(--tide-dim); padding: 0; }
+.map-action:hover { border-color: var(--kelp); }
+.map-action svg {
+  width: 78%; height: 78%; display: block;
+  fill: none; stroke: currentColor; stroke-width: 2.1;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
 .pp-decl-auto {
   margin-left: 4px; padding: 3px 6px; cursor: pointer;
   background: var(--current); color: var(--tide);
@@ -1209,22 +1221,21 @@ input[type=range]::-moz-range-thumb {
    * the viewport, then each child gets placed on its own.
    */
   .corner-br { display: contents; }
-  .zoom-control {
-    position: fixed; right: 10px; z-index: 800; flex-direction: column;
-    bottom: calc(var(--tabbar-h) + var(--safe-b) + 12px);
-  }
+  /* pinch-zoom is the native gesture here; the buttons were only taking room
+     away from the map */
+  .zoom-control { display: none; }
   .map-actions {
     display: block; position: fixed; right: 10px; z-index: 800;
-    /* sits directly above the overlay picker (126 offset + 162 tall + gap) */
-    bottom: calc(var(--tabbar-h) + var(--safe-b) + 300px);
+    /* above the (now shorter, lower) overlay picker: 14 offset + 3x34 + 2x6 gaps */
+    bottom: calc(var(--tabbar-h) + var(--safe-b) + 152px);
   }
   .map-action[aria-pressed="true"] {
     background: var(--kelp); color: var(--abyss); border-color: var(--kelp);
   }
   .overlay-picker {
     position: fixed; right: 10px; z-index: 800; flex-direction: column;
-    /* clears the zoom stack below it (2x44 + gaps) with room to spare */
-    bottom: calc(var(--tabbar-h) + var(--safe-b) + 126px);
+    gap: 6px;
+    bottom: calc(var(--tabbar-h) + var(--safe-b) + 14px);   /* zoom is gone */
   }
 
   /* ---- the four panels become bottom sheets ----
@@ -1314,8 +1325,10 @@ input[type=range]::-moz-range-thumb {
   .cal-nav { width: 30px; height: 30px; }
   .seg button { padding: 14px 0; min-height: 44px; }
   .pp-tool { width: 32px; height: 30px; }
-  .ov-icon { width: 44px; height: 44px; }
-  .zoom-control button { width: 44px; height: 44px; font-size: 19px; }
+  /* compact overlay toggles — smaller than the 44px touch standard on purpose,
+     since they sit alone against the map with nothing adjacent to mis-hit */
+  .ov-icon { width: 34px; height: 34px; font-size: 13px; }
+  .ov-flyout input[type=range] { width: 92px; }
   .cc-cog, .pp-cog, .pp-caret, .pp-pencil { padding: 4px 6px; font-size: 13px; }
   /* the node editor is reached by long-press on a phone, so size it for a thumb */
   .node-coord input { font-size: 13px; padding: 8px 9px; }

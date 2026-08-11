@@ -234,10 +234,9 @@
       if (prewarm) return;    // background warm-up failing is not worth a toast
       say('True color unavailable — ' + err.message, 'warn');
       toast(err.message, true);
+      // opacity 0 is enough: the icon's pressed state now derives from opacity,
+      // so it stops reading "active" over a layer that never loaded
       setTrueColorOpacity(0);
-      // undo whatever solo state this failed attempt started, so the eye icon
-      // doesn't read "active" over a layer that never actually loaded
-      if (overlaySoloed === 'eye') { overlaySoloed = null; overlayPreSolo = null; }
       syncOverlayPicker();
     } finally {
       trueColorLoading = false;
@@ -1018,8 +1017,16 @@
     truecolor: { btn: 'ov-eye',   slider: 'ov-eye-slider',   param: 'trueColorOpacity' },
     depth:     { btn: 'ov-ruler', slider: 'ov-ruler-slider', param: 'depthOpacity' }
   };
-  let overlaySoloed = null;        // key of OVERLAYS, or null
-  let overlayPreSolo = null;       // every overlay's opacity before the solo click
+  /*
+   * Each overlay is independent. Clicking an icon toggles only that overlay
+   * between off and its last visible opacity — it does not touch the others.
+   *
+   * This replaces an earlier "solo" behaviour where clicking one icon set every
+   * other overlay to 0. That made kelp opacity a hostage of the basemap
+   * toggles: looking at true colour silently zeroed the kelp layer, and there
+   * was no way to view both together.
+   */
+  const overlayLast = {};          // last non-zero opacity, per overlay key
 
   function setKelpOpacity(v) {
     state.params.opacity = v;
@@ -1035,11 +1042,14 @@
     depth: setDepthOpacity
   };
 
+  // pressed simply means visible, which is what the icon now communicates
   function syncOverlayPicker() {
     Object.keys(OVERLAYS).forEach((key) => {
       const o = OVERLAYS[key];
-      $(o.btn).setAttribute('aria-pressed', overlaySoloed === key ? 'true' : 'false');
-      $(o.slider).value = state.params[o.param];
+      const v = state.params[o.param];
+      $(o.btn).setAttribute('aria-pressed', v > 0 ? 'true' : 'false');
+      $(o.slider).value = v;
+      if (v > 0) overlayLast[key] = v;
     });
   }
 
@@ -1051,28 +1061,24 @@
     setDepthLayer('relief', true);
   }
 
-  function soloOverlay(which) {
-    if (overlaySoloed === which) {
-      if (overlayPreSolo) {
-        Object.keys(OVERLAYS).forEach((key) => OVERLAY_SETTERS[key](overlayPreSolo[key]));
-      }
-      overlaySoloed = null;
-      overlayPreSolo = null;
+  const OVERLAY_FALLBACK = { kelp: 0.85, truecolor: 0.6, depth: 0.45 };
+
+  function toggleOverlay(which) {
+    const cur = state.params[OVERLAYS[which].param];
+    if (cur > 0) {
+      overlayLast[which] = cur;              // remember where to come back to
+      OVERLAY_SETTERS[which](0);
     } else {
-      overlayPreSolo = {};
-      Object.keys(OVERLAYS).forEach((key) => { overlayPreSolo[key] = state.params[OVERLAYS[key].param]; });
       if (which === 'depth') ensureReliefOn();
-      Object.keys(OVERLAYS).forEach((key) => OVERLAY_SETTERS[key](key === which ? 1 : 0));
-      overlaySoloed = which;
+      OVERLAY_SETTERS[which](overlayLast[which] || OVERLAY_FALLBACK[which]);
     }
     syncOverlayPicker();
   }
 
   Object.keys(OVERLAYS).forEach((key) => {
     const o = OVERLAYS[key];
-    $(o.btn).addEventListener('click', () => soloOverlay(key));
+    $(o.btn).addEventListener('click', () => toggleOverlay(key));
     $(o.slider).addEventListener('input', (ev) => {
-      overlaySoloed = null; overlayPreSolo = null;
       if (key === 'depth' && +ev.target.value > 0) ensureReliefOn();
       OVERLAY_SETTERS[key](+ev.target.value);
       syncOverlayPicker();

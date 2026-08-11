@@ -221,7 +221,9 @@ window.KELP_CONFIG = {
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it
-    trueColorOpacity: 0.3   // Sentinel-2 B4/B3/B2 RGB read, faint under the kelp mask
+    // The real view is the default: true colour is on at load, and the kelp
+    // overlay rides on top of it independently.
+    trueColorOpacity: 0.85  // Sentinel-2 B4/B3/B2 RGB read
                             // (auto-zeroed in demo mode, which has no real imagery)
   }
 };

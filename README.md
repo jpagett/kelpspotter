@@ -338,6 +338,22 @@ no stable export URL, and Google **Maps saved lists** are not extractable at all
 — that page is rendered by script, so no proxy helps. Both cases return a
 message naming the export that does work.
 
+## Map overlays
+
+The three overlay icons (kelp / true colour / depth) are **independent
+toggles**: each turns only its own layer on and off, restoring the opacity it
+last had. Earlier they behaved as a *solo* control — clicking one zeroed the
+other two, which made kelp opacity a hostage of the basemap toggles and left no
+way to view kelp over true colour at all.
+
+True colour is **on by default**, so the real view is what you land on. In demo
+mode it self-disables with a message, since there is no real imagery to show.
+
+On mobile the on-screen zoom buttons are dropped (pinch-zoom is the native
+gesture) and the overlay toggles are compact — deliberately under the 44 px
+touch standard, since they sit alone against the map with nothing adjacent to
+mis-hit.
+
 ## Magnetic declination
 
 Path options can derive declination from the mean position of the selected path

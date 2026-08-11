@@ -104,10 +104,20 @@
    */
   const drawBtn = $('map-draw-path');
   if (drawBtn && window.Paths) {
+    /*
+     * Inline SVG rather than a glyph: the arrow characters available all carry
+     * a lot of built-in side bearing, so the mark ended up small and floating
+     * in the middle of the button. Drawing it lets the zigzag run edge to edge.
+     */
+    const ZIGZAG = '<svg viewBox="0 0 22 22" aria-hidden="true">' +
+      '<polyline points="2,17 7.5,8.5 12,15 17,5.5"/>' +
+      '<polyline points="12.6,6.6 17.4,5.2 18.6,10"/></svg>';
+    const CHECK = '<svg viewBox="0 0 22 22" aria-hidden="true">' +
+      '<polyline points="4,12 9,17 18,5"/></svg>';
     const syncDraw = () => {
       const on = Paths.drawing;
       drawBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      drawBtn.textContent = on ? '✓' : '⤳';
+      drawBtn.innerHTML = on ? CHECK : ZIGZAG;
       drawBtn.title = on ? 'Finish this path' : 'Draw a path';
     };
     drawBtn.addEventListener('click', () => {

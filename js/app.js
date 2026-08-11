@@ -1497,7 +1497,7 @@
     $('pp-add').title = Paths.drawing ? 'Finish this path' : 'Draw a new path';
     $('pp-save').disabled = !Paths.selectedId;
     $('pp-note').textContent = !list.length
-      ? 'No paths yet — press + and click the map.'
+      ? 'No paths yet — press + or Ctrl-click the map.'
       : (Paths.drawing ? 'Click the map to add nodes. Esc or ✓ to finish.'
                        : 'Drag a node to move it; right-click a node to delete it.');
 
@@ -1712,75 +1712,58 @@
    * the first drag it is pinned to explicit left/top and the anchor dropped —
    * otherwise dragging a west or north edge would fight the anchor.
    */
+  /*
+   * Publish the dock's effective width as a CSS var. Anything that must stay
+   * clear of the panel (the bottom-right controls, the sign-in notice) offsets
+   * by it, so they follow a resize without their own listeners. A hidden or
+   * collapsed dock reports 0 — it is not occupying the right edge, so nothing
+   * needs to dodge it.
+   */
+  function syncDockWidth() {
+    const panel = document.querySelector('.paths-panel');
+    const occupying = !panel.classList.contains('view-hidden') &&
+                      !panel.classList.contains('collapsed');
+    const w = occupying ? (state.params.dockWidth || 360) : 0;
+    document.documentElement.style.setProperty('--dock-w', w + 'px');
+  }
+
   (function initPanelChrome() {
     const panel = document.querySelector('.paths-panel');
-    const MIN_W = 240, MIN_H = 120;
+    const MIN_W = 240;
     let drag = null;
 
-    // Anything that does its own thing on a press is not a drag handle.
-    const INTERACTIVE = 'button, input, select, textarea, a, svg, .pp-grip, .pp-row, .pp-menu';
-
-    // Switch from the top-right anchor to explicit left/top on the first
-    // interaction; otherwise moving or resizing a west/north edge fights it.
-    function unpin() {
-      const r = panel.getBoundingClientRect();
-      panel.style.left = r.left + 'px';
-      panel.style.top = r.top + 'px';
-      panel.style.right = 'auto';
-      return r;
-    }
-
+    /*
+     * The panel is docked (fixed to the right edge, full height), so the only
+     * geometry it owns is its width — dragged from its inboard edge. The CSS
+     * var is what actually sizes it, so the bottom-right controls and the
+     * sign-in notice, which offset by the same var, move with it for free.
+     */
     function onMove(ev) {
       if (!drag) return;
-      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
-
-      if (drag.corner) {
-        const west = drag.corner === 'nw' || drag.corner === 'sw';
-        const north = drag.corner === 'nw' || drag.corner === 'ne';
-        const w = Math.max(MIN_W, Math.min(window.innerWidth * 0.7, drag.w + (west ? -dx : dx)));
-        const h = Math.max(MIN_H, Math.min(window.innerHeight * 0.8, drag.h + (north ? -dy : dy)));
-        panel.style.width = w + 'px';
-        panel.style.height = h + 'px';
-        if (west) panel.style.left = (drag.left + (drag.w - w)) + 'px';
-        if (north) panel.style.top = (drag.top + (drag.h - h)) + 'px';
-        schedulePathsRerender();
-      } else {
-        // Keep a grabbable strip on screen rather than allowing it to be lost.
-        const maxL = window.innerWidth - 60, maxT = window.innerHeight - 40;
-        panel.style.left = Math.max(60 - drag.w, Math.min(maxL, drag.left + dx)) + 'px';
-        panel.style.top = Math.max(0, Math.min(maxT, drag.top + dy)) + 'px';
-      }
+      const w = Math.max(MIN_W, Math.min(window.innerWidth * 0.7, drag.w - (ev.clientX - drag.x)));
+      state.params.dockWidth = w;
+      syncDockWidth();
+      schedulePathsRerender();   // the profile plots track the panel's width
       ev.preventDefault();
     }
-
     function onUp() {
       drag = null;
       panel.classList.remove('dragging');
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
     }
-
-    function begin(ev, corner) {
-      const r = unpin();
-      drag = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height,
-               left: r.left, top: r.top, corner: corner };
-      panel.classList.add('dragging');
-      document.addEventListener('pointermove', onMove);
-      document.addEventListener('pointerup', onUp);
-      ev.preventDefault();
+    const edge = panel.querySelector('.pp-edge');
+    if (edge) {
+      edge.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        drag = { x: ev.clientX, w: panel.getBoundingClientRect().width };
+        panel.classList.add('dragging');
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        ev.preventDefault();
+      });
     }
-
-    panel.querySelectorAll('.pp-grip').forEach((grip) => {
-      grip.addEventListener('pointerdown', (ev) => begin(ev, grip.dataset.corner));
-    });
-
-    // Drag from any background area — the padding, the header bar behind its
-    // buttons, the note, the gaps between path rows.
-    panel.addEventListener('pointerdown', (ev) => {
-      if (ev.button !== 0) return;
-      if (ev.target.closest(INTERACTIVE)) return;
-      begin(ev, null);
-    });
+    syncDockWidth();
   })();
 
   /*
@@ -1861,6 +1844,7 @@
       $('pp-collapse').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       $('pp-collapse').title = collapsed ? 'Expand this panel' : 'Collapse this panel';
     }
+    syncDockWidth();
   });
   if (mobileQuery.matches) {
     pathsPanel.classList.add('collapsed');
@@ -1880,17 +1864,37 @@
   Object.keys(VIEW_TARGETS).forEach((id) => {
     $(id).addEventListener('change', () => {
       document.querySelector(VIEW_TARGETS[id]).classList.toggle('view-hidden', !$(id).checked);
+      if (id === 'view-paths') syncDockWidth();   // the dock stopped/started occupying the edge
     });
   });
-  $('view-toggle').addEventListener('click', () => {
-    const open = $('view-list').hidden;
-    $('view-list').hidden = !open;
-    $('view-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  /*
+   * Header dropdowns (View, Settings) share one rule: opening one closes the
+   * others, and a click anywhere outside closes them all. Wired by scanning
+   * .hdr-menu rather than by id, so a third menu needs no JS.
+   */
+  function closeHeaderMenus(except) {
+    document.querySelectorAll('.hdr-menu').forEach((menu) => {
+      if (menu === except) return;
+      const list = menu.querySelector('.hdr-menu-list');
+      const btn = menu.querySelector('button[aria-haspopup]');
+      if (list) list.hidden = true;
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    });
+  }
+  document.querySelectorAll('.hdr-menu').forEach((menu) => {
+    const btn = menu.querySelector('button[aria-haspopup]');
+    const list = menu.querySelector('.hdr-menu-list');
+    if (!btn || !list) return;
+    btn.addEventListener('click', () => {
+      const opening = list.hidden;
+      closeHeaderMenus(menu);
+      list.hidden = !opening;
+      btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    });
   });
   document.addEventListener('click', (ev) => {
-    if (ev.target.closest && ev.target.closest('.view-menu')) return;
-    $('view-list').hidden = true;
-    $('view-toggle').setAttribute('aria-expanded', 'false');
+    if (ev.target.closest && ev.target.closest('.hdr-menu')) return;
+    closeHeaderMenus();
   });
 
   /*
@@ -2054,7 +2058,9 @@
    * all for the cost of one JSON serialisation per burst of activity.
    * beforeunload does a final synchronous flush.
    */
+  let persistDisabled = false;
   function persistNow() {
+    if (persistDisabled) return;
     try {
       // stamp the version with every write — data without its version key
       // would be discarded as stale on the next load
@@ -2082,6 +2088,26 @@
   document.addEventListener('input', schedulePersist);
   document.addEventListener('pointerup', schedulePersist);
   window.addEventListener('beforeunload', persistNow);
+
+  /*
+   * Forget everything this app has stored, then reload into a first-visit
+   * state. Persistence is switched off FIRST and the pending write cancelled:
+   * otherwise the debounced writer — or the beforeunload flush that the
+   * reload itself triggers — would put the in-memory state straight back, and
+   * the cleared data would reappear on the next load.
+   */
+  $('clear-data').addEventListener('click', () => {
+    if (!window.confirm(
+      'Clear saved settings and paths?\n\nYour drawn paths and preferences will be forgotten and the page will reload. This cannot be undone.'
+    )) return;
+    persistDisabled = true;
+    clearTimeout(persistTimer);
+    try {
+      ['kelp.v', 'kelp.params', 'kelp.paths'].forEach((k) => localStorage.removeItem(k));
+      ['kelp.session', 'kelp.tcUsed'].forEach((k) => sessionStorage.removeItem(k));
+    } catch (err) { console.warn('clearing stored data failed:', err); }
+    location.reload();
+  });
 
   // ---- boot ----
   (async function boot() {

@@ -21,13 +21,21 @@
     </div>
     <div class="header-right">
       <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
-      <div class="view-menu">
+      <div class="hdr-menu">
         <button id="view-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false">View <span class="sect-caret">▾</span></button>
-        <div id="view-list" class="view-list" hidden>
+        <div id="view-list" class="hdr-menu-list" hidden>
           <label class="check"><input type="checkbox" id="view-console" checked><span class="label">Console</span></label>
           <label class="check"><input type="checkbox" id="view-paths" checked><span class="label">Paths</span></label>
           <label class="check"><input type="checkbox" id="view-activity" checked><span class="label">Activity</span></label>
           <label class="check"><input type="checkbox" id="view-legend" checked><span class="label">Legend</span></label>
+        </div>
+      </div>
+      <div class="hdr-menu">
+        <button id="settings-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false"
+                title="Settings">⚙</button>
+        <div id="settings-list" class="hdr-menu-list" hidden>
+          <button id="clear-data" class="menu-action danger" type="button"
+                  title="Forget saved settings and paths, then reload">Clear persistent data</button>
         </div>
       </div>
       <button id="connect" class="btn ghost disconnected">Connect Earth Engine</button>
@@ -213,10 +221,8 @@
       </div>
       <input id="pp-file" type="file" accept=".xlsx,.xls" hidden>
     </div>
-    <span class="pp-grip nw" data-corner="nw"></span>
-    <span class="pp-grip ne" data-corner="ne"></span>
-    <span class="pp-grip sw" data-corner="sw"></span>
-    <span class="pp-grip se" data-corner="se"></span>
+    <!-- docked to the right edge: only its inboard (left) edge resizes -->
+    <span class="pp-edge" aria-hidden="true"></span>
   </aside>
 
   <div class="activity" aria-live="polite">

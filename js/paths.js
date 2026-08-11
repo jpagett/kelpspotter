@@ -295,6 +295,13 @@ const Paths = (function () {
   }
 
   function onMapClick(ev) {
+    /*
+     * Ctrl (or Cmd) + click starts a path and drops its first node in one go,
+     * so drawing never has to begin at the + button. Cmd is accepted because
+     * macOS turns Ctrl+click into a secondary click, which never reaches here.
+     */
+    const oe = ev.originalEvent;
+    if (!drawing && oe && (oe.ctrlKey || oe.metaKey)) startDrawing();
     if (!drawing) return;
     drawing.nodes.push(ev.latlng);
     drawing.profile = null;

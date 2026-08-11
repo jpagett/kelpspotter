@@ -149,6 +149,7 @@ window.KELP_CONFIG = {
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
     kelpPalette: 'amber',   // key into KELP_PALETTES above
+    dockWidth: 360,         // width of the docked paths panel, in px
     mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'

@@ -18,6 +18,9 @@
 
   --console-w: 322px;
   --header-h: 52px;
+  /* live width of the docked paths panel; JS keeps it in sync so the
+     bottom-right controls and the sign-in notice can sit clear of it */
+  --dock-w: 360px;
   --activity-h: 134px;   /* reserved at the bottom left, under the console */
 }
 
@@ -90,17 +93,26 @@ body {
 .btn.ghost.disconnected { color: var(--kelp); border-color: var(--kelp); }
 .btn.ghost.disconnected:hover { background: var(--kelp); color: var(--abyss); }
 
-.view-menu { position: relative; }
-.view-menu .sect-caret { font-size: 8px; margin-left: 2px; }
-.view-list {
+/* shared chrome for the header dropdowns (View, Settings) */
+.hdr-menu { position: relative; }
+.hdr-menu .sect-caret { font-size: 8px; margin-left: 2px; }
+.hdr-menu-list {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
   display: flex; flex-direction: column; gap: 8px; min-width: 120px;
   padding: 10px 12px; background: var(--deep); border: 1px solid var(--line); border-radius: 3px;
   box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
 }
-.view-list[hidden] { display: none; }
-.view-list .check { font-size: 12px; color: var(--tide); }
-.view-list .check:hover { color: var(--foam); }
+.hdr-menu-list[hidden] { display: none; }
+.hdr-menu-list .check { font-size: 12px; color: var(--tide); }
+.hdr-menu-list .check:hover { color: var(--foam); }
+.menu-action {
+  cursor: pointer; white-space: nowrap; text-align: left;
+  background: none; color: var(--tide); border: 1px solid var(--line);
+  border-radius: 2px; padding: 5px 8px; font-family: var(--sans); font-size: 12px;
+}
+.menu-action:hover { color: var(--foam); border-color: var(--tide-dim); }
+/* destructive: reads as a warning before it is pressed, not after */
+.menu-action.danger:hover { color: #e2725b; border-color: #e2725b; }
 
 /* panels hidden entirely from the View menu, independent of their own collapse state */
 .console.view-hidden, .paths-panel.view-hidden,
@@ -114,7 +126,8 @@ body {
  * each other's widths.
  */
 .corner-br {
-  position: fixed; z-index: 900; right: 16px; bottom: 16px;
+  position: fixed; z-index: 900; bottom: 16px;
+  right: calc(var(--dock-w) + 16px);   /* clear of the docked paths panel */
   display: flex; align-items: center; gap: 10px;
 }
 .overlay-picker {
@@ -173,9 +186,10 @@ body {
    until the visitor signs in or dismisses it, so it must not sit over anything. */
 .signin-notice {
   position: fixed; z-index: 950; bottom: 18px;
-  /* Centred in the band between the activity panel (left) and legend (right)
-     rather than on the viewport, so it cannot overlap either on narrow screens. */
-  left: calc(var(--console-w) + 34px); right: 148px;
+  /* Centred in the band between the activity panel (left) and the docked
+     paths panel (right) rather than on the viewport, so it cannot overlap
+     either on narrow screens. */
+  left: calc(var(--console-w) + 34px); right: calc(var(--dock-w) + 16px);
   margin: 0 auto; width: fit-content; max-width: 620px;
   display: flex; align-items: stretch;
   background: rgba(5,22,28,0.94);
@@ -457,17 +471,15 @@ input[type=range]::-moz-range-thumb {
 .leaflet-contour-pane { filter: invert(1); opacity: 0.6; }
 
 /*
- * The kelp mask is a thin, alpha-ramped amber overlay, tuned to read clearly
- * against the plain dark basemap it was designed against. True color and the
- * depth relief now sit right under it (see the overlay picker) and, at full
- * "solo" opacity, are bright/busy enough to wash the same overlay out even
- * though it's still on top pane-wise — a halo keeps it legible over any of
- * them. Applies to both the EE/API tile layer (kelpPane) and the demo
- * engine's canvas, which lives in Leaflet's own overlayPane instead.
+ * NOTE: do not put a CSS `filter` on .leaflet-kelp-pane (or any pane holding
+ * tiles). A filter forces the browser to rasterize the whole pane into its
+ * own compositing layer, and Leaflet's zoom animation transforms that same
+ * pane and its tiles every frame — re-rasterizing a drop-shadow (which needs
+ * the layer's full alpha plus a blur) on each frame renders as black
+ * rectangles while zooming. A halo for kelp legibility over true colour was
+ * tried here and reverted for exactly that reason; true colour now defaults
+ * to a faint 30%, so the overlay reads fine without one.
  */
-.leaflet-kelp-pane, .kelp-overlay {
-  filter: drop-shadow(0 0 1.5px rgba(5,22,28,0.9)) drop-shadow(0 0 3px rgba(5,22,28,0.55));
-}
 
 /* crosshair over the map — Leaflet's own grab/grabbing cursors have to be beaten */
 .leaflet-container,
@@ -492,18 +504,22 @@ input[type=range]::-moz-range-thumb {
 .depth-probe .dp-sub { color: var(--tide-dim); margin-left: 5px; }
 
 /* ---------- paths panel ---------- */
+/* Docked to the right edge, full height under the header — a fixed piece of
+   chrome rather than a floating window, so it neither moves nor overlaps the
+   bottom-right controls (which shift left by --dock-w). */
 .paths-panel {
-  position: fixed; z-index: 900; right: 16px;
-  top: calc(var(--header-h) + 14px);
-  width: 360px; height: 320px;
-  min-width: 240px; min-height: 120px; max-width: 70vw; max-height: 80vh;
-  /* The panel itself never scrolls — .pp-inner does. If it did, the corner grips
-     (absolutely positioned children) would scroll out of reach on a long list. */
+  position: fixed; z-index: 900;
+  right: 0; top: var(--header-h); bottom: 0;
+  width: var(--dock-w); min-width: 240px; max-width: 70vw;
+  /* The panel itself never scrolls — .pp-inner does. If it did, the resize
+     edge (an absolutely positioned child) would scroll out of reach. */
   overflow: visible;
-  background: rgba(10,40,48,0.94); border: 1px solid var(--line); border-radius: 4px;
+  background: rgba(10,40,48,0.94);
+  border: 0 solid var(--line); border-left-width: 1px; border-radius: 0;
   backdrop-filter: blur(8px);
-  cursor: move;                          /* drag the panel by its background */
 }
+/* collapsed: shrink to the header strip instead of a tall empty column */
+.paths-panel.collapsed { bottom: auto; }
 .pp-inner {
   height: 100%; overflow-y: auto; overflow-x: hidden;
   padding: 12px 14px; border-radius: 4px;
@@ -523,7 +539,8 @@ input[type=range]::-moz-range-thumb {
 }
 .pp-head .eyebrow:hover { color: var(--kelp); }
 .paths-panel.collapsed #pp-body,
-.paths-panel.collapsed .pp-grip { display: none; }
+.paths-panel.collapsed .pp-global-tools,
+.paths-panel.collapsed .pp-edge { display: none; }
 .pp-tools { display: flex; gap: 4px; }
 .pp-tool {
   width: 24px; height: 22px; cursor: pointer; display: grid; place-items: center;
@@ -582,17 +599,12 @@ input[type=range]::-moz-range-thumb {
   font-family: var(--mono); font-size: 10px; padding: 2px 3px; cursor: pointer;
 }
 
-/* corner resize handles — CSS resize only offers bottom-right */
-.pp-grip { position: absolute; width: 14px; height: 14px; z-index: 5; }
-.pp-grip.nw { top: 0; left: 0; cursor: nwse-resize; }
-.pp-grip.ne { top: 0; right: 0; cursor: nesw-resize; }
-.pp-grip.sw { bottom: 0; left: 0; cursor: nesw-resize; }
-.pp-grip.se { bottom: 0; right: 0; cursor: nwse-resize; }
-.pp-grip.se::after {
-  content: ''; position: absolute; right: 3px; bottom: 3px;
-  width: 6px; height: 6px;
-  border-right: 2px solid var(--tide-dim); border-bottom: 2px solid var(--tide-dim);
+/* the dock's one resize affordance: its inboard edge, full height */
+.pp-edge {
+  position: absolute; top: 0; bottom: 0; left: -3px; width: 7px; z-index: 5;
+  cursor: ew-resize; touch-action: none;
 }
+.pp-edge:hover, .paths-panel.dragging .pp-edge { background: rgba(242,177,52,0.3); }
 .pp-cog:hover, .pp-caret:hover { color: var(--kelp); }
 .pp-mirror:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
 .pp-mirror[aria-pressed="true"]:hover { color: var(--abyss); }
@@ -854,10 +866,14 @@ input[type=range]::-moz-range-thumb {
   /* paths panel stays fixed top-right, width-capped so it never forces
      horizontal scroll on a narrow phone; corner-br tucks in a bit too */
   .corner-br { right: 10px; bottom: 10px; }
+  /* undock on phones: back to a floating card, since a side dock would eat
+     most of a narrow screen (tapping its name still fills the screen) */
   .paths-panel {
-    right: 10px; top: calc(var(--header-h) + 8px);
+    right: 10px; top: calc(var(--header-h) + 8px); bottom: auto;
     width: min(360px, calc(100vw - 20px));
+    border-width: 1px; border-radius: 4px;
   }
+  .pp-edge { display: none; }
   /* collapsed to its header strip by default on mobile — see boot() in app.js */
   .paths-panel.collapsed { width: auto; }
 
@@ -869,7 +885,6 @@ input[type=range]::-moz-range-thumb {
     border-radius: 0; margin: 0;
   }
   .paths-panel.mobile-full .pp-inner { height: 100%; }
-  .paths-panel.mobile-full .pp-grip { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

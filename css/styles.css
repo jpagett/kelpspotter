@@ -1117,6 +1117,31 @@ input[type=range]::-moz-range-thumb {
   .pp-opts-group { grid-template-columns: 1fr; }
 }
 
+
+/* ---------- profile-plot context menu ---------- */
+.plot-menu {
+  position: fixed; z-index: 1600; min-width: 210px;
+  background: linear-gradient(180deg, rgba(10,40,48,0.98), rgba(8,32,39,0.98));
+  border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 16px 44px -16px rgba(0,0,0,0.9);
+  padding: 4px; display: flex; flex-direction: column;
+}
+.plot-menu-head {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+  color: var(--tide-dim); padding: 4px 8px 6px; border-bottom: 1px solid var(--line);
+  margin-bottom: 3px;
+}
+.plot-menu button {
+  background: none; border: none; cursor: pointer; text-align: left;
+  padding: 8px 9px; border-radius: 3px;
+  color: var(--tide); font-size: 12px;
+}
+.plot-menu button:hover:not(:disabled) { background: rgba(242,177,52,0.12); color: var(--foam); }
+.plot-menu button:disabled { opacity: 0.35; cursor: default; }
+@media (max-width: 820px) {
+  .plot-menu button { padding: 12px 10px; font-size: 13px; }  /* thumb-sized */
+}
+
 /* ---------- session import review ---------- */
 .session-modal {
   position: fixed; inset: 0; z-index: 1500;

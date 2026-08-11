@@ -699,6 +699,68 @@ const Paths = (function () {
     onChange();
   }
 
+
+  /*
+   * SheetJS on demand. At 882 KB it was the single largest thing the page
+   * loaded, parse-blocking every visit — to serve a feature most sessions never
+   * touch. First spreadsheet action injects it; after that it is cached.
+   */
+  let xlsxLoading = null;
+  function ensureXLSX() {
+    if (typeof XLSX !== 'undefined') return Promise.resolve();
+    if (xlsxLoading) return xlsxLoading;
+    xlsxLoading = new Promise((resolve, reject) => {
+      say('Loading spreadsheet support…');
+      const tag = document.createElement('script');
+      tag.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+      tag.onload = () => resolve();
+      tag.onerror = () => { xlsxLoading = null; reject(new Error('spreadsheet library failed to load')); };
+      document.head.appendChild(tag);
+    });
+    return xlsxLoading;
+  }
+
+  /* ---------- depth ceilings ----------
+   * A ceiling caps the PLANNED depth over a span of the path: "over this 80 ft
+   * section we stay at 40 ft". Stored per path as {start, end, feet} in metres
+   * along the path / feet of depth. The bottom profile itself is untouched —
+   * the cap changes the effective depth used for display and gas planning,
+   * and the plot keeps the true bottom as a dotted line so the cap is never
+   * mistaken for bathymetry.
+   */
+  function addCeiling(id, a, b, feet) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(feet > 0)) return false;
+    const start = Math.min(a, b), end = Math.max(a, b);
+    if (!(end > start)) return false;
+    if (!p.ceilings) p.ceilings = [];
+    p.ceilings.push({ start: start, end: end, feet: Math.round(feet) });
+    onChange();
+    return true;
+  }
+  function clearCeilings(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !p.ceilings || !p.ceilings.length) return;
+    p.ceilings = [];
+    onChange();
+  }
+  // the tightest cap covering this distance, or null
+  function ceilingFtAt(p, dist) {
+    if (!p || !p.ceilings) return null;
+    let cap = null;
+    p.ceilings.forEach((c) => {
+      if (dist >= c.start && dist <= c.end && (cap === null || c.feet < cap)) cap = c.feet;
+    });
+    return cap;
+  }
+
+  // Insert a node into the selected geometry at this position — the same
+  // operation as clicking the path line, exposed for the profile-plot menu.
+  function insertAt(id, latlng) {
+    const p = paths.find((x) => x.id === id);
+    if (p) insertNodeAt(p, L.latLng(latlng.lat, latlng.lng));
+  }
+
   function lengthOf(p) {
     let d = 0;
     for (let i = 1; i < p.nodes.length; i++) d += DemSampler.haversine(p.nodes[i - 1], p.nodes[i]);
@@ -951,6 +1013,8 @@ const Paths = (function () {
         plotHeight: s.plotHeight > 0 ? s.plotHeight : 62,
         showNodes: !!s.showNodes,
         showLegs: !!s.showLegs,
+        ceilings: Array.isArray(s.ceilings)
+          ? s.ceilings.filter((c) => c && c.end > c.start && c.feet > 0) : [],
         plotHeightManual: !!s.plotHeightManual,
         legGas: (s.legGas && typeof s.legGas === 'object') ? s.legGas : {}
       });
@@ -965,11 +1029,12 @@ const Paths = (function () {
 
   /* ---------- spreadsheet in / out ---------- */
 
-  function exportPath(id) {
+  async function exportPath(id) {
     const p = paths.find((x) => x.id === id);
     if (!p) return;
-    if (typeof XLSX === 'undefined') { toast('Spreadsheet library did not load.', true); return; }
     if (!p.profile) { toast('Depth profile is still being read.', true); return; }
+    try { await ensureXLSX(); }
+    catch (e) { toast('Spreadsheet library failed to load — check the connection.', true); return; }
 
     const profile = p.profile.map((s) => ({
       'distance_m': Math.round(s.distance * 100) / 100,
@@ -987,7 +1052,8 @@ const Paths = (function () {
   }
 
   async function importFile(file) {
-    if (typeof XLSX === 'undefined') { toast('Spreadsheet library did not load.', true); return; }
+    try { await ensureXLSX(); }
+    catch (e) { toast('Spreadsheet library failed to load — check the connection.', true); return; }
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
@@ -1033,6 +1099,7 @@ const Paths = (function () {
     if (existing) {
       existing.name = rec.name || existing.name;
       existing.color = rec.color || existing.color;
+      existing.ceilings = Array.isArray(rec.ceilings) ? rec.ceilings : existing.ceilings;
       existing.nodes = nodes;
       existing.profile = null;
       redraw(existing);
@@ -1060,6 +1127,10 @@ const Paths = (function () {
     init: init,
     upsert: upsertPath,
     removeByUid: removePathByUid,
+    addCeiling: addCeiling,
+    clearCeilings: clearCeilings,
+    ceilingFtAt: ceilingFtAt,
+    insertAt: insertAt,
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,
     select: select,

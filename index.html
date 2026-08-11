@@ -6,6 +6,9 @@
   <title>KelpSpotter · Santa Barbara Channel</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 
+  <link rel="preconnect" href="https://basemaps.cartocdn.com">
+  <link rel="preconnect" href="https://gis.ngdc.noaa.gov">
+  <link rel="preconnect" href="https://gis.charttools.noaa.gov">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -376,27 +379,24 @@
 
 
   <!-- Leaflet -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Google Identity Services (for live Earth Engine sign-in) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <!-- Earth Engine JS client library (optional; site falls back to demo if absent) -->
-  <script src="https://unpkg.com/@google/earthengine@latest/build/ee_api_js.js"></script>
+  <script defer src="https://unpkg.com/@google/earthengine@latest/build/ee_api_js.js"></script>
 
-  <!-- SheetJS: path export/import needs a real two-sheet workbook -->
-  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  <script src="js/config.js"></script>
-  <script src="js/wmm.js"></script>
-  <script src="js/dem.js"></script>
-  <script src="js/contours.js"></script>
-  <script src="js/paths.js"></script>
-  <script src="js/poi.js"></script>
-  <script src="js/session.js"></script>
-  <script src="js/session-ui.js"></script>
-  <script src="js/api-kelp.js"></script>
-  <script src="js/ee-kelp.js"></script>
-  <script src="js/demo.js"></script>
-  <script src="js/app.js"></script>
-  <script src="js/mobile.js"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/wmm.js"></script>
+  <script defer src="js/dem.js"></script>
+  <script defer src="js/contours.js"></script>
+  <script defer src="js/paths.js"></script>
+  <script defer src="js/poi.js"></script>
+  <script defer src="js/session.js"></script>
+  <script defer src="js/session-ui.js"></script>
+  <script defer src="js/api-kelp.js"></script>
+  <script defer src="js/ee-kelp.js"></script>
+  <script defer src="js/demo.js"></script>
+  <script defer src="js/app.js"></script>
+  <script defer src="js/mobile.js"></script>
 </body>
 </html>

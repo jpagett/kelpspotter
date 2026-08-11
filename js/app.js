@@ -1551,7 +1551,11 @@
        * ~33 ft of elevation), so a leg would consume negative gas and the
        * running budget would refund itself. Surface pressure is the floor.
        */
-      const depthFt = Math.max(0, -s.feet);
+      let depthFt = Math.max(0, -s.feet);
+      // a ceiling caps the PLANNED depth for the span it covers, so gas is
+      // burned at the capped depth, not the bottom's
+      const cap = Paths.ceilingFtAt(p, s.distance);
+      if (cap !== null && cap < depthFt) depthFt = cap;
       const ata = 1 + depthFt / ATA_DEPTH_FT;
       const mi = s.distance / 1609.344;
       const dtMin = i === 0 ? 0 : ((mi - prevMi) / speedMiHr) * 60;
@@ -1905,9 +1909,22 @@
      * panel or window is resized.
      */
 
+    /*
+     * Two depth series. `eff` is the planned depth — the bottom, capped by any
+     * ceiling covering that distance. The solid line and fill draw eff; where a
+     * ceiling actually bites, the true bottom is added back as a dotted line so
+     * the cap can never be misread as bathymetry.
+     */
+    const effFt = (smp) => {
+      const bottom = -smp.feet;
+      const cap = Paths.ceilingFtAt(p, smp.distance);
+      return (cap !== null && cap < bottom) ? cap : bottom;
+    };
+    const capped = (smp) => effFt(smp) < -smp.feet - 1e-9;
+
     const area = document.createElementNS(NS, 'path');
     let d = 'M' + x(0) + ',' + y(0);
-    pts.forEach((s) => { d += 'L' + x(s.distance).toFixed(1) + ',' + y(-s.feet).toFixed(1); });
+    pts.forEach((s) => { d += 'L' + x(s.distance).toFixed(1) + ',' + y(effFt(s)).toFixed(1); });
     d += 'L' + x(maxX) + ',' + y(0) + 'Z';
     area.setAttribute('d', d);
     area.setAttribute('fill', p.color);
@@ -1915,11 +1932,35 @@
     svg.appendChild(area);
 
     const line = document.createElementNS(NS, 'polyline');
-    line.setAttribute('points', pts.map((s) => x(s.distance).toFixed(1) + ',' + y(-s.feet).toFixed(1)).join(' '));
+    line.setAttribute('points', pts.map((s) => x(s.distance).toFixed(1) + ',' + y(effFt(s)).toFixed(1)).join(' '));
     line.setAttribute('fill', 'none');
     line.setAttribute('stroke', p.color);
     line.setAttribute('stroke-width', '1.4');
     svg.appendChild(line);
+
+    // dotted true bottom, drawn only over the capped stretches
+    if ((p.ceilings || []).length) {
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) {
+          const dot = document.createElementNS(NS, 'polyline');
+          dot.setAttribute('points', run.join(' '));
+          dot.setAttribute('fill', 'none');
+          dot.setAttribute('stroke', p.color);
+          dot.setAttribute('stroke-width', '1');
+          dot.setAttribute('class', 'pp-true-bottom');
+          dot.setAttribute('stroke-dasharray', '2 3');
+          dot.setAttribute('opacity', '0.75');
+          svg.appendChild(dot);
+        }
+        run = [];
+      };
+      pts.forEach((s) => {
+        if (capped(s)) run.push(x(s.distance).toFixed(1) + ',' + y(-s.feet).toFixed(1));
+        else flush();
+      });
+      flush();
+    }
 
     [[0, '0'], [maxD, fmtDepth(maxD)]].forEach(([v, label], i) => {
       const t = document.createElementNS(NS, 'text');
@@ -2027,7 +2068,10 @@
       readout.setAttribute('x', sx < W / 2 ? sx + 4 : sx - 4);
       readout.setAttribute('text-anchor', sx < W / 2 ? 'start' : 'end');
       readout.setAttribute('opacity', '1');
-      readout.textContent = fmtDepth(-s.feet) + ' @ ' + fmtDist(s.distance);
+      const capHere = Paths.ceilingFtAt(p, s.distance);
+      readout.textContent = (capHere !== null && capHere < -s.feet
+        ? fmtDepth(capHere) + ' (bottom ' + fmtDepth(-s.feet) + ')'
+        : fmtDepth(-s.feet)) + ' @ ' + fmtDist(s.distance);
       Paths.hoverAt(p.id, s, fmtDepth(-s.feet));
     });
     svg.addEventListener('mouseleave', () => {
@@ -2035,7 +2079,129 @@
       readout.setAttribute('opacity', '0');
       Paths.hoverOff();
     });
+
+    /*
+     * Right-click (long-press on touch) anywhere on the plot for actions at
+     * that distance along the path. The click's x gives the distance, its y a
+     * depth — which is what makes "set ceiling" natural: point at where the
+     * cap should sit and the depth is read straight off the axis.
+     */
+    const plotPoint = (clientX, clientY) => {
+      const r = svg.getBoundingClientRect();
+      if (!r.width) return null;
+      const vx = ((clientX - r.left) / r.width) * W;
+      const vy = ((clientY - r.top) / r.height) * H;
+      const dm = Math.max(0, Math.min(maxX, ((vx - PADL) / (W - PADL - 4)) * maxX));
+      const ft = Math.max(0, ((vy - PADT) / (H - PADT - PADB)) * (maxD || 1));
+      let best = pts[0];
+      pts.forEach((smp) => { if (Math.abs(smp.distance - dm) < Math.abs(best.distance - dm)) best = smp; });
+      return { dist: dm, feet: ft, sample: best };
+    };
+    svg.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const at = plotPoint(ev.clientX, ev.clientY);
+      if (at) openPlotMenu(p, at, ev.clientX, ev.clientY);
+    });
+    // touch: long-press for the same menu
+    let plotPress = null;
+    svg.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType === 'mouse') return;
+      const sx = ev.clientX, sy = ev.clientY;
+      plotPress = setTimeout(() => {
+        const at = plotPoint(sx, sy);
+        if (at) openPlotMenu(p, at, sx, sy);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 450);
+    });
+    ['pointerup', 'pointercancel', 'pointermove'].forEach((t) =>
+      svg.addEventListener(t, (ev) => {
+        if (t === 'pointermove' && plotPress === null) return;
+        if (t !== 'pointermove' || ev.pointerType !== 'mouse') { clearTimeout(plotPress); plotPress = null; }
+      }));
     return svg;
+  }
+
+  /*
+   * ---- plot context menu ----
+   * One floating menu, rebuilt per opening. pendingCeil holds a "ceiling start"
+   * waiting for its end, per path — kept OUTSIDE the path object so an
+   * abandoned half-gesture never persists or exports.
+   */
+  let pendingCeil = null;   // {pathId, dist, feet}
+  let plotMenuEl = null;
+
+  function closePlotMenu() {
+    if (plotMenuEl) { plotMenuEl.remove(); plotMenuEl = null; }
+  }
+  document.addEventListener('click', (ev) => {
+    if (plotMenuEl && !plotMenuEl.contains(ev.target)) closePlotMenu();
+  }, true);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePlotMenu(); });
+
+  function openPlotMenu(p, at, cx, cy) {
+    closePlotMenu();
+    const menu = document.createElement('div');
+    menu.className = 'plot-menu';
+    const item = (label, fn, disabled, hint) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      if (hint) b.title = hint;
+      b.disabled = !!disabled;
+      b.addEventListener('click', () => { closePlotMenu(); fn(); });
+      menu.appendChild(b);
+      return b;
+    };
+    const head = document.createElement('div');
+    head.className = 'plot-menu-head';
+    head.textContent = fmtDist(at.dist) + ' · ' + fmtDepth(at.feet);
+    menu.appendChild(head);
+
+    item('Add node here', () => {
+      Paths.insertAt(p.id, { lat: at.sample.lat, lng: at.sample.lng });
+      say('Node inserted at ' + fmtDist(at.dist) + ' along ' + p.name);
+    }, false, 'Insert a path node at this distance along the line');
+
+    const pendingHere = pendingCeil && pendingCeil.pathId === p.id;
+    item('Set ceiling start — ' + fmtDepth(at.feet), () => {
+      pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
+      say('Ceiling started at ' + fmtDist(at.dist) + ', ' + fmtDepth(at.feet) +
+          ' — right-click the plot again to set the end');
+    }, false, 'Start a max-depth cap at this distance; its depth is where you clicked');
+
+    item(pendingHere
+          ? 'Set ceiling end — cap at ' + fmtDepth(pendingCeil.feet)
+          : 'Set ceiling end (no start yet)',
+      () => {
+        if (!pendingHere) return;
+        if (Paths.addCeiling(p.id, pendingCeil.dist, at.dist, pendingCeil.feet)) {
+          say('Ceiling: ' + fmtDepth(pendingCeil.feet) + ' from ' +
+              fmtDist(Math.min(pendingCeil.dist, at.dist)) + ' to ' +
+              fmtDist(Math.max(pendingCeil.dist, at.dist)), 'ok');
+          pendingCeil = null;
+          renderPaths();
+          persistNow();
+        } else {
+          toast('Could not set that ceiling — zero-length span?', true);
+        }
+      }, !pendingHere,
+      'Close the cap here, using the depth from the start click');
+
+    if ((p.ceilings || []).length) {
+      item('Clear ceilings (' + p.ceilings.length + ')', () => {
+        Paths.clearCeilings(p.id);
+        say('Ceilings cleared from ' + p.name);
+        renderPaths();
+        persistNow();
+      });
+    }
+
+    document.body.appendChild(menu);
+    // keep it on screen
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.min(cx, window.innerWidth - mw - 8) + 'px';
+    menu.style.top = Math.min(cy, window.innerHeight - mh - 8) + 'px';
+    plotMenuEl = menu;
   }
 
   function renderPaths() {
@@ -2913,7 +3079,7 @@
           ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
         plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
         expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
-        legGas: p.legGas,
+        legGas: p.legGas, ceilings: p.ceilings || [],
         nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
       }))));
       const sc = state.scenes[state.idx];

@@ -64,6 +64,7 @@ const Session = (function () {
   }
   function pathRecord(p) {
     return { uid: pathUid(p), name: p.name, color: p.color,
+             ceilings: p.ceilings || [],
              nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng })) };
   }
 
@@ -168,7 +169,7 @@ const Session = (function () {
       pois: diffCollection((window.POI ? POI.list : []).map(poiRecord), incoming.pois,
                            ['name', 'lat', 'lng', 'symbol', 'desc']),
       paths: diffCollection((window.Paths ? Paths.list : []).map(pathRecord), incoming.paths,
-                            ['name', 'color', 'nodes']),
+                            ['name', 'color', 'nodes', 'ceilings']),
       view: settingsDiff(st.params, incoming.view, VIEW_KEYS),
       user: settingsDiff(st.params, incoming.user, USER_KEYS)
     };

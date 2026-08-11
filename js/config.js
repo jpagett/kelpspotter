@@ -30,7 +30,7 @@ window.KELP_CONFIG = {
    * a relay. Leave as the placeholder to disable share-link import — the file
    * importer is unaffected either way.
    */
-  PROXY_URL: '<your-cloudflare-worker-url>',
+  PROXY_URL: 'https://kelpspotter-proxy.pagett-jared.workers.dev',
 
   API_URL: 'https://kelpspotter-api-mjhkueccia-uw.a.run.app',
 

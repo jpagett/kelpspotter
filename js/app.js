@@ -17,8 +17,11 @@
 
   // ---- map ----
   const [w, s, e, n] = cfg.AOI;
-  const map = L.map('map', { zoomControl: true, attributionControl: true })
+  // zoomControl:false — replaced by the custom horizontal control in .corner-br
+  const map = L.map('map', { zoomControl: false, attributionControl: true })
     .fitBounds([[s, w], [n, e]]);
+  $('zoom-in').addEventListener('click', () => map.zoomIn());
+  $('zoom-out').addEventListener('click', () => map.zoomOut());
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19, subdomains: 'abcd'
   }).addTo(map);
@@ -703,14 +706,25 @@
 
   /*
    * Engines return either a tile-URL template (Earth Engine) or a Leaflet layer
-   * (demo). tileSize:128 (half Leaflet's 256 default) requests a finer grid —
-   * more, smaller boxes over the same area — so the map redraws more of the
-   * layer's edge on each pan/zoom step rather than in fewer, larger jumps.
+   * (demo).
+   *
+   * tileSize stays at Leaflet's 256 default ON PURPOSE. Earth Engine's tile
+   * server only speaks the standard 256px z/x/y pyramid, so a smaller
+   * tileSize misaligns the grid (Leaflet computes x/y for a 128px grid, the
+   * server answers for a 256px one — every tile lands on the wrong patch of
+   * ocean). The correct pairing (tileSize:128 + zoomOffset:1) would render
+   * fine but quadruples tile requests per view against EE quota for pixels
+   * EE renders identically anyway.
+   *
+   * keepBuffer + updateWhenIdle mirror cfg.DEPTH.tuning's rationale: hold
+   * panned-past tiles so panning back is free, and wait for the map to
+   * settle before requesting new ones — every kelp tile is an EE render.
    */
   function toLeafletLayer(res, opts) {
     if (typeof res === 'string') {
       return L.tileLayer(res, Object.assign(
-        { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane', tileSize: 128 }, opts));
+        { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane',
+          keepBuffer: 4, updateWhenIdle: true }, opts));
     }
     return res; // already a Leaflet layer (demo overlay)
   }
@@ -955,6 +969,7 @@
       startDepth = Math.max(0, Math.min(CC_MAX_FT, Math.abs(it.feet)));
       pending = startDepth;
       try { marker.setPointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+      ev.preventDefault();   // a drag must never double as a text-selection
     });
 
     marker.addEventListener('pointermove', (ev) => {
@@ -1013,7 +1028,10 @@
     if (ev.target.closest('.cc-marker')) return;
     const r = $('cc-ruler').getBoundingClientRect();
     const frac = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-    const depth = Math.round(frac * CC_MAX_FT);
+    // click-to-add snaps to a round 5 ft; dragging afterwards is deliberately
+    // free-form (see the marker's pointermove handler), so coarse placement is
+    // easy and fine adjustment stays possible
+    const depth = Math.round(frac * CC_MAX_FT / 5) * 5;
     const it = CustomContours.add(depth);
     if (!it) return;
     renderContourRuler();
@@ -1171,7 +1189,9 @@
     // by the caller) rather than fixed, so 1 viewBox unit == 1 CSS px and text
     // never needs non-uniform scaling to fill the panel — see the comment on
     // preserveAspectRatio below.
-    const W = Math.max(120, Math.round(pxWidth) || 240), H = 62, PADL = 26, PADB = 12, PADT = 4;
+    const W = Math.max(120, Math.round(pxWidth) || 240);
+    const H = Math.max(32, Math.round(p.plotHeight) || 62);
+    const PADL = 26, PADB = 12, PADT = 4;
     const maxD = Math.max.apply(null, pts.map((s) => -s.feet));
     const maxX = pts[pts.length - 1].distance || 1;
     const x = (d) => PADL + (W - PADL - 4) * (d / maxX);
@@ -1180,6 +1200,7 @@
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.style.height = H + 'px';   // draggable per path (p.plotHeight) — see the resize handle below
     /*
      * No preserveAspectRatio="none" here (unlike before): since W now matches
      * the container's real width and H matches the CSS height, the viewBox
@@ -1280,7 +1301,7 @@
       readout.setAttribute('text-anchor', sx < W / 2 ? 'start' : 'end');
       readout.setAttribute('opacity', '1');
       readout.textContent = fmtDepth(-s.feet) + ' @ ' + fmtDist(s.distance);
-      Paths.hoverAt(p.id, s);
+      Paths.hoverAt(p.id, s, fmtDepth(-s.feet));
     });
     svg.addEventListener('mouseleave', () => {
       guide.setAttribute('opacity', '0');
@@ -1447,6 +1468,40 @@
           readout.appendChild(document.createTextNode(' · ' + (gp ? gp.total.toFixed(1) + ' cuft' : '—')));
         }
         wrap.appendChild(readout);
+
+        if (svg) {
+          /*
+           * Drag to resize. Height is written straight to p.plotHeight and
+           * the SVG is rebuilt in place on every pointermove for a smooth
+           * drag — Paths.setPlotHeight() (which fires onChange -> a full
+           * renderPaths()) is only called once, on release, to persist it.
+           */
+          const resizeHandle = document.createElement('div');
+          resizeHandle.className = 'pp-plot-resize';
+          resizeHandle.title = 'Drag to resize this plot';
+          let dragH = null;
+          resizeHandle.addEventListener('pointerdown', (ev) => {
+            if (ev.button !== 0) return;
+            dragH = { startY: ev.clientY, startH: p.plotHeight || 62 };
+            try { resizeHandle.setPointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+            ev.preventDefault();
+          });
+          resizeHandle.addEventListener('pointermove', (ev) => {
+            if (!dragH) return;
+            p.plotHeight = Math.max(32, Math.min(320, dragH.startH + (ev.clientY - dragH.startY)));
+            const currentSvg = wrap.querySelector('svg');
+            const freshWidth = currentSvg ? currentSvg.getBoundingClientRect().width : pxWidth;
+            const newSvg = profileSvg(p, freshWidth);
+            if (newSvg && currentSvg) wrap.replaceChild(newSvg, currentSvg);
+          });
+          resizeHandle.addEventListener('pointerup', (ev) => {
+            if (!dragH) return;
+            dragH = null;
+            try { resizeHandle.releasePointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+            Paths.setPlotHeight(p.id, p.plotHeight);
+          });
+          wrap.appendChild(resizeHandle);
+        }
       }
     });
   }
@@ -1668,7 +1723,7 @@
    * length turns these into its own numbers.
    */
   function syncGasBar() {
-    $('pp-sac-field').style.display = state.params.showGas ? '' : 'none';
+    $('pp-sac-field').classList.toggle('pp-field-hidden', !state.params.showGas);
     $('pp-sac-input').value = +sacU().fromBase(state.params.sac).toFixed(sacU().dp);
     $('pp-sac-unit').textContent = sacU().label;
 

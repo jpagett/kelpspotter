@@ -30,6 +30,17 @@ body {
   overflow: hidden;
 }
 
+/*
+ * Panel chrome is controls, not copy. Browsers start a native text selection
+ * on any mousedown-drag, and only some drag handlers preventDefault it — so
+ * dragging panels/markers/handles was highlighting labels along the way.
+ * Blanket-disable selection across the chrome; text-entry fields opt back in.
+ */
+.header, .console, .paths-panel, .activity, .corner-br, .signin-notice {
+  user-select: none;
+}
+.console input, .paths-panel input, .activity input { user-select: text; }
+
 /* ---------- header ---------- */
 .header {
   position: fixed; inset: 0 0 auto 0; height: var(--header-h); z-index: 1000;
@@ -96,8 +107,17 @@ body {
 .activity.view-hidden, .legend.view-hidden { display: none; }
 
 /* ---------- base overlay picker (true color vs depth) ---------- */
-.overlay-picker {
+/*
+ * The legend, overlay picker and zoom control all live in one bottom-right
+ * row (.corner-br) instead of each being independently position:fixed, so
+ * they line up in one place instead of needing hand-tuned offsets against
+ * each other's widths.
+ */
+.corner-br {
   position: fixed; z-index: 900; right: 16px; bottom: 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.overlay-picker {
   display: flex; gap: 8px;
   background: rgba(5,22,28,0.6); border: 1px solid var(--line); border-radius: 22px;
   padding: 6px; backdrop-filter: blur(6px);
@@ -133,6 +153,21 @@ body {
 .ov-flyout input[type=range] {
   writing-mode: vertical-lr; direction: rtl; width: 16px; height: 64px; accent-color: var(--kelp);
 }
+
+/* replaces Leaflet's own top-left, vertically-stacked zoom control */
+.zoom-control {
+  display: flex;
+  background: rgba(5,22,28,0.6); border: 1px solid var(--line); border-radius: 22px;
+  padding: 6px; backdrop-filter: blur(6px);
+}
+.zoom-control button {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.zoom-control button:hover { border-color: var(--kelp); color: var(--kelp); }
+.zoom-control button:first-child { border-radius: 50% 0 0 50%; border-right: none; }
+.zoom-control button:last-child { border-radius: 0 50% 50% 0; }
 
 /* Bottom centre — the space the timeline used to occupy. Persistent: it stays
    until the visitor signs in or dismisses it, so it must not sit over anything. */
@@ -378,7 +413,6 @@ input[type=range]::-moz-range-thumb {
 
 /* ---------- kelp colorbar ---------- */
 .legend {
-  position: fixed; z-index: 900; right: 16px; top: calc(var(--header-h) + 14px);
   display: flex; align-items: center; gap: 8px;
   background: rgba(5,22,28,0.5); border: 1px solid var(--line); border-radius: 4px;
   padding: 6px 10px; backdrop-filter: blur(6px);
@@ -439,7 +473,7 @@ input[type=range]::-moz-range-thumb {
 /* ---------- paths panel ---------- */
 .paths-panel {
   position: fixed; z-index: 900; right: 16px;
-  top: calc(var(--header-h) + 58px);   /* clears the kelp colorbar sitting above it */
+  top: calc(var(--header-h) + 14px);
   width: 360px; height: 320px;
   min-width: 240px; min-height: 120px; max-width: 70vw; max-height: 80vh;
   /* The panel itself never scrolls — .pp-inner does. If it did, the corner grips
@@ -560,7 +594,8 @@ input[type=range]::-moz-range-thumb {
 }
 .pp-del:hover { color: #e2725b; border-color: #e2725b; }
 .pp-profile { padding: 2px 6px 7px; }
-.pp-profile svg { display: block; width: 100%; height: 62px; }
+/* height comes inline per path (p.plotHeight) — see profileSvg() in app.js */
+.pp-profile svg { display: block; width: 100%; }
 .pp-profile .pp-axis { font-family: var(--mono); font-size: 8px; fill: var(--tide-dim); }
 
 /*
@@ -573,13 +608,20 @@ input[type=range]::-moz-range-thumb {
 }
 /* each group stacks its button(s) over the spinbox that configures them */
 .pp-tool-group { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
-.pp-tool-group-wide { width: 116px; }
+/* right-aligned within the bar — the gas/SAC group stays left via normal flow */
+.pp-tool-group-wide { width: 116px; margin-left: auto; }
 .pp-mode-btns { display: flex; gap: 4px; width: 100%; }
 .pp-mode-btns .pp-mode-btn { flex: 1; min-width: 0; }
 .pp-field { display: flex; align-items: center; gap: 4px; }
 .pp-field-below { justify-content: center; }
 .pp-field-below .pp-num { flex: 1; min-width: 0; }
 .pp-field-unit { color: var(--tide-dim); }
+/*
+ * visibility, not display: the SAC field keeps reserving its layout space
+ * even while hidden (gas off), so the gas/SAC group's width never changes
+ * and the time/speed group to its right never shifts when gas is toggled.
+ */
+#pp-sac-field.pp-field-hidden { visibility: hidden; }
 .pp-num {
   width: 46px; background: var(--current); color: var(--foam);
   border: 1px solid var(--line); border-radius: 2px;
@@ -587,6 +629,11 @@ input[type=range]::-moz-range-thumb {
 }
 /* Chrome/Safari spinner arrows crowd a 46px field */
 .pp-num::-webkit-inner-spin-button, .pp-num::-webkit-outer-spin-button { margin-left: 2px; }
+/* the SAC field specifically drops the spinner entirely, arrows or not */
+#pp-sac-input { -moz-appearance: textfield; }
+#pp-sac-input::-webkit-inner-spin-button, #pp-sac-input::-webkit-outer-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
 .pp-mode-btn {
   height: 20px; padding: 0 8px; cursor: pointer;
   background: none; color: var(--tide-dim);
@@ -610,6 +657,21 @@ input[type=range]::-moz-range-thumb {
   margin-top: 4px; padding: 0 2px;
 }
 .pp-readout-speed.warn { color: #e2725b; font-weight: 600; }
+
+.pp-plot-resize {
+  height: 7px; margin-top: 4px; border-radius: 2px;
+  background: var(--line); cursor: ns-resize; touch-action: none;
+}
+.pp-plot-resize:hover, .pp-plot-resize:active { background: var(--kelp); }
+
+/* depth readout riding on the plot-hover map dot */
+.path-hover-label {
+  background: rgba(5,22,28,0.88); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; padding: 1px 5px;
+  box-shadow: none;
+}
+.path-hover-label::before { display: none; }   /* no tooltip arrow — the dot is the anchor */
 
 /* draggable node handles */
 .path-node span {
@@ -753,11 +815,11 @@ input[type=range]::-moz-range-thumb {
     max-width: 30vw;
   }
 
-  /* legend and paths panel stay fixed top-right, but width-capped so they
-     never force horizontal scroll on a narrow phone */
-  .legend { right: 10px; }
+  /* paths panel stays fixed top-right, width-capped so it never forces
+     horizontal scroll on a narrow phone; corner-br tucks in a bit too */
+  .corner-br { right: 10px; bottom: 10px; }
   .paths-panel {
-    right: 10px; top: calc(var(--header-h) + 52px);
+    right: 10px; top: calc(var(--header-h) + 8px);
     width: min(360px, calc(100vw - 20px));
   }
   /* collapsed to its header strip by default on mobile — see boot() in app.js */

@@ -43,7 +43,8 @@ const Paths = (function () {
    * distance along the path shows where that distance actually is on the water.
    */
   let hoverDot = null;
-  function hoverAt(id, sample) {
+  // label is a pre-formatted string (e.g. "42 ft") — app.js owns unit conversion/formatting.
+  function hoverAt(id, sample, label) {
     const p = paths.find((x) => x.id === id);
     if (!p || !sample) return;
     const ll = L.latLng(sample.lat, sample.lng);
@@ -54,6 +55,14 @@ const Paths = (function () {
       }).addTo(map);
     } else {
       hoverDot.setLatLng(ll).setStyle({ fillColor: p.color });
+    }
+    if (label) {
+      if (hoverDot.getTooltip()) hoverDot.setTooltipContent(label);
+      else {
+        hoverDot.bindTooltip(label, {
+          permanent: true, direction: 'top', offset: [0, -8], className: 'path-hover-label'
+        }).openTooltip();
+      }
     }
   }
   function hoverOff() {
@@ -120,7 +129,7 @@ const Paths = (function () {
       id: id, name: 'Path ' + id, nodes: [],
       color: COLORS[(id - 1) % COLORS.length],
       line: null, markers: [], profile: null, expanded: true,
-      mirrored: false, preMirrorNodes: null
+      mirrored: false, preMirrorNodes: null, plotHeight: 62
     };
     paths.push(p);
     selectedId = p.id;
@@ -222,6 +231,18 @@ const Paths = (function () {
     onChange();
   }
 
+  /*
+   * Called once per drag, on release (see app.js) — not on every pointermove,
+   * since that already redraws the SVG directly for a smooth drag and only
+   * needs to persist the final value here.
+   */
+  function setPlotHeight(id, px) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(px > 0)) return;
+    p.plotHeight = px;
+    onChange();
+  }
+
   function setColor(id, color) {
     const p = paths.find((x) => x.id === id);
     if (!p) return;
@@ -285,7 +306,7 @@ const Paths = (function () {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
         color: COLORS[(id - 1) % COLORS.length],
         line: null, markers: [], profile: null, expanded: true,
-        mirrored: false, preMirrorNodes: null
+        mirrored: false, preMirrorNodes: null, plotHeight: 62
       };
       paths.push(p);
       selectedId = p.id;
@@ -309,6 +330,7 @@ const Paths = (function () {
     rename: rename,
     toggleExpand: toggleExpand,
     setMirrored: setMirrored,
+    setPlotHeight: setPlotHeight,
     setColor: setColor,
     remove: remove,
     exportPath: exportPath,

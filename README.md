@@ -80,6 +80,10 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Depth contours** | Charted depth contours from NOAA ENC (off by default). |
 | **Depth → Depth opacity** | Dims the relief so the kelp layer stays readable over it. |
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
+| **Floors** | The ceiling's mirror: a *minimum* planned depth over a span ("stay below 20 ft through the boat channel"). Set from the same right-click menu. Where a floor and ceiling conflict, the floor wins; where the bottom is shallower than the floor, the bottom wins — rock is not negotiable. |
+| **Bound editing** | Drag a ceiling/floor segment on the plot vertically to change its depth; right-click the segment to remove just that one. |
+| **Undo** | Deleting a path shows a 6-second toast with an Undo button. |
+| **Keys** | `[` `]` step scenes (arrows still work), `n` starts/finishes drawing a path. |
 | **Profile right-click** | Right-click (long-press on touch) the depth plot for actions at that distance: **Add node here**, **Set ceiling start / end**, **Clear ceilings**. A ceiling caps the *planned* depth over a span — the plot draws the capped line solid with the true bottom dotted, hover reads both, and gas is burned at the capped depth. The cap's depth is the y-position of the click. |
 | **Drawing on a contour** | While drawing, a node placed within ~18 px of a custom depth contour snaps onto it, so a transect can follow "the 40 ft line". Shift-clicking an existing node snaps it the same way, with a wider catch. |
 | **Node handles** | Live in their own map pane above the path lines, so grabbing a node always beats the line's insert-a-node hit area. |
@@ -359,6 +363,24 @@ in the published file.
 **The model expires 2029-12-31.** After that `WMM.isExpired()` returns true and
 the app warns rather than quietly returning stale values; replacing
 `js/wmm.js`'s coefficient block with the next WMM release is the fix.
+
+## Performance notes
+
+- **SheetJS is no longer shipped with the page.** At 882 KB it was the largest
+  asset, parse-blocking every visit for spreadsheet features most sessions never
+  touch; it now loads on first use. All other scripts are `defer`'d and the
+  tile/data hosts get `preconnect` hints — about 1.4 MB of parse-blocking script
+  is gone from first paint.
+- **`sw.js` caches the NOAA hosts** (stale-while-revalidate, 400-entry cap):
+  NOAA sends `cache-control: private` with no freshness signal, so without the
+  worker every relief and contour tile re-downloads on every visit. Bathymetry
+  does not change week to week.
+- **Kelp tile URLs are cached for 20 minutes** per parameter set, and the
+  neighbouring scenes are minted during idle time so the scene steppers land on
+  a warm cache. Only tile-URL engines cache; the demo engine rebuilds live
+  layers.
+- POIs are annotated with the **depth under each marker** (one batched NOAA
+  request per import), shown as a chip in the panel row.
 
 ## Notes & caveats
 

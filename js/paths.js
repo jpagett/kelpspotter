@@ -754,6 +754,51 @@ const Paths = (function () {
     return cap;
   }
 
+  /*
+   * Floors are the ceiling's mirror: a MINIMUM planned depth over a span —
+   * "stay below 20 ft through the boat channel". The deepest floor covering
+   * the distance wins.
+   */
+  function addFloor(id, a, b, feet) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(feet > 0)) return false;
+    const start = Math.min(a, b), end = Math.max(a, b);
+    if (!(end > start)) return false;
+    if (!p.floors) p.floors = [];
+    p.floors.push({ start: start, end: end, feet: Math.round(feet) });
+    onChange();
+    return true;
+  }
+  function clearFloors(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !p.floors || !p.floors.length) return;
+    p.floors = [];
+    onChange();
+  }
+  function floorFtAt(p, dist) {
+    if (!p || !p.floors) return null;
+    let f = null;
+    p.floors.forEach((c) => {
+      if (dist >= c.start && dist <= c.end && (f === null || c.feet > f)) f = c.feet;
+    });
+    return f;
+  }
+
+  /*
+   * The planned depth at a point: the bottom, capped by any ceiling, then
+   * pushed back down by any floor — but never below the bottom, since rock is
+   * not negotiable. This single function is what the plot, the hover readout,
+   * the leg table and the gas model all agree on.
+   */
+  function plannedFtAt(p, dist, bottomFt) {
+    let planned = bottomFt;
+    const c = ceilingFtAt(p, dist);
+    if (c !== null && c < planned) planned = c;
+    const f = floorFtAt(p, dist);
+    if (f !== null && f > planned) planned = Math.min(bottomFt, f);
+    return planned;
+  }
+
   // Insert a node into the selected geometry at this position — the same
   // operation as clicking the path line, exposed for the profile-plot menu.
   function insertAt(id, latlng) {
@@ -808,7 +853,7 @@ const Paths = (function () {
       const to = p.nodes[i + 1];
       const depths = samples
         .filter((s) => s.distance >= cum[i] && s.distance <= cum[i + 1])
-        .map((s) => -s.feet);
+        .map((s) => plannedFtAt(p, s.distance, -s.feet));   // the PLAN, caps applied
       return {
         leg: i + 1, from: from, to: to,
         heading: bearing(from, to),
@@ -973,10 +1018,34 @@ const Paths = (function () {
     onChange();
   }
 
+  // Deleting is now one keypress, so it keeps a way back: the last removed
+  // path's full record, resurrectable by undoRemove() until the next delete.
+  let lastRemoved = null;
+  function undoRemove() {
+    if (!lastRemoved) return false;
+    const rec = lastRemoved;
+    lastRemoved = null;
+    restore([rec]);
+    const p = paths[paths.length - 1];
+    if (p) { selectedId = p.id; paths.forEach(redraw); refreshProfile(p); }
+    onChange();
+    return true;
+  }
+
   function remove(id) {
     const i = paths.findIndex((p) => p.id === id);
     if (i < 0) return;
     const p = paths[i];
+    lastRemoved = {
+      name: p.name, color: p.color, mirrored: p.mirrored,
+      preMirrorNodes: p.preMirrorNodes
+        ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
+      plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
+      expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
+      legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
+      nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
+    };
+    if (Paths.onRemoved) { try { Paths.onRemoved(p.name); } catch (e) { /* ui only */ } }
     if (p.line) map.removeLayer(p.line);
     if (p.hitLine) map.removeLayer(p.hitLine);
     p.markers.forEach((m) => map.removeLayer(m));
@@ -1015,6 +1084,8 @@ const Paths = (function () {
         showLegs: !!s.showLegs,
         ceilings: Array.isArray(s.ceilings)
           ? s.ceilings.filter((c) => c && c.end > c.start && c.feet > 0) : [],
+        floors: Array.isArray(s.floors)
+          ? s.floors.filter((c) => c && c.end > c.start && c.feet > 0) : [],
         plotHeightManual: !!s.plotHeightManual,
         legGas: (s.legGas && typeof s.legGas === 'object') ? s.legGas : {}
       });
@@ -1100,6 +1171,7 @@ const Paths = (function () {
       existing.name = rec.name || existing.name;
       existing.color = rec.color || existing.color;
       existing.ceilings = Array.isArray(rec.ceilings) ? rec.ceilings : existing.ceilings;
+      existing.floors = Array.isArray(rec.floors) ? rec.floors : existing.floors;
       existing.nodes = nodes;
       existing.profile = null;
       redraw(existing);
@@ -1130,6 +1202,11 @@ const Paths = (function () {
     addCeiling: addCeiling,
     clearCeilings: clearCeilings,
     ceilingFtAt: ceilingFtAt,
+    addFloor: addFloor,
+    clearFloors: clearFloors,
+    floorFtAt: floorFtAt,
+    plannedFtAt: plannedFtAt,
+    undoRemove: undoRemove,
     insertAt: insertAt,
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,

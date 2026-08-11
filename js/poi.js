@@ -186,6 +186,23 @@ const POI = (function () {
     ));
   }
 
+  /*
+   * Depth under each marker, fetched once per point and kept on the record —
+   * a dive-site list without depths is half a list. Best-effort: a failed
+   * batch leaves the rows without a depth rather than failing the import.
+   */
+  async function annotateDepths() {
+    const todo = items.filter((i) => i.depthFt === undefined);
+    if (!todo.length || !window.DemSampler) return;
+    try {
+      const vals = await DemSampler.points(todo.map((i) => ({ lat: i.lat, lng: i.lng })));
+      todo.forEach((it, k) => {
+        it.depthFt = vals[k] === null ? null : Math.round(-vals[k] * 3.280839895);
+      });
+      render();
+    } catch (err) { console.warn('POI depth annotation skipped:', err); }
+  }
+
   function ingest(parsed, sourceName) {
     parsed.points.forEach((p) => {
       const rec = Object.assign({ id: nextId++, visible: true, source: sourceName }, p);
@@ -205,7 +222,7 @@ const POI = (function () {
         (extra ? ' and ' + extra + ' shape' + (extra === 1 ? '' : 's') : '') +
         ' from ' + sourceName, 'ok');
     if (!parsed.points.length && !extra) toast('No placemarks found in that file.', true);
-    else fitAll();
+    else { fitAll(); annotateDepths(); }
   }
 
   async function importFile(file) {
@@ -295,6 +312,13 @@ const POI = (function () {
       const name = document.createElement('span');
       name.className = 'poi-name';
       name.textContent = rec.name;
+      if (typeof rec.depthFt === 'number' && rec.depthFt > 0) {
+        const dep = document.createElement('span');
+        dep.className = 'poi-depth';
+        dep.textContent = rec.depthFt + ' ft';
+        dep.title = 'Charted depth under this point (NOAA DEM)';
+        name.appendChild(dep);
+      }
       name.title = rec.name + (rec.desc ? ' — ' + rec.desc.slice(0, 120) : '');
 
       const eye = document.createElement('button');
@@ -372,12 +396,15 @@ const POI = (function () {
     (records || []).forEach((rec) => {
       const p = { id: nextId++, name: rec.name, lat: rec.lat, lng: rec.lng,
                   symbol: rec.symbol || 'marker', desc: rec.desc || '',
+                  depthFt: (typeof rec.depthFt === 'number' || rec.depthFt === null)
+                    ? rec.depthFt : undefined,
                   visible: rec.visible !== false, source: 'saved' };
       p.marker = addMarker(p);
       if (!p.visible) map.removeLayer(p.marker);
       items.push(p);
     });
     render();
+    annotateDepths();
     return items.length;
   }
 

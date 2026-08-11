@@ -136,6 +136,20 @@ const DemSampler = (function () {
     return { step: step, gx0: gx0, gy0: gy0, nx: nx, ny: ny, values: values, stats: stats };
   }
 
+  /*
+   * Elevations at arbitrary points, chunked at the endpoint's 1000-sample cap.
+   * Used by the POI panel to annotate imported markers with their depth.
+   */
+  async function points(latlngs) {
+    const out = [];
+    for (let i = 0; i < latlngs.length; i += MAX_PER_REQUEST) {
+      const chunk = latlngs.slice(i, i + MAX_PER_REQUEST);
+      const vals = await postSamples(chunk.map((q) => [q.lng, q.lat]));
+      vals.forEach((v) => out.push(v));
+    }
+    return out;   // metres, null where the DEM has no data
+  }
+
   // Sample `count` evenly spaced points along a polyline of {lat,lng}.
   async function alongPath(nodes, count) {
     if (nodes.length < 2) return [];
@@ -179,6 +193,7 @@ const DemSampler = (function () {
     init: init,
     grid: grid,
     identify: identify,
+    points: points,
     alongPath: alongPath,
     haversine: haversine,
     M_TO_FT: M_TO_FT,

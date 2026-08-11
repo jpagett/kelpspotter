@@ -789,11 +789,15 @@
       let layer;
       if (composite) {
         const [start, end] = dateRangeISO();
-        const res = await state.engine.compositeLayer(start, end, state.params.maxCloud, state.params);
+        const res = await cachedLayer('c|' + start + '|' + end + '|' + state.params.maxCloud,
+          () => state.engine.compositeLayer(start, end, state.params.maxCloud, state.params));
         layer = toLeafletLayer(res);
       } else {
-        const res = await state.engine.singleSceneLayer(state.scenes[state.idx].date, state.params);
+        const date = state.scenes[state.idx].date;
+        const res = await cachedLayer('s|' + date,
+          () => state.engine.singleSceneLayer(date, state.params));
         layer = toLeafletLayer(res);
+        prefetchNeighbours();
       }
       state.layer = layer;
       layer.addTo(map);
@@ -822,6 +826,56 @@
       setDirty(false);        // whatever just rendered now matches the settings
       setTimeout(() => sweep(false), 350);
     }
+  }
+
+  /*
+   * ---- layer URL cache + neighbour prefetch ----
+   * A minted tile URL is valid for ~30 minutes, so re-requesting the same
+   * scene with the same model settings is pure waste — switching single <->
+   * composite, or stepping back to a scene just viewed, should be instant.
+   * Only string results (tile templates) are cached; the demo engine returns
+   * live Leaflet layers, which must be rebuilt each time.
+   */
+  const layerCache = new Map();          // key -> {url, at}
+  const LAYER_TTL = 20 * 60 * 1000;      // under the mint lifetime, with margin
+
+  function layerCacheKey(suffix) {
+    const P = state.params;
+    return [state.engine.name, suffix, P.indexType, P.kelpThresh, P.b11Thresh,
+            P.kelpPalette, P.paletteMin, P.paletteMax].join('|');
+  }
+  async function cachedLayer(suffix, make) {
+    const key = layerCacheKey(suffix);
+    const hit = layerCache.get(key);
+    if (hit && Date.now() - hit.at < LAYER_TTL) return hit.url;
+    const res = await make();
+    if (typeof res === 'string') {
+      if (layerCache.size > 60) layerCache.clear();
+      layerCache.set(key, { url: res, at: Date.now() });
+    }
+    return res;
+  }
+
+  /*
+   * While idle after a single-scene render, quietly mint the neighbours so the
+   * scene steppers land on a warm cache. Skipped for the demo engine (nothing
+   * to mint) and when the browser lacks requestIdleCallback.
+   */
+  function prefetchNeighbours() {
+    if (state.engine.name === 'demo' || typeof requestIdleCallback === 'undefined') return;
+    requestIdleCallback(() => {
+      [state.idx - 1, state.idx + 1].forEach((i) => {
+        const sc = state.scenes[i];
+        if (!sc) return;
+        const key = layerCacheKey('s|' + sc.date);
+        if (layerCache.has(key)) return;
+        state.engine.singleSceneLayer(sc.date, state.params)
+          .then((res) => {
+            if (typeof res === 'string') layerCache.set(key, { url: res, at: Date.now() });
+          })
+          .catch(() => { /* prefetch is best-effort by definition */ });
+      });
+    }, { timeout: 4000 });
   }
 
   /*
@@ -914,11 +968,15 @@
    * focus, since sliders and date inputs use the arrow keys themselves.
    */
   document.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
     if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
     const el = document.activeElement;
     if (el && (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(el.tagName) || el.isContentEditable)) return;
-    if (stepScene(ev.key === 'ArrowLeft' ? -1 : 1)) ev.preventDefault();
+    if (ev.key === 'ArrowLeft' || ev.key === '[') { if (stepScene(-1)) ev.preventDefault(); return; }
+    if (ev.key === 'ArrowRight' || ev.key === ']') { if (stepScene(1)) ev.preventDefault(); return; }
+    if (ev.key === 'n' || ev.key === 'N') {
+      if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();
+      ev.preventDefault();
+    }
   });
 
   // sliders: label live, act on release ('change')
@@ -969,6 +1027,35 @@
     setDirty(true);
     say('Kelp model reset to the published defaults');
   });
+
+  /*
+   * ---- undo toast ----
+   * Delete is now a single keypress, so it gets a way back. One toast at a
+   * time (a new delete replaces it); the stash lives in Paths.undoRemove.
+   */
+  let undoTimer = null;
+  function showUndoToast(name) {
+    let el = $('undo-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'undo-toast'; el.className = 'undo-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = '';
+    const msg = document.createElement('span');
+    msg.textContent = name + ' deleted';
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.textContent = 'Undo';
+    btn.addEventListener('click', () => {
+      if (Paths.undoRemove()) { say(name + ' restored', 'ok'); persistNow(); }
+      el.classList.remove('show');
+    });
+    el.appendChild(msg); el.appendChild(btn);
+    el.classList.add('show');
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => el.classList.remove('show'), 6000);
+  }
+  Paths.onRemoved = showUndoToast;
 
   // ---- date range ----
   // Read-only in the console; edited from the calendar's Start / End buttons.
@@ -1551,11 +1638,9 @@
        * ~33 ft of elevation), so a leg would consume negative gas and the
        * running budget would refund itself. Surface pressure is the floor.
        */
-      let depthFt = Math.max(0, -s.feet);
-      // a ceiling caps the PLANNED depth for the span it covers, so gas is
-      // burned at the capped depth, not the bottom's
-      const cap = Paths.ceilingFtAt(p, s.distance);
-      if (cap !== null && cap < depthFt) depthFt = cap;
+      // gas burns at the PLANNED depth — bottom, capped by ceilings, pushed
+      // back down by floors. One function shared with the plot and leg table.
+      const depthFt = Paths.plannedFtAt(p, s.distance, Math.max(0, -s.feet));
       const ata = 1 + depthFt / ATA_DEPTH_FT;
       const mi = s.distance / 1609.344;
       const dtMin = i === 0 ? 0 : ((mi - prevMi) / speedMiHr) * 60;
@@ -1915,11 +2000,7 @@
      * ceiling actually bites, the true bottom is added back as a dotted line so
      * the cap can never be misread as bathymetry.
      */
-    const effFt = (smp) => {
-      const bottom = -smp.feet;
-      const cap = Paths.ceilingFtAt(p, smp.distance);
-      return (cap !== null && cap < bottom) ? cap : bottom;
-    };
+    const effFt = (smp) => Paths.plannedFtAt(p, smp.distance, -smp.feet);
     const capped = (smp) => effFt(smp) < -smp.feet - 1e-9;
 
     const area = document.createElementNS(NS, 'path');
@@ -1938,8 +2019,79 @@
     line.setAttribute('stroke-width', '1.4');
     svg.appendChild(line);
 
+    /*
+     * Each ceiling/floor gets an invisible fat grab-line over its span: drag it
+     * vertically to adjust the bound's depth, right-click it to remove just
+     * that one. The visible flat segment is part of the planned polyline, so
+     * this hit target is what makes the bound feel like an object.
+     */
+    const addBoundGrip = (bound, kind) => {
+      const x1 = x(Math.max(0, bound.start)), x2 = x(Math.min(maxX, bound.end));
+      if (x2 - x1 < 4) return;
+      const grip = document.createElementNS(NS, 'line');
+      grip.setAttribute('x1', x1); grip.setAttribute('x2', x2);
+      grip.setAttribute('y1', y(bound.feet)); grip.setAttribute('y2', y(bound.feet));
+      grip.setAttribute('stroke', 'transparent');
+      grip.setAttribute('stroke-width', '12');
+      grip.setAttribute('class', 'bound-grip');
+      grip.style.cursor = 'ns-resize';
+      let dragging = false, preview = null, label = null;
+      const ftFromY = (clientY) => {
+        const r = svg.getBoundingClientRect();
+        const vy = ((clientY - r.top) / r.height) * H;
+        return Math.max(1, Math.round(((vy - PADT) / (H - PADT - PADB)) * (maxD || 1)));
+      };
+      grip.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        dragging = true;
+        // capture keeps the drag when the pointer outruns the thin hit line;
+        // it can throw for an already-released pointer, and losing capture is
+        // a degraded drag rather than an error, so it must not abort setup
+        try { grip.setPointerCapture(ev.pointerId); } catch (e) { /* degrade */ }
+        preview = document.createElementNS(NS, 'line');
+        preview.setAttribute('x1', x1); preview.setAttribute('x2', x2);
+        preview.setAttribute('stroke', p.color); preview.setAttribute('stroke-width', '1');
+        preview.setAttribute('stroke-dasharray', '4 3');
+        label = document.createElementNS(NS, 'text');
+        label.setAttribute('class', 'pp-axis');
+        label.setAttribute('x', (x1 + x2) / 2); label.setAttribute('text-anchor', 'middle');
+        svg.appendChild(preview); svg.appendChild(label);
+        ev.stopPropagation(); ev.preventDefault();
+      });
+      grip.addEventListener('pointermove', (ev) => {
+        if (!dragging || !preview) return;
+        const ft = ftFromY(ev.clientY);
+        const yy = y(ft);
+        preview.setAttribute('y1', yy); preview.setAttribute('y2', yy);
+        label.setAttribute('y', yy - 3);
+        label.textContent = fmtDepth(ft);
+      });
+      grip.addEventListener('pointerup', (ev) => {
+        if (!dragging) return;
+        dragging = false;
+        bound.feet = ftFromY(ev.clientY);
+        say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' moved to ' + fmtDepth(bound.feet));
+        renderPaths();
+        persistNow();
+      });
+      grip.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        const list = kind === 'ceiling' ? p.ceilings : p.floors;
+        const i = list.indexOf(bound);
+        if (i >= 0) {
+          list.splice(i, 1);
+          say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' removed from ' + p.name);
+          renderPaths();
+          persistNow();
+        }
+      });
+      svg.appendChild(grip);
+    };
+    (p.ceilings || []).forEach((c) => addBoundGrip(c, 'ceiling'));
+    (p.floors || []).forEach((f) => addBoundGrip(f, 'floor'));
+
     // dotted true bottom, drawn only over the capped stretches
-    if ((p.ceilings || []).length) {
+    if ((p.ceilings || []).length || (p.floors || []).length) {
       let run = [];
       const flush = () => {
         if (run.length > 1) {
@@ -2068,9 +2220,9 @@
       readout.setAttribute('x', sx < W / 2 ? sx + 4 : sx - 4);
       readout.setAttribute('text-anchor', sx < W / 2 ? 'start' : 'end');
       readout.setAttribute('opacity', '1');
-      const capHere = Paths.ceilingFtAt(p, s.distance);
-      readout.textContent = (capHere !== null && capHere < -s.feet
-        ? fmtDepth(capHere) + ' (bottom ' + fmtDepth(-s.feet) + ')'
+      const plannedHere = Paths.plannedFtAt(p, s.distance, -s.feet);
+      readout.textContent = (plannedHere < -s.feet - 1e-9
+        ? fmtDepth(plannedHere) + ' (bottom ' + fmtDepth(-s.feet) + ')'
         : fmtDepth(-s.feet)) + ' @ ' + fmtDist(s.distance);
       Paths.hoverAt(p.id, s, fmtDepth(-s.feet));
     });
@@ -2128,6 +2280,7 @@
    * abandoned half-gesture never persists or exports.
    */
   let pendingCeil = null;   // {pathId, dist, feet}
+  let pendingFloor = null;  // same shape, for the mirror gesture
   let plotMenuEl = null;
 
   function closePlotMenu() {
@@ -2163,6 +2316,7 @@
     }, false, 'Insert a path node at this distance along the line');
 
     const pendingHere = pendingCeil && pendingCeil.pathId === p.id;
+    const pendingFloorHere = pendingFloor && pendingFloor.pathId === p.id;
     item('Set ceiling start — ' + fmtDepth(at.feet), () => {
       pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
       say('Ceiling started at ' + fmtDist(at.dist) + ', ' + fmtDepth(at.feet) +
@@ -2187,6 +2341,28 @@
       }, !pendingHere,
       'Close the cap here, using the depth from the start click');
 
+    item('Set floor start — ' + fmtDepth(at.feet), () => {
+      pendingFloor = { pathId: p.id, dist: at.dist, feet: at.feet };
+      say('Floor started at ' + fmtDist(at.dist) + ', ' + fmtDepth(at.feet) +
+          ' — right-click the plot again to set the end');
+    }, false, 'Start a minimum-depth bound at this distance');
+
+    item(pendingFloorHere
+          ? 'Set floor end — stay below ' + fmtDepth(pendingFloor.feet)
+          : 'Set floor end (no start yet)',
+      () => {
+        if (!pendingFloorHere) return;
+        if (Paths.addFloor(p.id, pendingFloor.dist, at.dist, pendingFloor.feet)) {
+          say('Floor: stay below ' + fmtDepth(pendingFloor.feet) + ' from ' +
+              fmtDist(Math.min(pendingFloor.dist, at.dist)) + ' to ' +
+              fmtDist(Math.max(pendingFloor.dist, at.dist)), 'ok');
+          pendingFloor = null;
+          renderPaths();
+          persistNow();
+        }
+      }, !pendingFloorHere,
+      'Close the floor here, using the depth from the start click');
+
     if ((p.ceilings || []).length) {
       item('Clear ceilings (' + p.ceilings.length + ')', () => {
         Paths.clearCeilings(p.id);
@@ -2195,6 +2371,17 @@
         persistNow();
       });
     }
+    if ((p.floors || []).length) {
+      item('Clear floors (' + p.floors.length + ')', () => {
+        Paths.clearFloors(p.id);
+        say('Floors cleared from ' + p.name);
+        renderPaths();
+        persistNow();
+      });
+    }
+
+    item('Export plot as PNG', () => exportPlotPng(p),
+      false, 'Save this depth profile as an image, for a briefing or a slate');
 
     document.body.appendChild(menu);
     // keep it on screen
@@ -2204,7 +2391,74 @@
     plotMenuEl = menu;
   }
 
+  /*
+   * Rasterise a path's profile SVG. The SVG is serialised with an injected
+   * dark background (the on-screen one is transparent over the panel), drawn
+   * to a 2x canvas for crispness, and downloaded. No library: Blob -> Image ->
+   * canvas is enough for our own well-formed SVG.
+   */
+  function exportPlotPng(p) {
+    const svg = document.querySelector('.pp-profile svg');
+    if (!svg) { toast('Open the path’s profile first.', true); return; }
+    const clone = svg.cloneNode(true);
+    const vb = svg.getAttribute('viewBox').split(' ');
+    const w = +vb[2], h = +vb[3];
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', w); bg.setAttribute('height', h);
+    bg.setAttribute('fill', '#0a2830');
+    clone.insertBefore(bg, clone.firstChild);
+    // axis text uses a CSS class on-page; inline what the raster needs
+    clone.querySelectorAll('.pp-axis').forEach((t) => {
+      t.setAttribute('fill', '#4d868b');
+      t.setAttribute('font-family', 'monospace');
+      t.setAttribute('font-size', '8');
+    });
+    const blob = new Blob([new XMLSerializer().serializeToString(clone)],
+                          { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = w * 2; canvas.height = h * 2;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((png2) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(png2);
+        a.download = p.name.replace(/[^\w-]+/g, '_') + '-profile.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        say('Profile exported as PNG', 'ok');
+      });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); toast('PNG export failed.', true); };
+    img.src = url;
+  }
+
+  /*
+   * renderPaths rebuilds every row from scratch — fine at five paths, wasteful
+   * when a drag fires it per pointer event. Calls coalesce onto one frame; the
+   * Now variant exists for the rare caller that must read the DOM immediately.
+   */
+  let renderPathsQueued = false;
   function renderPaths() {
+    if (renderPathsQueued) return;
+    renderPathsQueued = true;
+    /*
+     * rAF for the normal case, with a timeout backstop: rAF does not tick in a
+     * hidden or backgrounded tab, and without the fallback a session import or
+     * restore finishing while the tab is hidden would leave the panel stale
+     * until the next repaint. Whichever fires first wins.
+     */
+    const go = () => {
+      if (!renderPathsQueued) return;
+      renderPathsQueued = false;
+      renderPathsNow();
+    };
+    requestAnimationFrame(go);
+    setTimeout(go, 50);
+  }
+  function renderPathsNow() {
     const box = $('pp-list');
     box.textContent = '';
     const list = Paths.list;
@@ -2273,6 +2527,21 @@
       const meta = document.createElement('span');
       meta.className = 'pp-meta';
       meta.textContent = p.nodes.length + 'n · ' + fmtDist(Paths.lengthOf(p));
+      /*
+       * Depth stats ride in the meta once a profile exists — planned depth,
+       * so ceilings and floors are reflected. The row shows only the max;
+       * avg and time-below-60ft live in the tooltip to keep the line short.
+       */
+      const prof = (p.profile || []).filter((sm) => sm.feet !== null);
+      if (prof.length > 1) {
+        const planned = prof.map((sm) => Paths.plannedFtAt(p, sm.distance, -sm.feet));
+        const mx = Math.max.apply(null, planned);
+        const avg = planned.reduce((a, b) => a + b, 0) / planned.length;
+        const pct60 = Math.round(100 * planned.filter((d) => d > 60).length / planned.length);
+        meta.textContent += ' · ⌄' + fmtDepth(mx);
+        meta.title = 'planned max ' + fmtDepth(mx) + ' · avg ' + fmtDepth(avg) +
+                     ' · ' + pct60 + '% deeper than ' + fmtDepth(60);
+      }
 
       const caret = document.createElement('button');
       caret.className = 'pp-caret'; caret.type = 'button';
@@ -3079,7 +3348,7 @@
           ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
         plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
         expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
-        legGas: p.legGas, ceilings: p.ceilings || [],
+        legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
         nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
       }))));
       const sc = state.scenes[state.idx];
@@ -3235,6 +3504,16 @@
       if (Array.isArray(saved) && saved.length) Paths.restore(saved);
     } catch (err) { console.warn('path restore skipped:', err); }
     renderPaths();
+
+    /*
+     * Service worker: cache-first for the NOAA hosts, which send
+     * cache-control:private with no freshness signal and so re-download every
+     * relief and contour tile on every visit. Registration is best-effort —
+     * file:// and older browsers simply skip it.
+     */
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw skipped:', e));
+    }
 
     say('Starting up…');
     /*

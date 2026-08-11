@@ -690,8 +690,12 @@ input[type=range]::-moz-range-thumb {
 .pp-tool-group { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 /* right-aligned within the bar — the gas/SAC group stays left via normal flow */
 .pp-tool-group-wide { width: 116px; margin-left: auto; }
-.pp-mode-btns { display: flex; gap: 4px; width: 100%; }
-.pp-mode-btns .pp-mode-btn { flex: 1; min-width: 0; }
+/* NOTE: no width:100% and no flex:1 here. Those were for the old full-width
+   toolbar layout; in the compact grid they stretched the two buttons across
+   the whole field and squeezed the number input to zero width — the
+   "time/speed box is invisible" bug. The buttons size to their labels now. */
+.pp-mode-btns { display: flex; gap: 4px; flex: none; }
+.pp-mode-btns .pp-mode-btn { flex: 0 0 auto; }
 .pp-field { display: flex; align-items: center; gap: 4px; }
 .pp-field-below { justify-content: center; }
 .pp-field-below .pp-num { flex: 1; min-width: 0; }
@@ -1133,6 +1137,30 @@ input[type=range]::-moz-range-thumb {
   /* keep it clear of the tab bar */
   .leaflet-bottom.leaflet-left { bottom: 4px; }
 }
+
+/* offline chip in the header */
+.offline-badge {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  color: var(--coral); border: 1px solid var(--coral); border-radius: 2px;
+  padding: 3px 6px;
+}
+.offline-badge[hidden] { display: none; }
+/* locate: pressed = actively tracking */
+#locate-btn-desk[aria-pressed="true"],
+#locate-btn[aria-pressed="true"] { background: #5ec6c9; color: var(--abyss); border-color: #5ec6c9; }
+
+/* tap depth cursor (mobile) */
+.tap-cursor span {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; border: 2px solid #5ec6c9; color: #5ec6c9;
+  background: rgba(5,22,28,0.55); font-size: 15px; line-height: 1;
+}
+.tap-cursor-label {
+  background: rgba(5,22,28,0.92) !important; color: var(--foam) !important;
+  border: 1px solid var(--line) !important; border-radius: 3px !important;
+  font-family: var(--mono); font-size: 11px; padding: 3px 7px !important;
+}
+.tap-cursor-label::before { display: none; }
 
 /* ---------- undo toast ---------- */
 .undo-toast {

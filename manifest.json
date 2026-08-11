@@ -1,0 +1,14 @@
+{
+  "name": "KelpSpotter — Santa Barbara Channel",
+  "short_name": "KelpSpotter",
+  "description": "Sentinel-2 kelp canopy mapping, NOAA bathymetry, and dive-path planning for the Santa Barbara Channel.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05161c",
+  "theme_color": "#05161c",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

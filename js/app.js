@@ -1138,6 +1138,116 @@
     ['pointerup', 'pointercancel'].forEach((k) => el.addEventListener(k, cancel));
   })();
 
+  /*
+   * ---- tap depth cursor (touch layouts) ----
+   * The hover probe needs a cursor, which touch does not have — so on a phone a
+   * TAP plants one: a draggable crosshair whose label reads the depth under it
+   * from the same cached identify endpoint the hover uses. Tap elsewhere moves
+   * it, drag it to fine-tune, tap the cursor itself to dismiss. Long-press
+   * (map menu) and drawing mode are untouched: Leaflet only fires 'click' for
+   * a genuine tap, and the handler stands down entirely while drawing.
+   */
+  let tapCursor = null;
+  function tapCursorLabel(m, text) {
+    if (m.getTooltip()) m.setTooltipContent(text);
+    else m.bindTooltip(text, { permanent: true, direction: 'top', offset: [0, -12],
+                               className: 'tap-cursor-label' }).openTooltip();
+  }
+  async function tapCursorRead(m, latlng) {
+    tapCursorLabel(m, '…');
+    try {
+      const metres = await fetchDepth(latlng);
+      if (metres === null || metres === undefined) { tapCursorLabel(m, 'no data'); return; }
+      const ft = Math.round(Math.abs(metres) * M_TO_FT);
+      tapCursorLabel(m, ft.toLocaleString() + ' ft ' + (metres < 0 ? 'depth' : 'elev.'));
+    } catch (err) {
+      if (err && err.name !== 'AbortError') tapCursorLabel(m, 'no data');
+    }
+  }
+  function removeTapCursor() {
+    if (tapCursor) { map.removeLayer(tapCursor); tapCursor = null; }
+  }
+  map.on('click', (ev) => {
+    if (!window.matchMedia('(max-width: 820px)').matches) return;  // touch layouts only
+    if (Paths.drawing) return;                                     // taps place nodes there
+    if (!depthEnabled()) return;                                   // nothing to read from
+    if (!tapCursor) {
+      tapCursor = L.marker(ev.latlng, {
+        draggable: true,
+        icon: L.divIcon({ className: 'tap-cursor', html: '<span>+</span>',
+                          iconSize: [26, 26], iconAnchor: [13, 13] })
+      }).addTo(map);
+      tapCursor.on('dragend', () => tapCursorRead(tapCursor, tapCursor.getLatLng()));
+      tapCursor.on('click', removeTapCursor);   // tapping the cursor dismisses it
+    } else {
+      tapCursor.setLatLng(ev.latlng);
+    }
+    tapCursorRead(tapCursor, ev.latlng);
+  });
+
+  /*
+   * ---- geolocation ----
+   * One toggle, two buttons (the mobile action stack and the desktop zoom
+   * stack). On: watchPosition draws a dot with its accuracy circle and pans to
+   * the first fix. Off: everything is removed. Denied: say so once, plainly.
+   */
+  let geoWatch = null, geoDot = null, geoRing = null, geoFirstFix = false;
+  const locateButtons = () => [$('locate-btn'), $('locate-btn-desk')].filter(Boolean);
+  function setLocateUi(on) {
+    locateButtons().forEach((b) => b.setAttribute('aria-pressed', on ? 'true' : 'false'));
+  }
+  function stopLocate() {
+    if (geoWatch !== null) { navigator.geolocation.clearWatch(geoWatch); geoWatch = null; }
+    if (geoDot) { map.removeLayer(geoDot); geoDot = null; }
+    if (geoRing) { map.removeLayer(geoRing); geoRing = null; }
+    setLocateUi(false);
+  }
+  function toggleLocate() {
+    if (geoWatch !== null) { stopLocate(); say('Position tracking off'); return; }
+    if (!('geolocation' in navigator)) { toast('This browser has no geolocation.', true); return; }
+    geoFirstFix = true;
+    setLocateUi(true);
+    say('Locating…');
+    geoWatch = navigator.geolocation.watchPosition((pos) => {
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      const acc = pos.coords.accuracy || 0;
+      if (!geoDot) {
+        geoRing = L.circle(ll, { radius: acc, weight: 1, color: '#5ec6c9',
+                                 fillColor: '#5ec6c9', fillOpacity: 0.12, interactive: false }).addTo(map);
+        geoDot = L.circleMarker(ll, { radius: 6, weight: 2, color: '#ffffff',
+                                      fillColor: '#5ec6c9', fillOpacity: 1, interactive: false }).addTo(map);
+      } else {
+        geoDot.setLatLng(ll);
+        geoRing.setLatLng(ll).setRadius(acc);
+      }
+      if (geoFirstFix) {
+        geoFirstFix = false;
+        map.setView(ll, Math.max(map.getZoom(), 13));
+        say('Position: ' + ll[0].toFixed(5) + ', ' + ll[1].toFixed(5) +
+            ' (±' + Math.round(acc) + ' m)', 'ok');
+      }
+    }, (err) => {
+      stopLocate();
+      const why = err.code === 1 ? 'permission denied'
+                : err.code === 2 ? 'position unavailable' : 'timed out';
+      say('Location failed — ' + why, 'warn');
+      toast('Could not get your position (' + why + ').', true);
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+  }
+  locateButtons().forEach((b) => b.addEventListener('click', toggleLocate));
+
+  /*
+   * ---- offline badge ----
+   * On a boat, offline is the normal case, not an error. The badge names the
+   * state; the NOAA service worker keeps cached bathymetry working through it.
+   */
+  // the event IS the state change; trusting it beats re-reading a property
+  // that some browsers update after the handlers run
+  function setOffline(off) { $('offline-badge').hidden = !off; }
+  window.addEventListener('online', () => { setOffline(false); say('Back online', 'ok'); });
+  window.addEventListener('offline', () => { setOffline(true); say('Offline — cached depth tiles still work', 'warn'); });
+  setOffline(!navigator.onLine);
+
   // ---- date range ----
   // Read-only in the console; edited from the calendar's Start / End buttons.
   function showRange() {

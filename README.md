@@ -82,6 +82,8 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
 | **Floors** | The ceiling's mirror: a *minimum* planned depth over a span ("stay below 20 ft through the boat channel"). Set from the same right-click menu. Where a floor and ceiling conflict, the floor wins; where the bottom is shallower than the floor, the bottom wins — rock is not negotiable. |
 | **Bound editing** | Drag a ceiling/floor segment on the plot vertically to change its depth; right-click the segment to remove just that one. |
+| **Tap depth cursor** (touch) | Tapping the map plants a draggable crosshair whose label reads the depth under it; tap elsewhere to move it, drag to fine-tune, tap the cursor to dismiss. Long-press still opens the map menu. |
+| **Locate me** | ◎ (in the zoom stack on desktop, the action stack on mobile) tracks your position with an accuracy ring. |
 | **Map right-click** | Right-click (long-press on touch) open water: **Add POI here**, **Start path here**, **Copy coordinates**. |
 | **Reverse / duplicate** | In a path's cog menu: ⇋ runs the line from the other end (headings, legs and bounds all remap); ⧉ copies it for a planning variant. |
 | **Undo** | Deleting a path shows a 6-second toast with an Undo button. |
@@ -333,7 +335,7 @@ in `config.js`.
 
 ## Points of interest (KML / KMZ import)
 
-⚙ → **Import KML / KMZ…** drops markers on the map for dive sites and other
+⚙ → **Import KML / KMZ…** shows a review of what would change — additions and changes ticked, merge by default, overwrite opt-in via the replace toggle — then drops markers on the map for dive sites and other
 features. Parsed entirely in the browser — KML is XML for `DOMParser`, and KMZ is
 a ZIP unpacked with `DecompressionStream` rather than a library — so the site
 stays a dependency-free static deployment.

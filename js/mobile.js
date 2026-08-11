@@ -132,6 +132,34 @@
     syncDraw();
   }
 
+  /* ------------------------------------------------ swipe a sheet closed
+   * A downward drag on the top strip of an open sheet dismisses it — the
+   * gesture every bottom sheet teaches. Limited to the top 34px (the grab-
+   * handle zone) so it never fights the sheet's own scrolling, and to a
+   * mostly-vertical 48px travel so a horizontal fidget does nothing.
+   */
+  Object.values(SHEETS).forEach((sel) => {
+    const panel = document.querySelector(sel);
+    if (!panel) return;
+    let sy = null, sx = null;
+    panel.addEventListener('pointerdown', (ev) => {
+      if (!mq.matches || ev.pointerType === 'mouse') return;
+      const r = panel.getBoundingClientRect();
+      if (ev.clientY - r.top > 34) return;      // below the grab zone
+      sy = ev.clientY; sx = ev.clientX;
+    });
+    panel.addEventListener('pointermove', (ev) => {
+      if (sy === null) return;
+      const dy = ev.clientY - sy, dx = Math.abs(ev.clientX - sx);
+      if (dy > 48 && dy > dx * 2) {
+        sy = null;
+        if (document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+      }
+    });
+    ['pointerup', 'pointercancel'].forEach((t) =>
+      panel.addEventListener(t, () => { sy = null; }));
+  });
+
   /* ------------------------------------------- touch substitutes for hover */
 
   /*

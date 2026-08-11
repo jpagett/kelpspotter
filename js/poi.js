@@ -232,12 +232,41 @@ const POI = (function () {
     else { fitAll(); annotateDepths(); }
   }
 
+  // shapes are decorative context (tracks, boundaries) — they draw
+  // immediately; only the point markers go through the review
+  function ingestShapes(parsed) {
+    parsed.lines.forEach((l) => {
+      shapes.push(L.polyline(l.coords, { pane: PANE, color: '#6fb7bd', weight: 2, opacity: 0.85 }).addTo(map));
+    });
+    parsed.polys.forEach((g) => {
+      shapes.push(L.polygon(g.coords, { pane: PANE, color: '#6fb7bd', weight: 1.5,
+        opacity: 0.85, fillOpacity: 0.12 }).addTo(map));
+    });
+  }
+
   async function importFile(file) {
     try {
       let text;
       if (/\.kmz$/i.test(file.name)) text = await unzipFirstKml(await file.arrayBuffer());
       else text = await file.text();
-      ingest(parseKml(text), file.name);
+      const parsed = parseKml(text);
+      /*
+       * Placemarks go through the same diff review the session importer uses:
+       * additions and changes ticked, merge by default, overwrite (removals)
+       * opt-in per the replace toggle. Nothing lands until Import is pressed.
+       */
+      if (window.Session && window.SessionUI && parsed.points.length) {
+        ingestShapes(parsed);
+        const recs = parsed.points.map((pt) => ({
+          uid: Session.poiUid(pt), name: pt.name, lat: pt.lat, lng: pt.lng,
+          symbol: pt.symbol, desc: pt.desc || '', visible: true
+        }));
+        say(file.name + ': ' + recs.length + ' placemark' + (recs.length === 1 ? '' : 's') +
+            ' — review before import');
+        SessionUI.open(Session.diffPois(recs), file.name);
+      } else {
+        ingest(parsed, file.name);   // no review machinery loaded, or no points
+      }
     } catch (err) {
       console.warn(err);
       toast('Could not read that file — ' + err.message, true);
@@ -328,6 +357,22 @@ const POI = (function () {
       }
       name.title = rec.name + (rec.desc ? ' — ' + rec.desc.slice(0, 120) : '');
 
+      const pen = document.createElement('button');
+      pen.className = 'poi-eye'; pen.type = 'button'; pen.textContent = '✎';
+      pen.title = 'Rename this point';
+      pen.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const next = window.prompt('Rename point', rec.name);
+        if (next === null || !next.trim()) return;
+        rec.name = next.trim();
+        if (rec.marker) {
+          rec.marker.setPopupContent('<b>' + escapeHtml(rec.name) + '</b>' +
+            (rec.desc ? '<br>' + escapeHtml(rec.desc).slice(0, 300) : ''));
+        }
+        render();
+        say('Renamed to ' + rec.name);
+      });
+
       const eye = document.createElement('button');
       eye.className = 'poi-eye'; eye.type = 'button';
       eye.textContent = rec.visible ? '◉' : '◌';
@@ -340,7 +385,8 @@ const POI = (function () {
       del.addEventListener('click', (ev) => { ev.stopPropagation(); remove(rec); });
 
       row.addEventListener('click', () => flyTo(rec));
-      row.appendChild(pin); row.appendChild(name); row.appendChild(eye); row.appendChild(del);
+      row.appendChild(pin); row.appendChild(name); row.appendChild(pen);
+      row.appendChild(eye); row.appendChild(del);
       box.appendChild(row);
     });
   }

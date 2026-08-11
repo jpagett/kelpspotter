@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KelpSpotter · Santa Barbara Channel</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!-- installable: with sw.js already registered, this makes "Add to Home
+       Screen" give a standalone, full-screen app on a phone -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#05161c">
 
   <link rel="preconnect" href="https://basemaps.cartocdn.com">
   <link rel="preconnect" href="https://gis.ngdc.noaa.gov">
@@ -23,6 +27,7 @@
       <span class="sub">Sentinel-2 · Santa Barbara Channel</span>
     </div>
     <div class="header-right">
+      <span id="offline-badge" class="offline-badge" hidden>OFFLINE</span>
       <span id="status" class="status is-demo"><span class="dot"></span><span id="status-label">DEMO DATA</span></span>
       <div class="hdr-menu view-menu">
         <button id="view-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false">View <span class="sect-caret">▾</span></button>
@@ -319,6 +324,7 @@
     </div>
 
     <div class="zoom-control" aria-label="Zoom">
+      <button id="locate-btn-desk" type="button" title="Show my position" aria-pressed="false" aria-label="Show my position">◎</button>
       <button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </div>
@@ -328,6 +334,8 @@
     <div class="map-actions">
       <button id="map-draw-path" class="ov-icon map-action" type="button"
               aria-pressed="false" title="Draw a path"></button>
+      <button id="locate-btn" class="ov-icon map-action" type="button"
+              aria-pressed="false" title="Show my position">◎</button>
     </div>
 
     <div class="overlay-picker" aria-label="Map overlays">

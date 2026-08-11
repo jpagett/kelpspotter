@@ -163,6 +163,21 @@ const Session = (function () {
     return rows;
   }
 
+  /*
+   * A POI-only diff, for KML import review. The full diff would list every
+   * current path as a "removal" against a file that never mentions paths —
+   * technically true, useless to read. Scoping the sections to empty keeps the
+   * same review sheet honest for a file that only carries placemarks.
+   */
+  function diffPois(incomingPois) {
+    return {
+      file: { pois: incomingPois, paths: [], view: {}, user: {} },
+      pois: diffCollection((window.POI ? POI.list : []).map(poiRecord), incomingPois,
+                           ['name', 'lat', 'lng', 'symbol', 'desc']),
+      paths: [], view: [], user: []
+    };
+  }
+
   function diff(incoming) {
     const st = getState();
     return {
@@ -253,6 +268,7 @@ const Session = (function () {
     exportFile: exportFile,
     parse: parse,
     diff: diff,
+    diffPois: diffPois,
     apply: apply,
     poiUid: poiUid,
     pathUid: pathUid,

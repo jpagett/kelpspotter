@@ -1056,6 +1056,67 @@ input[type=range]::-moz-range-thumb {
   box-shadow: 0 2px 6px rgba(0,0,0,0.5);
 }
 
+
+/* ---------- compact path options ---------- */
+/*
+ * Spin buttons are a liability on these fields: they are tiny targets, they
+ * steal width from the number itself, and a stray scroll over a focused input
+ * silently changes a gas figure. Typing is the only sane input here.
+ */
+.pp-num::-webkit-outer-spin-button,
+.pp-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pp-num { -moz-appearance: textfield; appearance: textfield; }
+
+/* two fields per row instead of one, and less air between them */
+.pp-opts { padding: 8px 0 2px; }
+.pp-opts-group { margin-bottom: 10px; }
+.pp-opts-group:last-child { margin-bottom: 0; }
+.pp-opts-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--tide-dim);
+  margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1px solid var(--line);
+}
+.pp-opts-group > .pp-field,
+.pp-opts-group > label.pp-field { margin: 0; }
+.pp-opts-group {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px;
+}
+.pp-opts-group > .pp-opts-head { grid-column: 1 / -1; }
+.pp-opts-group > .pp-cyl-list { grid-column: 1 / -1; }
+.pp-field {
+  display: flex; align-items: center; gap: 5px;
+  min-width: 0; padding: 3px 5px;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(111,183,189,0.05);
+}
+.pp-opts-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em;
+  color: var(--tide-dim); flex: none;
+}
+.pp-num {
+  flex: 1; min-width: 0; width: 100%;
+  background: none; border: none; color: var(--foam);
+  font-family: var(--mono); font-size: 11px; padding: 2px 0;
+}
+.pp-num:focus { outline: none; color: var(--kelp-hot); }
+.pp-field:focus-within { border-color: var(--kelp); }
+.pp-field-unit { font-family: var(--mono); font-size: 9px; color: var(--tide-dim); flex: none; }
+.pp-mode-btns { display: flex; gap: 2px; flex: none; }
+.pp-mode-btn {
+  padding: 2px 5px; cursor: pointer; border-radius: 2px;
+  background: var(--current); color: var(--tide-dim);
+  border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.06em;
+}
+.pp-mode-btn[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+/* the mode field carries two buttons plus a value, so it needs the full row */
+#pp-opts .pp-opts-group > .pp-field:has(.pp-mode-btns) { grid-column: 1 / -1; }
+
+@media (max-width: 820px) {
+  .pp-opts-group { grid-template-columns: 1fr; }
+}
+
 /* ---------- session import review ---------- */
 .session-modal {
   position: fixed; inset: 0; z-index: 1500;

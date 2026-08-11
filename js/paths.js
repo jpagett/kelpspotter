@@ -13,6 +13,7 @@
  */
 const Paths = (function () {
   const PANE = 'paths';
+  const NODE_PANE = 'pathNodes';
   const PROFILE_SAMPLES = 250;
   const COLORS = ['#f2b134', '#5ec6c9', '#e2725b', '#a6d95b', '#c78bd9',
                   '#ffd166', '#7fb3ff', '#ff9ec4'];
@@ -30,6 +31,14 @@ const Paths = (function () {
     toast = toaster || function () {};
     onChange = changed || function () {};
     map.createPane(PANE).style.zIndex = 380;   // above kelp, below the demo canvas
+    /*
+     * Node handles live in their own pane ABOVE the lines. The hit-line is a
+     * 32px-wide interactive polyline sharing the pane, and whether it or a
+     * marker won a pointer press came down to DOM insertion order — so grabbing
+     * a node could land on the line instead and insert a new node there.
+     * Separate panes make the priority explicit rather than incidental.
+     */
+    map.createPane(NODE_PANE).style.zIndex = 385;
     map.on('click', onMapClick);
     initBoxSelect();
     document.addEventListener('keydown', (ev) => {
@@ -56,6 +65,20 @@ const Paths = (function () {
   }
 
   const selected = () => paths.find((p) => p.id === selectedId) || null;
+
+  /*
+   * A new path folds the others away — their plot and leg table stay open
+   * otherwise, and three expanded profiles push the one you are drawing off the
+   * bottom of the panel.
+   */
+  function collapseOthers(keepId) {
+    paths.forEach((p) => {
+      if (p.id === keepId) return;
+      p.expanded = false;
+      p.showLegs = false;
+      p.showNodes = false;
+    });
+  }
 
   /*
    * Marker tying the profile chart back to the map: hovering the plot at some
@@ -243,12 +266,24 @@ const Paths = (function () {
   const LONG_PRESS_MS = 450;
   const MOVE_TOLERANCE = 10;
 
+  // per-marker canceller, so a drag can abort a pending long press
+  const longPressCancels = new WeakMap();
+  function cancelLongPress(marker) {
+    const fn = longPressCancels.get(marker);
+    if (fn) fn();
+  }
+
   function bindLongPress(marker, p, i) {
     const el = marker.getElement();
     if (!el) return;
     let timer = null, sx = 0, sy = 0, fired = false;
 
     const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    longPressCancels.set(marker, () => {
+      cancel();
+      if (fired && marker.dragging) marker.dragging.enable();
+      fired = false;
+    });
     const restoreDrag = () => {
       if (fired && marker.dragging) marker.dragging.enable();
       fired = false;
@@ -478,6 +513,16 @@ const Paths = (function () {
       if (isSel) {
         p.hitLine.on('click', (ev) => {
           const oe = ev.originalEvent;
+          /*
+           * A click that lands on an existing node is an attempt to grab it,
+           * not to insert another one beside it. The hit-line is far fatter
+           * than a node handle, so without this a slightly-missed grab silently
+           * added a node.
+           */
+          const at = map.latLngToLayerPoint(ev.latlng);
+          const onNode = p.nodes.some((n) =>
+            map.latLngToLayerPoint(n).distanceTo(at) <= NODE_GRAB_PX);
+          if (onNode) { L.DomEvent.stop(ev); return; }
           // Ctrl/Cmd means "start a new path", even over an existing one
           if (oe && (oe.ctrlKey || oe.metaKey)) {
             startDrawing();
@@ -503,7 +548,7 @@ const Paths = (function () {
         html: '<span style="background:' + p.color + '"></span>',
         iconSize: [11, 11]
       });
-      const m = L.marker(ll, { icon: icon, draggable: true, pane: PANE });
+      const m = L.marker(ll, { icon: icon, draggable: true, pane: NODE_PANE });
       /*
        * Dragging a picked node carries the rest of the selection with it: the
        * delta this node moved is applied to every other picked node, so their
@@ -547,7 +592,10 @@ const Paths = (function () {
       });
       m.on('mouseover', () => showNodeEditor(p, i));
       m.on('mouseout', scheduleNodeEditorClose);
-      m.on('dragstart', closeNodeEditor);
+      m.on('dragstart', () => {
+        closeNodeEditor();
+        cancelLongPress(m);      // a real drag cancels any pending long press
+      });
       m.addTo(map);
       bindLongPress(m, p, i);      // needs the icon element, so after addTo
       p.markers.push(m);
@@ -607,9 +655,18 @@ const Paths = (function () {
    * user meant, and silently teleporting the node would be worse than a miss.
    */
   const SNAP_PX = 70;
-  function snapNodeToContour(p, i) {
+  const DRAW_SNAP_PX = 18;   // tighter while drawing: every click would otherwise grab
+  const NODE_GRAB_PX = 14;   // treat a click this close to a node as 'grab it'
+
+  /*
+   * Nearest point on any custom depth contour, in screen space. Shared by the
+   * shift-click snap and by drawing, so a node placed on the 40 ft line and a
+   * node snapped to it afterwards land in exactly the same place.
+   */
+  function nearestContourPoint(latlng, limitPx) {
     const contours = (window.CustomContours && CustomContours.items) || [];
-    const src = map.latLngToLayerPoint(p.nodes[i]);
+    if (!contours.length) return null;
+    const src = map.latLngToLayerPoint(latlng);
     let bestPt = null, bestD = Infinity, bestFt = null;
     contours.forEach((it) => {
       if (!it.layer) return;
@@ -624,9 +681,17 @@ const Paths = (function () {
         }
       });
     });
+    if (!bestPt || bestD > (limitPx || SNAP_PX)) return null;
+    return { latlng: map.layerPointToLatLng(bestPt), feet: bestFt, dist: bestD };
+  }
+
+  function snapNodeToContour(p, i) {
+    const contours = (window.CustomContours && CustomContours.items) || [];
     if (!contours.length) { toast('No custom contours to snap to — add one on the depth ruler.', true); return; }
-    if (!bestPt || bestD > SNAP_PX) { toast('No contour within snapping range of that node.', true); return; }
-    p.nodes[i] = map.layerPointToLatLng(bestPt);
+    const hit = nearestContourPoint(p.nodes[i], SNAP_PX);
+    if (!hit) { toast('No contour within snapping range of that node.', true); return; }
+    const bestFt = hit.feet;
+    p.nodes[i] = hit.latlng;
     p.profile = null;
     closeNodeEditor();
     redraw(p); refreshProfile(p);
@@ -704,6 +769,7 @@ const Paths = (function () {
       mirrored: false, preMirrorNodes: null, plotHeight: 62, plotHeightManual: false,
       showNodes: false, showLegs: false, legGas: {}
     };
+    collapseOthers(p.id);
     paths.push(p);
     selectedId = p.id;
     drawing = p;
@@ -721,7 +787,16 @@ const Paths = (function () {
     const oe = ev.originalEvent;
     if (!drawing && oe && (oe.ctrlKey || oe.metaKey)) startDrawing();
     if (!drawing) return;
-    drawing.nodes.push(ev.latlng);
+    /*
+     * Snap a placed node onto a custom depth contour when one is close. This is
+     * the point of drawing a transect along "the 40 ft line" — doing it only
+     * afterwards, via shift-click per node, made the contour decorative. The
+     * radius is tighter than the manual snap: while drawing every click is a
+     * candidate, so a wide catch would drag unrelated nodes onto a contour.
+     */
+    const hit = nearestContourPoint(ev.latlng, DRAW_SNAP_PX);
+    drawing.nodes.push(hit ? hit.latlng : ev.latlng);
+    if (hit) say('Node snapped to the ' + hit.feet + ' ft contour');
     drawing.profile = null;
     redraw(drawing);
     onChange();
@@ -925,6 +1000,7 @@ const Paths = (function () {
         .map((n) => L.latLng(n.lat, n.lng));
       if (nodes.length < 2) throw new Error('need at least two nodes');
 
+      collapseOthers(null);
       const id = nextId++;
       const p = {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
@@ -963,6 +1039,7 @@ const Paths = (function () {
       refreshProfile(existing);
     } else {
       const id = nextId++;
+      collapseOthers(id);
       const p = { id: id, name: rec.name || ('Path ' + id), nodes: nodes,
                   color: rec.color || COLORS[(id - 1) % COLORS.length],
                   line: null, markers: [], profile: null, expanded: true };

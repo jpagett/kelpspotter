@@ -80,6 +80,8 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Depth contours** | Charted depth contours from NOAA ENC (off by default). |
 | **Depth → Depth opacity** | Dims the relief so the kelp layer stays readable over it. |
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
+| **Drawing on a contour** | While drawing, a node placed within ~18 px of a custom depth contour snaps onto it, so a transect can follow "the 40 ft line". Shift-clicking an existing node snaps it the same way, with a wider catch. |
+| **Node handles** | Live in their own map pane above the path lines, so grabbing a node always beats the line's insert-a-node hit area. |
 | **Paths** (top right) | **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. Hovering the profile drops a dot on the map at that distance along the path. The panel is resizable from its bottom-right corner. |
 | **Rerun kelp map** | Greyed out while the map matches the settings; turns kelp-yellow once the index, kelp threshold or B11 filter changes. Layer opacity does not count — it restyles the existing layer rather than recomputing it. |
 | **Section headers** | **Depth** and **Kelp model** collapse and expand. |

@@ -419,6 +419,40 @@ const Paths = (function () {
     onChange();
   }
 
+  /*
+   * Rebuild paths from their persisted form (see persistNow in app.js).
+   * Only geometry and display fields are stored; profiles are derived and
+   * re-sample from the DEM here. Entries that fail validation are skipped
+   * individually rather than aborting the whole restore.
+   */
+  function restore(list) {
+    const valid = (n) => n && isFinite(n.lat) && isFinite(n.lng);
+    (list || []).forEach((s) => {
+      if (!s || !Array.isArray(s.nodes)) return;
+      const nodes = s.nodes.filter(valid).map((n) => L.latLng(n.lat, n.lng));
+      if (nodes.length < 2) return;
+      const id = nextId++;
+      paths.push({
+        id: id,
+        name: typeof s.name === 'string' && s.name ? s.name : 'Path ' + id,
+        nodes: nodes,
+        color: typeof s.color === 'string' ? s.color : COLORS[(id - 1) % COLORS.length],
+        line: null, markers: [], profile: null,
+        expanded: s.expanded !== false,
+        mirrored: !!s.mirrored,
+        preMirrorNodes: Array.isArray(s.preMirrorNodes)
+          ? s.preMirrorNodes.filter(valid).map((n) => L.latLng(n.lat, n.lng)) : null,
+        plotHeight: s.plotHeight > 0 ? s.plotHeight : 62
+      });
+    });
+    if (!paths.length) return;
+    selectedId = paths[paths.length - 1].id;
+    paths.forEach(redraw);
+    paths.forEach(refreshProfile);
+    say(paths.length + ' path' + (paths.length === 1 ? '' : 's') + ' restored from your last visit', 'ok');
+    onChange();
+  }
+
   /* ---------- spreadsheet in / out ---------- */
 
   function exportPath(id) {
@@ -490,6 +524,7 @@ const Paths = (function () {
     remove: remove,
     exportPath: exportPath,
     importFile: importFile,
+    restore: restore,
     lengthOf: lengthOf,
     hoverAt: hoverAt,
     hoverOff: hoverOff,

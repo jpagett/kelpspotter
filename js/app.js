@@ -15,6 +15,28 @@
     params: Object.assign({}, cfg.DEFAULTS)
   };
 
+  /*
+   * ---- persistence ----
+   * Settings and paths live in localStorage (across visits); the date range
+   * and selected scene in sessionStorage (per tab). Restoring params happens
+   * RIGHT HERE, before any of the module-scope UI wiring below reads them —
+   * merged over the DEFAULTS copy so config keys added later still get their
+   * defaults. STORE_V discards stored data wholesale on a schema change
+   * rather than half-loading it. Every write is best-effort: private-mode or
+   * full storage degrades to a stateless session, never a broken one.
+   */
+  const STORE_V = '1';
+  try {
+    if (localStorage.getItem('kelp.v') !== STORE_V) {
+      localStorage.removeItem('kelp.params');
+      localStorage.removeItem('kelp.paths');
+      localStorage.setItem('kelp.v', STORE_V);
+    } else {
+      const saved = JSON.parse(localStorage.getItem('kelp.params') || 'null');
+      if (saved && typeof saved === 'object') Object.assign(state.params, saved);
+    }
+  } catch (err) { console.warn('settings restore skipped:', err); }
+
   // ---- map ----
   const [w, s, e, n] = cfg.AOI;
   // zoomControl:false — replaced by the custom horizontal control in .corner-br
@@ -547,6 +569,26 @@
   }
 
   /*
+   * Ranges are capped at RANGE_MAX_DAYS. The endpoint the user just set is
+   * honoured and the OTHER one is pulled in to fit — picking a start five
+   * years back gives you that start plus the following 400 days, rather
+   * than a refusal.
+   */
+  const RANGE_MAX_DAYS = 400;
+  function clampRange(start, end, anchor) {
+    const maxMs = RANGE_MAX_DAYS * 86400000;
+    if (Date.parse(end) - Date.parse(start) <= maxMs) return [start, end];
+    if (anchor === 'start') {
+      const e = new Date(Date.parse(start) + maxMs).toISOString().slice(0, 10);
+      say('Range capped at ' + RANGE_MAX_DAYS + ' days — end pulled in to ' + e);
+      return [start, e];
+    }
+    const s = new Date(Date.parse(end) - maxMs).toISOString().slice(0, 10);
+    say('Range capped at ' + RANGE_MAX_DAYS + ' days — start pulled in to ' + s);
+    return [s, end];
+  }
+
+  /*
    * Setting one edge advances to the other, so the natural flow after opening the
    * picker is: click a start, click an end, done. Setting the end drops back to
    * scene picking. Picking a start also pushes the end out if it would otherwise
@@ -554,9 +596,9 @@
    */
   function setRangeEdge(date) {
     const [rs, re] = dateRangeISO();
-    const next = calMode === 'start'
-      ? [date, date > re ? date : re]
-      : [date < rs ? date : rs, date];
+    const next = clampRange.apply(null, calMode === 'start'
+      ? [date, date > re ? date : re, 'start']
+      : [date < rs ? date : rs, date, 'end']);
     const ok = applyRange(next[0], next[1], true);
     if (!ok) return;                 // rejected — stay armed and let them retry
     calMode = calMode === 'start' ? 'end' : 'scene';
@@ -573,7 +615,12 @@
     if (date < rs || date > re) {
       pendingPick = date;
       setCalendar(false);
-      applyRange(date < rs ? date : rs, date > re ? date : re, true);
+      // widening obeys the range cap too, anchored on the clicked day so the
+      // scene being asked for is always inside whatever window results
+      const next = clampRange(
+        date < rs ? date : rs, date > re ? date : re,
+        date < rs ? 'start' : 'end');
+      applyRange(next[0], next[1], true);
       return;
     }
     const at = state.scenes.findIndex((s) => s.date === date);
@@ -713,6 +760,9 @@
       } else {
         say('Kelp layer drawn', 'ok');
       }
+      // keep a visible true-color layer on the scene now being shown — this is
+      // also what re-materialises it after a restore, once scenes exist
+      if (state.params.trueColorOpacity > 0) ensureTrueColor();
     } catch (err) {
       console.warn(err);
       say('Kelp computation failed — see console', 'warn');
@@ -845,6 +895,27 @@
       if (state.layer && state.layer.setOpacity) state.layer.setOpacity(+v);
       if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
     }, () => run());
+
+  /*
+   * Reset the kelp-model section to the published values. Settings persist
+   * across visits now, so this is the way back to the paper's calibration
+   * after experimenting. Scoped to this section's own controls — units,
+   * gas planning, overlays and the rest are untouched.
+   */
+  $('kelp-defaults').addEventListener('click', () => {
+    const d = cfg.DEFAULTS;
+    applyIndex(d.indexType);            // index buttons + threshold slider + published value
+    state.params.b11Thresh = d.b11Thresh;
+    $('b11').value = d.b11Thresh;
+    $('b11-val').textContent = d.b11Thresh.toFixed(3);
+    state.params.opacity = d.opacity;
+    $('opacity').value = d.opacity;
+    $('op-val').textContent = Math.round(d.opacity * 100) + '%';
+    if (state.layer && state.layer.setOpacity) state.layer.setOpacity(d.opacity);
+    if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
+    setDirty(true);
+    say('Kelp model reset to the published defaults');
+  });
 
   // ---- date range ----
   // Read-only in the console; edited from the calendar's Start / End buttons.
@@ -1930,6 +2001,43 @@
     loadScenes();
   }
 
+  /*
+   * ---- persistence: the save side ----
+   * One debounced writer, triggered by the tail end of any interaction
+   * (click / input / pointerup) rather than instrumenting every setter —
+   * all mutations here start from a user gesture, so this catches them
+   * all for the cost of one JSON serialisation per burst of activity.
+   * beforeunload does a final synchronous flush.
+   */
+  function persistNow() {
+    try {
+      // stamp the version with every write — data without its version key
+      // would be discarded as stale on the next load
+      localStorage.setItem('kelp.v', STORE_V);
+      localStorage.setItem('kelp.params', JSON.stringify(state.params));
+      localStorage.setItem('kelp.paths', JSON.stringify(Paths.list.map((p) => ({
+        name: p.name, color: p.color, mirrored: p.mirrored,
+        preMirrorNodes: p.preMirrorNodes
+          ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
+        plotHeight: p.plotHeight, expanded: p.expanded,
+        nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
+      }))));
+      const sc = state.scenes[state.idx];
+      sessionStorage.setItem('kelp.session', JSON.stringify({
+        start: state.range.start, end: state.range.end, scene: sc ? sc.date : null
+      }));
+    } catch (err) { /* storage blocked or full — run stateless, never break */ }
+  }
+  let persistTimer = null;
+  function schedulePersist() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistNow, 500);
+  }
+  document.addEventListener('click', schedulePersist);
+  document.addEventListener('input', schedulePersist);
+  document.addEventListener('pointerup', schedulePersist);
+  window.addEventListener('beforeunload', persistNow);
+
   // ---- boot ----
   (async function boot() {
     // Point the controls at whichever index config.js defaults to, so the slider
@@ -1940,7 +2048,20 @@
 
     const [rs, re] = defaultRange();
     state.range.start = rs; state.range.end = re;
+    // a reload mid-session keeps its place; a fresh visit starts at the default window
+    try {
+      const sess = JSON.parse(sessionStorage.getItem('kelp.session') || 'null');
+      if (sess && sess.start && sess.end) {
+        state.range.start = sess.start;
+        state.range.end = sess.end;
+        if (sess.scene) pendingPick = sess.scene;
+      }
+    } catch (err) { console.warn('session restore skipped:', err); }
     showRange();
+
+    // mode is restored with the rest of params; the seg buttons need to agree
+    $('mode-single').setAttribute('aria-pressed', state.params.mode === 'single');
+    $('mode-composite').setAttribute('aria-pressed', state.params.mode === 'composite');
 
     setCloudCeiling(state.params.maxCloud, true);   // sync both sliders, no refilter yet
     setDirty(false);
@@ -1955,6 +2076,10 @@
     DemSampler.init(cfg);
     CustomContours.init(cfg, L, map, say);
     Paths.init(cfg, L, map, say, toast, renderPaths);
+    try {
+      const saved = JSON.parse(localStorage.getItem('kelp.paths') || 'null');
+      if (Array.isArray(saved) && saved.length) Paths.restore(saved);
+    } catch (err) { console.warn('path restore skipped:', err); }
     renderPaths();
 
     say('Starting up…');
@@ -1987,6 +2112,12 @@
       : engine === ApiKelpEngine ? 'Live Sentinel-2 via the shared backend — sign in to use your own quota'
       : 'Demo mode — synthetic kelp', 'ok');
     if (engine === DemoEngine) await DemoEngine.init(cfg, L);
+    // a restored true-color opacity is meaningless in demo mode (no imagery) —
+    // zero it quietly rather than greeting the user with an error toast
+    if (engine === DemoEngine && state.params.trueColorOpacity > 0) {
+      state.params.trueColorOpacity = 0;
+      syncOverlayPicker();
+    }
     activateEngine(engine);
     if (engine === DemoEngine && !(cfg.CLIENT_ID.indexOf('<') === 0)) {
       // creds present but silent auth failed → offer popup

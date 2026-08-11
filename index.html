@@ -195,20 +195,33 @@
           <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
         </div>
       </div>
+      <!-- always-visible strip: the gas toggle plus the options disclosure -->
       <div id="pp-global-tools" class="pp-global-tools">
-        <div class="pp-tool-group">
-          <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false" title="Overlay estimated gas consumption on every path">Gas</button>
-          <label id="pp-sac-field" class="pp-field pp-field-below" title="Surface air consumption rate">
-            <span>SAC</span>
+        <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false"
+                title="Overlay estimated gas consumption on every path">Gas</button>
+        <button id="pp-opts-toggle" class="pp-opts-toggle" type="button" aria-expanded="false"
+                title="Diver and cylinder settings"><span class="sect-caret">&#9656;</span> Path options</button>
+      </div>
+      <div id="pp-opts" class="pp-opts" hidden>
+        <div class="pp-opts-group">
+          <div class="pp-opts-head">Diver</div>
+          <label id="pp-sac-field" class="pp-field" title="Surface air consumption rate">
+            <span class="pp-opts-label">SAC</span>
             <input id="pp-sac-input" type="number" class="pp-num" min="0" aria-label="Surface air consumption rate">
             <span id="pp-sac-unit" class="pp-field-unit"></span>
           </label>
-        </div>
-        <div class="pp-tool-group">
-          <span class="pp-group-label">Kick</span>
-          <label class="pp-field pp-field-below"
+          <div class="pp-field">
+            <div class="pp-mode-btns">
+              <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
+              <button id="pp-speed-btn" class="pp-mode-btn" type="button" aria-pressed="true">Speed</button>
+            </div>
+            <input id="pp-mode-input" type="number" class="pp-num" min="0" aria-label="Time or speed value">
+            <span id="pp-mode-unit" class="pp-field-unit"></span>
+          </div>
+          <label class="pp-field"
                  title="Distance covered per kick cycle — leave blank to omit kicks from the leg table">
-            <input id="pp-kick-input" type="number" class="pp-num" min="0" placeholder="—"
+            <span class="pp-opts-label">Kick</span>
+            <input id="pp-kick-input" type="number" class="pp-num" min="0" placeholder="&#8212;"
                    aria-label="Distance per kick cycle">
             <select id="pp-kick-unit" class="pp-units" aria-label="Kick distance units">
               <option value="m">m</option>
@@ -216,15 +229,13 @@
             </select>
           </label>
         </div>
-        <div class="pp-tool-group pp-tool-group-wide">
-          <div class="pp-mode-btns">
-            <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
-            <button id="pp-speed-btn" class="pp-mode-btn" type="button" aria-pressed="true">Speed</button>
+        <div class="pp-opts-group">
+          <div class="pp-opts-head">
+            Cylinders
+            <button id="pp-cyl-add" class="pp-cyl-add" type="button" title="Add another gas source">+</button>
           </div>
-          <label class="pp-field pp-field-below">
-            <input id="pp-mode-input" type="number" class="pp-num" min="0" aria-label="Time or speed value">
-            <span id="pp-mode-unit" class="pp-field-unit"></span>
-          </label>
+          <!-- one row per gas source; built by app.js from state.params.cylinders -->
+          <div id="pp-cyl-list" class="pp-cyl-list"></div>
         </div>
       </div>
       <div id="pp-body">
@@ -299,20 +310,6 @@
 
   <div id="toast" class="toast"></div>
 
-  <!-- leg table viewer; body is built by app.js when the compass button is pressed -->
-  <div id="legs-modal" class="modal" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legs-title">
-      <div class="modal-head">
-        <span id="legs-title" class="eyebrow">Leg table</span>
-        <div class="modal-tools">
-          <button id="legs-print" class="btn ghost" type="button">Print</button>
-          <button id="legs-csv" class="btn ghost" type="button">Save CSV</button>
-          <button id="legs-close" class="modal-x" type="button" aria-label="Close">×</button>
-        </div>
-      </div>
-      <div id="legs-body" class="modal-body"></div>
-    </div>
-  </div>
 
   <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

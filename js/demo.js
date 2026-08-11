@@ -128,8 +128,12 @@ const DemoEngine = (function () {
 
         // Non-default colormaps interpolate the shared palette; 'amber' keeps
         // the hand-tuned procedural ramps below, which it was derived from.
-        const stops = (cfg && cfg.KELP_PALETTES && p.kelpPalette && p.kelpPalette !== 'amber')
-          ? cfg.KELP_PALETTES[p.kelpPalette] : null;
+        // prefer the range-sliced palette from app.js; only the untouched
+        // amber default falls through to the hand-tuned procedural ramps
+        const sliced = p.paletteStops && p.paletteStops.length ? p.paletteStops : null;
+        const stops = (p.kelpPalette && p.kelpPalette !== 'amber')
+          ? (sliced || (cfg && cfg.KELP_PALETTES && cfg.KELP_PALETTES[p.kelpPalette]))
+          : (p.paletteMin > 0 || p.paletteMax < 1 ? sliced : null);
 
         seeds.forEach((seed) => {
           BEDS.forEach(([lng, lat, strength]) => {

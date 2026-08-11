@@ -119,6 +119,10 @@ const KelpEngine = (function () {
   // keyed by p.kelpPalette, so the legend's colormap picker steers this too.
   const KELP_VIS = ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'];
   function paletteFor(p) {
+    // paletteStops is the named palette already sliced to the legend's
+    // selected range (see refreshPaletteStops in app.js); fall back to the
+    // whole palette, then to amber, if it has not been computed.
+    if (p.paletteStops && p.paletteStops.length) return p.paletteStops;
     return (cfg.KELP_PALETTES && cfg.KELP_PALETTES[p.kelpPalette]) || KELP_VIS;
   }
 

@@ -76,7 +76,8 @@ const ApiKelpEngine = (function () {
         index: p.indexType,
         kelpThresh: p.kelpThresh,
         b11Thresh: p.b11Thresh,
-        palette: p.kelpPalette
+        palette: p.kelpPalette,
+        stops: (p.paletteStops || []).join(',')
       }).then((r) => r.urlFormat);
     },
 
@@ -89,7 +90,8 @@ const ApiKelpEngine = (function () {
         index: p.indexType,
         kelpThresh: p.kelpThresh,
         b11Thresh: p.b11Thresh,
-        palette: p.kelpPalette
+        palette: p.kelpPalette,
+        stops: (p.paletteStops || []).join(',')
       }).then((r) => r.urlFormat);
     },
 

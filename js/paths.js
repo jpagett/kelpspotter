@@ -31,8 +31,18 @@ const Paths = (function () {
     onChange = changed || function () {};
     map.createPane(PANE).style.zIndex = 380;   // above kelp, below the demo canvas
     map.on('click', onMapClick);
+    initBoxSelect();
     document.addEventListener('keydown', (ev) => {
-      if ((ev.key === 'Escape' || ev.key === 'Enter') && drawing) finishDrawing();
+      if ((ev.key === 'Escape' || ev.key === 'Enter') && drawing) { finishDrawing(); return; }
+      if (ev.key === 'Escape' && picked.size) { clearPicked(); return; }
+      // Delete/Backspace clears the whole selection at once, but not while
+      // the user is typing into the coordinate editor
+      if ((ev.key === 'Delete' || ev.key === 'Backspace') && picked.size) {
+        const tag = ev.target && ev.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        ev.preventDefault();
+        removePicked();
+      }
     });
   }
 
@@ -67,6 +77,28 @@ const Paths = (function () {
   }
   function hoverOff() {
     if (hoverDot) { map.removeLayer(hoverDot); hoverDot = null; }
+  }
+
+  /*
+   * Depth formatting lives in app.js (it owns the unit settings), so hovering
+   * a path on the MAP borrows the same formatter the plot hover uses. Without
+   * one set, fall back to raw feet rather than showing nothing.
+   */
+  let depthLabel = (s) => Math.round(-s.feet) + ' ft';
+  function setDepthFormatter(fn) { if (typeof fn === 'function') depthLabel = fn; }
+
+  // The profile sample closest to a point on the path. Squared degrees is a
+  // fine metric here: the candidates all lie along one short line.
+  function sampleNearest(p, latlng) {
+    const pts = (p.profile || []).filter((s) => s.feet !== null);
+    if (!pts.length) return null;
+    let best = null, bestD = Infinity;
+    pts.forEach((s) => {
+      const dLat = s.lat - latlng.lat, dLng = s.lng - latlng.lng;
+      const d = dLat * dLat + dLng * dLng;
+      if (d < bestD) { bestD = d; best = s; }
+    });
+    return best;
   }
 
   /* ---------- GPS coordinate parsing ----------
@@ -228,6 +260,106 @@ const Paths = (function () {
     }
   }
 
+  /* ---------- multi-node selection ----------
+   * Shift-drag on the map rubber-bands a box and picks every node of the
+   * selected path inside it. This REPLACES Leaflet's shift-drag box zoom,
+   * which is disabled below — node editing is what that gesture is for here.
+   * (Shift-CLICK on a single node still snaps it to a contour; a click has no
+   * drag distance, so the two never fire together.)
+   *
+   * Picked nodes drag as a group and delete as a group; deleting interior
+   * nodes simply removes them from the list, so their surviving neighbours
+   * become adjacent and the line closes up.
+   */
+  const picked = new Set();        // node indices, always within the selected path
+  let pickedPathId = null;
+
+  function clearPicked() {
+    if (!picked.size) return;
+    picked.clear();
+    pickedPathId = null;
+    const p = selected();
+    if (p) redraw(p);
+  }
+
+  function removePicked() {
+    const p = selected();
+    if (!p || pickedPathId !== p.id || !picked.size) return;
+    const keep = p.nodes.filter((_, i) => !picked.has(i));
+    if (keep.length < 2) {
+      toast('A path needs at least two nodes — that selection would empty it.', true);
+      return;
+    }
+    const n = picked.size;
+    p.nodes = keep;
+    if (p.mirrored) { p.mirrored = false; p.preMirrorNodes = null; }
+    picked.clear(); pickedPathId = null;
+    p.profile = null;
+    closeNodeEditor();
+    redraw(p); refreshProfile(p);
+    say(n + ' node' + (n === 1 ? '' : 's') + ' deleted from ' + p.name);
+    onChange();
+  }
+
+  function initBoxSelect() {
+    map.boxZoom.disable();                       // the gesture belongs to selection now
+    const container = map.getContainer();
+    let origin = null, boxEl = null;
+
+    function corners(a, b) {
+      return {
+        left: Math.min(a.x, b.x), top: Math.min(a.y, b.y),
+        right: Math.max(a.x, b.x), bottom: Math.max(a.y, b.y)
+      };
+    }
+
+    container.addEventListener('mousedown', (ev) => {
+      if (!ev.shiftKey || ev.button !== 0) return;
+      const p = selected();
+      if (!p || drawing) return;
+      origin = map.mouseEventToContainerPoint(ev);
+      boxEl = L.DomUtil.create('div', 'node-select-box', container);
+      L.DomUtil.disableTextSelection();
+      ev.preventDefault();
+    });
+
+    container.addEventListener('mousemove', (ev) => {
+      if (!origin || !boxEl) return;
+      const now = map.mouseEventToContainerPoint(ev);
+      const c = corners(origin, now);
+      boxEl.style.left = c.left + 'px';
+      boxEl.style.top = c.top + 'px';
+      boxEl.style.width = (c.right - c.left) + 'px';
+      boxEl.style.height = (c.bottom - c.top) + 'px';
+    });
+
+    document.addEventListener('mouseup', (ev) => {
+      if (!origin) return;
+      const now = map.mouseEventToContainerPoint(ev);
+      const c = corners(origin, now);
+      if (boxEl) { L.DomUtil.remove(boxEl); boxEl = null; }
+      L.DomUtil.enableTextSelection();
+      origin = null;
+
+      const p = selected();
+      if (!p) return;
+      // a shift-click with no drag is not a box; leave it to the node handler
+      if (c.right - c.left < 4 && c.bottom - c.top < 4) return;
+      picked.clear();
+      pickedPathId = p.id;
+      p.nodes.forEach((ll, i) => {
+        const pt = map.latLngToContainerPoint(ll);
+        if (pt.x >= c.left && pt.x <= c.right && pt.y >= c.top && pt.y <= c.bottom) picked.add(i);
+      });
+      if (!picked.size) pickedPathId = null;
+      redraw(p);
+      if (picked.size) {
+        say(picked.size + ' node' + (picked.size === 1 ? '' : 's') +
+            ' selected — drag to move them together, Delete to remove');
+      }
+    });
+  }
+
   /* ---------- geometry ---------- */
 
   function redraw(p) {
@@ -251,41 +383,84 @@ const Paths = (function () {
      * never while drawing (it would swallow the clicks that place nodes).
      */
     if (p.hitLine) { map.removeLayer(p.hitLine); p.hitLine = null; }
-    if (isSel && !drawing) {
+    if (p.nodes.length >= 2 && !drawing) {
       p.hitLine = L.polyline(latlngs, {
         pane: PANE, weight: 16, opacity: 0, interactive: true
       }).addTo(map);
-      p.hitLine.on('click', (ev) => {
-        const oe = ev.originalEvent;
-        // Ctrl/Cmd means "start a new path", even over an existing one
-        if (oe && (oe.ctrlKey || oe.metaKey)) {
-          startDrawing();
-          drawing.nodes.push(ev.latlng);
-          redraw(drawing);
-          onChange();
-        } else {
-          insertNodeAt(p, ev.latlng);
-        }
-        L.DomEvent.stop(ev);
+      /*
+       * Hovering anywhere near a path reads its depth there, the same dot and
+       * label the profile plot's hover produces. Every path gets this, not
+       * just the selected one — reading a depth should not require selecting.
+       */
+      p.hitLine.on('mousemove', (ev) => {
+        const s = sampleNearest(p, ev.latlng);
+        if (s) hoverAt(p.id, s, depthLabel(s));
       });
+      p.hitLine.on('mouseout', hoverOff);
+      // ...but editing does: only the selected path takes an inserted node.
+      if (isSel) {
+        p.hitLine.on('click', (ev) => {
+          const oe = ev.originalEvent;
+          // Ctrl/Cmd means "start a new path", even over an existing one
+          if (oe && (oe.ctrlKey || oe.metaKey)) {
+            startDrawing();
+            drawing.nodes.push(ev.latlng);
+            redraw(drawing);
+            onChange();
+          } else if (!(oe && oe.shiftKey)) {   // shift-drag is box select
+            insertNodeAt(p, ev.latlng);
+          }
+          L.DomEvent.stop(ev);
+        });
+      }
     }
 
     // rebuild node handles
     p.markers.forEach((m) => map.removeLayer(m));
     p.markers = [];
     if (!isSel) return;                       // only the selected path is editable
+    const isPicked = (i) => pickedPathId === p.id && picked.has(i);
     p.nodes.forEach((ll, i) => {
       const icon = L.divIcon({
-        className: 'path-node',
+        className: 'path-node' + (isPicked(i) ? ' picked' : ''),
         html: '<span style="background:' + p.color + '"></span>',
         iconSize: [11, 11]
       });
       const m = L.marker(ll, { icon: icon, draggable: true, pane: PANE });
-      m.on('drag', (ev) => {
-        p.nodes[i] = ev.target.getLatLng();
-        p.line.setLatLngs(p.nodes);
+      /*
+       * Dragging a picked node carries the rest of the selection with it: the
+       * delta this node moved is applied to every other picked node, so their
+       * relative geometry is preserved.
+       */
+      let dragFrom = null, groupFrom = null;
+      m.on('dragstart', () => {
+        if (!isPicked(i)) return;
+        dragFrom = p.nodes[i];
+        groupFrom = {};
+        picked.forEach((k) => { groupFrom[k] = p.nodes[k]; });
       });
-      m.on('dragend', () => { p.profile = null; refreshProfile(p); });
+      m.on('drag', (ev) => {
+        const now = ev.target.getLatLng();
+        if (dragFrom && groupFrom) {
+          const dLat = now.lat - dragFrom.lat, dLng = now.lng - dragFrom.lng;
+          Object.keys(groupFrom).forEach((k) => {
+            const from = groupFrom[k];
+            p.nodes[k] = L.latLng(from.lat + dLat, from.lng + dLng);
+          });
+          // the dragged marker is authoritative for its own node
+          p.nodes[i] = now;
+          p.markers.forEach((mk, k) => { if (k !== i && picked.has(k)) mk.setLatLng(p.nodes[k]); });
+        } else {
+          p.nodes[i] = now;
+        }
+        p.line.setLatLngs(p.nodes);
+        if (p.hitLine) p.hitLine.setLatLngs(p.nodes);
+      });
+      m.on('dragend', () => {
+        dragFrom = null; groupFrom = null;
+        p.profile = null;
+        refreshProfile(p);
+      });
       m.on('contextmenu', () => removeNode(p, i));
       m.on('click', (ev) => {
         const oe = ev.originalEvent;
@@ -436,7 +611,8 @@ const Paths = (function () {
       id: id, name: 'Path ' + id, nodes: [],
       color: COLORS[(id - 1) % COLORS.length],
       line: null, markers: [], profile: null, expanded: true,
-      mirrored: false, preMirrorNodes: null, plotHeight: 62, showNodes: false
+      mirrored: false, preMirrorNodes: null, plotHeight: 62, plotHeightManual: false,
+      showNodes: false, showLegs: false, legGas: {}
     };
     paths.push(p);
     selectedId = p.id;
@@ -608,7 +784,10 @@ const Paths = (function () {
         preMirrorNodes: Array.isArray(s.preMirrorNodes)
           ? s.preMirrorNodes.filter(valid).map((n) => L.latLng(n.lat, n.lng)) : null,
         plotHeight: s.plotHeight > 0 ? s.plotHeight : 62,
-        showNodes: !!s.showNodes
+        showNodes: !!s.showNodes,
+        showLegs: !!s.showLegs,
+        plotHeightManual: !!s.plotHeightManual,
+        legGas: (s.legGas && typeof s.legGas === 'object') ? s.legGas : {}
       });
     });
     if (!paths.length) return;
@@ -661,7 +840,8 @@ const Paths = (function () {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
         color: COLORS[(id - 1) % COLORS.length],
         line: null, markers: [], profile: null, expanded: true,
-        mirrored: false, preMirrorNodes: null, plotHeight: 62, showNodes: false
+        mirrored: false, preMirrorNodes: null, plotHeight: 62, plotHeightManual: false,
+      showNodes: false, showLegs: false, legGas: {}
       };
       paths.push(p);
       selectedId = p.id;
@@ -697,6 +877,9 @@ const Paths = (function () {
     lengthOf: lengthOf,
     hoverAt: hoverAt,
     hoverOff: hoverOff,
+    setDepthFormatter: setDepthFormatter,
+    clearPicked: clearPicked,
+    get pickedCount() { return picked.size; },
     parseCoords: parseCoords,
     get list() { return paths; },
     get selectedId() { return selectedId; },

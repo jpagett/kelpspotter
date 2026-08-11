@@ -174,6 +174,20 @@ window.KELP_CONFIG = {
     showGas: true,
     kickDistance: 0,        // metres per kick cycle; 0 = omit kicks from the leg table
     kickUnit: 'm',          // how that number is typed/shown: 'm' | 'ft'
+    /*
+     * Gas sources. Each is a cylinder the diver carries; legs in the leg
+     * table are assigned to one of them, and a source is "over budget" once
+     * the legs drawing on it exceed (totalCuft - reserve). Reserve can be
+     * expressed as a volume, as a pressure, or both — whichever boxes are
+     * ticked; with both, the LARGER reserve wins, since that is the
+     * conservative reading of two stated minimums.
+     */
+    cylinders: [
+      { id: 1, name: 'AL80', totalCuft: 77.4, startPsi: 3000,
+        useReserveCuft: false, reserveCuft: 15,
+        useReservePsi: true, reservePsi: 500 }
+    ],
+    pressureUnit: 'psi',    // 'psi' | 'bar'
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it

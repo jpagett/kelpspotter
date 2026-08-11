@@ -934,12 +934,10 @@
     (v) => (state.params.kelpThresh = +v), () => setDirty(true));
   bindSlider('b11', 'b11-val', (v) => (+v).toFixed(3),
     (v) => (state.params.b11Thresh = +v), () => setDirty(true));
+  // shares setKelpOpacity with the overlay picker so the two stay in step;
+  // opacity restyles the existing layer, so no rerun is needed on release
   bindSlider('opacity', 'op-val', (v) => Math.round(v * 100) + '%',
-    (v) => {
-      state.params.opacity = +v;
-      if (state.layer && state.layer.setOpacity) state.layer.setOpacity(+v);
-      if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
-    }, () => run());
+    (v) => { setKelpOpacity(+v); syncOverlayPicker(); }, () => {});
 
   /*
    * Reset the kelp-model section to the published values. Settings persist
@@ -996,67 +994,150 @@
     (v) => setDepthOpacity(+v), () => {});
 
   /*
-   * ---- overlay picker: true color vs depth, "solo" style ----
-   * Clicking an icon remembers both overlays' current opacity, then sets this
-   * one to full and the other to zero — click it again to put both back the
-   * way they were. Dragging a flyout slider by hand is a plain opacity set and
-   * drops the "soloed" bookkeeping, since at that point the user is composing
-   * their own mix rather than toggling between two presets.
+   * ---- overlay picker: kelp / true color / depth, "solo" style ----
+   * Clicking an icon remembers every overlay's current opacity, then sets
+   * this one to full and the rest to zero — click it again to put them all
+   * back the way they were. Dragging a flyout slider by hand is a plain
+   * opacity set and drops the "soloed" bookkeeping, since at that point the
+   * user is composing their own mix rather than toggling between presets.
+   *
+   * The items are also drag-reorderable; see applyOverlayOrder below.
    */
-  let overlaySoloed = null;        // 'eye' | 'ruler' | null
-  let overlayPreSolo = null;       // {trueColorOpacity, depthOpacity} saved before a solo click
+  const OVERLAYS = {
+    kelp:      { btn: 'ov-kelp',  slider: 'ov-kelp-slider',  param: 'opacity' },
+    truecolor: { btn: 'ov-eye',   slider: 'ov-eye-slider',   param: 'trueColorOpacity' },
+    depth:     { btn: 'ov-ruler', slider: 'ov-ruler-slider', param: 'depthOpacity' }
+  };
+  let overlaySoloed = null;        // key of OVERLAYS, or null
+  let overlayPreSolo = null;       // every overlay's opacity before the solo click
+
+  function setKelpOpacity(v) {
+    state.params.opacity = v;
+    if (state.layer && state.layer.setOpacity) state.layer.setOpacity(v);
+    if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
+    // one opacity, two controls — mirror the console slider (as depth does)
+    $('opacity').value = v;
+    $('op-val').textContent = Math.round(v * 100) + '%';
+  }
+  const OVERLAY_SETTERS = {
+    kelp: setKelpOpacity,
+    truecolor: setTrueColorOpacity,
+    depth: setDepthOpacity
+  };
 
   function syncOverlayPicker() {
-    $('ov-eye').setAttribute('aria-pressed', overlaySoloed === 'eye' ? 'true' : 'false');
-    $('ov-ruler').setAttribute('aria-pressed', overlaySoloed === 'ruler' ? 'true' : 'false');
-    $('ov-eye-slider').value = state.params.trueColorOpacity;
-    $('ov-ruler-slider').value = state.params.depthOpacity;
+    Object.keys(OVERLAYS).forEach((key) => {
+      const o = OVERLAYS[key];
+      $(o.btn).setAttribute('aria-pressed', overlaySoloed === key ? 'true' : 'false');
+      $(o.slider).value = state.params[o.param];
+    });
+  }
+
+  // the depth overlay is invisible unless its relief layer is actually on
+  function ensureReliefOn() {
+    if (state.params.showRelief) return;
+    state.params.showRelief = true;
+    $('relief').checked = true;
+    setDepthLayer('relief', true);
   }
 
   function soloOverlay(which) {
     if (overlaySoloed === which) {
       if (overlayPreSolo) {
-        setTrueColorOpacity(overlayPreSolo.trueColorOpacity);
-        setDepthOpacity(overlayPreSolo.depthOpacity);
+        Object.keys(OVERLAYS).forEach((key) => OVERLAY_SETTERS[key](overlayPreSolo[key]));
       }
       overlaySoloed = null;
       overlayPreSolo = null;
     } else {
-      overlayPreSolo = { trueColorOpacity: state.params.trueColorOpacity, depthOpacity: state.params.depthOpacity };
-      if (which === 'eye') {
-        setTrueColorOpacity(1);
-        setDepthOpacity(0);
-      } else {
-        if (!state.params.showRelief) {
-          state.params.showRelief = true;
-          $('relief').checked = true;
-          setDepthLayer('relief', true);
-        }
-        setDepthOpacity(1);
-        setTrueColorOpacity(0);
-      }
+      overlayPreSolo = {};
+      Object.keys(OVERLAYS).forEach((key) => { overlayPreSolo[key] = state.params[OVERLAYS[key].param]; });
+      if (which === 'depth') ensureReliefOn();
+      Object.keys(OVERLAYS).forEach((key) => OVERLAY_SETTERS[key](key === which ? 1 : 0));
       overlaySoloed = which;
     }
     syncOverlayPicker();
   }
 
-  $('ov-eye').addEventListener('click', () => soloOverlay('eye'));
-  $('ov-ruler').addEventListener('click', () => soloOverlay('ruler'));
-  $('ov-eye-slider').addEventListener('input', (ev) => {
-    overlaySoloed = null; overlayPreSolo = null;
-    setTrueColorOpacity(+ev.target.value);
-    syncOverlayPicker();
+  Object.keys(OVERLAYS).forEach((key) => {
+    const o = OVERLAYS[key];
+    $(o.btn).addEventListener('click', () => soloOverlay(key));
+    $(o.slider).addEventListener('input', (ev) => {
+      overlaySoloed = null; overlayPreSolo = null;
+      if (key === 'depth' && +ev.target.value > 0) ensureReliefOn();
+      OVERLAY_SETTERS[key](+ev.target.value);
+      syncOverlayPicker();
+    });
   });
-  $('ov-ruler-slider').addEventListener('input', (ev) => {
-    overlaySoloed = null; overlayPreSolo = null;
-    if (+ev.target.value > 0 && !state.params.showRelief) {
-      state.params.showRelief = true;
-      $('relief').checked = true;
-      setDepthLayer('relief', true);
+
+  /*
+   * Drag an overlay icon left/right to restack the map layers. This is only a
+   * pane z-index rewrite — no tiles are refetched and no layer is rebuilt, so
+   * reordering is instant and costs nothing. Leftmost item = bottom of the
+   * stack, matching the flyouts reading left to right.
+   */
+  const OVERLAY_PANES = { kelp: ['kelpPane'], truecolor: ['truecolor'], depth: ['depth', 'contour'] };
+  /*
+   * Slots are 20 apart and start at 240, leaving each overlay room for its
+   * second pane (depth carries its ENC contours) without any two landing on
+   * the same z-index. The custom-contour pane sits above all of them at 350
+   * (set in contours.js) — hand-drawn reference lines should never be buried
+   * under an opaque true-colour scene — and paths stay on top at 380.
+   */
+  function applyOverlayOrder() {
+    const order = state.params.overlayOrder || ['truecolor', 'depth', 'kelp'];
+    order.forEach((key, slot) => {
+      (OVERLAY_PANES[key] || []).forEach((pane, i) => {
+        const el = map.getPane(pane);
+        if (el) el.style.zIndex = 240 + slot * 20 + i * 5;
+      });
+    });
+  }
+  (function initOverlayReorder() {
+    const picker = document.querySelector('.overlay-picker');
+    let dragKey = null;
+    picker.querySelectorAll('.ov-item').forEach((item) => {
+      item.addEventListener('dragstart', (ev) => {
+        dragKey = item.dataset.overlay;
+        item.classList.add('ov-dragging');
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', dragKey);   // Firefox needs a payload
+      });
+      item.addEventListener('dragend', () => {
+        dragKey = null;
+        picker.querySelectorAll('.ov-item').forEach((n) => n.classList.remove('ov-dragging', 'ov-drop-target'));
+      });
+      item.addEventListener('dragover', (ev) => {
+        if (!dragKey || item.dataset.overlay === dragKey) return;
+        ev.preventDefault();
+        item.classList.add('ov-drop-target');
+      });
+      item.addEventListener('dragleave', () => item.classList.remove('ov-drop-target'));
+      item.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        const target = item.dataset.overlay;
+        if (!dragKey || target === dragKey) return;
+        const dragged = picker.querySelector('.ov-item[data-overlay="' + dragKey + '"]');
+        // dropping onto an item to the right inserts after it, else before
+        const after = Array.prototype.indexOf.call(picker.children, dragged) <
+                      Array.prototype.indexOf.call(picker.children, item);
+        picker.insertBefore(dragged, after ? item.nextSibling : item);
+        state.params.overlayOrder = Array.prototype.map.call(
+          picker.querySelectorAll('.ov-item'), (n) => n.dataset.overlay);
+        applyOverlayOrder();
+        say('Overlay order: ' + state.params.overlayOrder.join(' → ') + ' (bottom to top)');
+      });
+    });
+    // restore a saved order by reordering the DOM to match
+    const saved = state.params.overlayOrder;
+    if (Array.isArray(saved)) {
+      saved.forEach((key) => {
+        const el = picker.querySelector('.ov-item[data-overlay="' + key + '"]');
+        if (el) picker.appendChild(el);
+      });
     }
-    setDepthOpacity(+ev.target.value);
-    syncOverlayPicker();
-  });
+    applyOverlayOrder();
+  })();
+
   syncOverlayPicker();
 
   /*
@@ -1066,38 +1147,134 @@
    * (the demo canvas redraws via setParams) and re-mints tiles otherwise —
    * no dirty-state / Rerun involvement, unlike the detection parameters.
    */
-  function updateLegendRamp() {
-    const stops = (cfg.KELP_PALETTES || {})[state.params.kelpPalette];
-    if (stops) {
-      document.querySelector('.legend .ramp').style.background =
-        'linear-gradient(90deg, ' + stops.map((s) => '#' + s).join(', ') + ')';
+  const basePalette = () =>
+    (cfg.KELP_PALETTES || {})[state.params.kelpPalette] || ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'];
+  const gradient = (stops, deg) =>
+    'linear-gradient(' + deg + 'deg, ' + stops.map((s) => '#' + s).join(', ') + ')';
+
+  // sample a palette at 0..1 by linear interpolation between its stops
+  function sampleStops(stops, t) {
+    const n = stops.length - 1;
+    const x = Math.max(0, Math.min(1, t)) * n;
+    const i = Math.min(n - 1, Math.floor(x));
+    const f = x - i;
+    const a = stops[i], b = stops[i + 1];
+    const mix = (o) => {
+      const av = parseInt(a.substr(o, 2), 16), bv = parseInt(b.substr(o, 2), 16);
+      return ('0' + Math.round(av + (bv - av) * f).toString(16)).slice(-2);
+    };
+    return mix(0) + mix(2) + mix(4);
+  }
+
+  /*
+   * The palette actually handed to the renderers: the base colormap resampled
+   * across [paletteMin, paletteMax]. Restricting the range is therefore a
+   * pure colour change — it never touches the detection, only which part of
+   * the ramp the same index values are painted with. Cached on state.params
+   * so every engine (EE visualize, the demo canvas, the API) reads one field.
+   */
+  const PALETTE_STEPS = 8;
+  function refreshPaletteStops() {
+    const base = basePalette();
+    const lo = state.params.paletteMin, hi = state.params.paletteMax;
+    const out = [];
+    for (let i = 0; i < PALETTE_STEPS; i++) {
+      out.push(sampleStops(base, lo + (hi - lo) * (i / (PALETTE_STEPS - 1))));
     }
+    state.params.paletteStops = out;
+    return out;
+  }
+
+  function updateLegendRamp() {
+    document.querySelector('.legend .ramp').style.background =
+      gradient(state.params.paletteStops || basePalette(), 90);
+    // the picker's vertical bar shows the FULL palette; the grips mark the slice
+    $('legend-range-bar').style.background = gradient(basePalette(), 0);
+  }
+
+  function applyPaletteToLayer() {
+    if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
+    else if (state.layer) run();
   }
 
   function setKelpPalette(key) {
     if (!(cfg.KELP_PALETTES || {})[key] || key === state.params.kelpPalette) return;
     state.params.kelpPalette = key;
+    refreshPaletteStops();
     updateLegendRamp();
-    $('legend-menu').querySelectorAll('.legend-swatch').forEach((b) => {
+    $('legend-swatches').querySelectorAll('.legend-swatch').forEach((b) => {
       b.setAttribute('aria-pressed', b.dataset.palette === key ? 'true' : 'false');
     });
-    if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
-    else if (state.layer) run();
+    applyPaletteToLayer();
     say('Kelp colormap: ' + key);
   }
 
   Object.keys(cfg.KELP_PALETTES || {}).forEach((key) => {
-    const stops = cfg.KELP_PALETTES[key];
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'legend-swatch';
     btn.dataset.palette = key;
     btn.title = key;
     btn.setAttribute('aria-pressed', key === state.params.kelpPalette ? 'true' : 'false');
-    btn.style.background = 'linear-gradient(90deg, ' + stops.map((s) => '#' + s).join(', ') + ')';
+    btn.style.background = gradient(cfg.KELP_PALETTES[key], 90);
     btn.addEventListener('click', () => setKelpPalette(key));
-    $('legend-menu').appendChild(btn);
+    $('legend-swatches').appendChild(btn);
   });
+
+  /*
+   * Range grips. The bar runs dark-at-bottom to bright-at-top, so a grip's
+   * fraction is measured up from the bottom. The pair cannot cross: each is
+   * clamped against the other with a small gap so the slice never inverts or
+   * collapses to nothing.
+   */
+  const GRIP_GAP = 0.05;
+  function syncRangeGrips() {
+    $('legend-range-top').style.bottom = (state.params.paletteMax * 100) + '%';
+    $('legend-range-bottom').style.bottom = (state.params.paletteMin * 100) + '%';
+  }
+  function bindRangeGrip(el, which) {
+    let dragging = false;
+    const setFrom = (clientY) => {
+      const r = $('legend-range-bar').getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, 1 - (clientY - r.top) / r.height));
+      if (which === 'max') state.params.paletteMax = Math.max(frac, state.params.paletteMin + GRIP_GAP);
+      else state.params.paletteMin = Math.min(frac, state.params.paletteMax - GRIP_GAP);
+      state.params.paletteMax = Math.min(1, state.params.paletteMax);
+      state.params.paletteMin = Math.max(0, state.params.paletteMin);
+      refreshPaletteStops();
+      syncRangeGrips();
+      updateLegendRamp();
+    };
+    el.addEventListener('pointerdown', (ev) => {
+      dragging = true;
+      try { el.setPointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+      ev.preventDefault(); ev.stopPropagation();
+    });
+    el.addEventListener('pointermove', (ev) => { if (dragging) setFrom(ev.clientY); });
+    el.addEventListener('pointerup', (ev) => {
+      if (!dragging) return;
+      dragging = false;
+      try { el.releasePointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
+      applyPaletteToLayer();   // re-mint once, on release — not per pixel of drag
+    });
+    // keyboard: the grips are sliders, so arrows should move them
+    el.addEventListener('keydown', (ev) => {
+      const step = ev.key === 'ArrowUp' ? 0.05 : ev.key === 'ArrowDown' ? -0.05 : 0;
+      if (!step) return;
+      const key = which === 'max' ? 'paletteMax' : 'paletteMin';
+      const other = which === 'max' ? state.params.paletteMin + GRIP_GAP : 0;
+      const cap = which === 'max' ? 1 : state.params.paletteMax - GRIP_GAP;
+      state.params[key] = Math.max(which === 'max' ? other : 0,
+                                   Math.min(cap, state.params[key] + step));
+      refreshPaletteStops(); syncRangeGrips(); updateLegendRamp(); applyPaletteToLayer();
+      ev.preventDefault();
+    });
+  }
+  bindRangeGrip($('legend-range-top'), 'max');
+  bindRangeGrip($('legend-range-bottom'), 'min');
+
+  refreshPaletteStops();
+  syncRangeGrips();
   updateLegendRamp();
 
   /*
@@ -1357,6 +1534,32 @@
   }
 
   /*
+   * ---- cylinders ----
+   * A gas source's usable volume is its total minus whatever reserve the
+   * diver declared. Reserve may be given as a volume, as a pressure, or
+   * both; with both ticked the LARGER of the two wins, because two stated
+   * minimums mean "at least this much left", not an average.
+   */
+  const PRESSURE_UNITS = { psi: { label: 'psi', from: (psi) => psi }, bar: { label: 'bar', from: (psi) => psi / 14.5038 } };
+  const pressU = () => PRESSURE_UNITS[state.params.pressureUnit] || PRESSURE_UNITS.psi;
+  const cylinders = () => state.params.cylinders || [];
+  const cylinderById = (id) => cylinders().find((c) => c.id === id) || cylinders()[0] || null;
+
+  function reserveCuft(cyl) {
+    if (!cyl) return 0;
+    const byVol = cyl.useReserveCuft ? (cyl.reserveCuft || 0) : 0;
+    const byPsi = (cyl.useReservePsi && cyl.startPsi > 0)
+      ? (cyl.reservePsi || 0) / cyl.startPsi * (cyl.totalCuft || 0) : 0;
+    return Math.max(byVol, byPsi);
+  }
+  const usableCuft = (cyl) => Math.max(0, (cyl ? cyl.totalCuft || 0 : 0) - reserveCuft(cyl));
+  // cuft -> the gauge reading that volume corresponds to on this cylinder
+  function cuftToPressure(cyl, cuft) {
+    if (!cyl || !(cyl.totalCuft > 0)) return null;
+    return pressU().from(cuft / cyl.totalCuft * (cyl.startPsi || 0));
+  }
+
+  /*
    * ---- leg table ----
    * The slate view: one row per segment with the compass heading and distance
    * you would actually swim, plus the depths along it.
@@ -1366,103 +1569,236 @@
    * true bearings (see Paths.bearing); the note under the table says so,
    * because a diver's compass reads magnetic.
    */
-  let legsPath = null;   // the path the open table belongs to
-
-  function legRows(p) {
-    const legs = Paths.legsOf(p.id);
-    const u = depthU();
-    const kickM = state.params.kickDistance;
-    const head = ['Leg', 'Heading (T)', 'Distance (' + u.label + ')'];
-    if (kickM > 0) head.push('Kicks');
-    head.push('Max depth (' + u.label + ')', 'Avg depth (' + u.label + ')');
-
-    const body = legs.map((lg) => {
-      const distU_ = u.from(lg.metres * M_TO_FT);       // metres -> ft -> chosen unit
-      const row = [
-        String(lg.leg),
-        Math.round(lg.heading) + '°',
-        distU_.toFixed(u.dp === 0 ? 0 : 1)
-      ];
-      if (kickM > 0) row.push(Math.round(lg.metres / kickM).toString());
-      row.push(lg.maxFt === null ? '—' : u.from(lg.maxFt).toFixed(u.dp),
-               lg.avgFt === null ? '—' : u.from(lg.avgFt).toFixed(u.dp));
-      return row;
+  /*
+   * One enriched row per segment, including the running gas budget. Legs are
+   * walked in order so each cylinder's consumption accumulates: a leg is
+   * "over" once the legs drawing on its source have used more than that
+   * source's usable volume (total minus reserve).
+   */
+  function gasAt(gp, dist) {
+    if (!gp) return null;
+    let best = null, bestD = Infinity;
+    gp.points.forEach((s) => {
+      const d = Math.abs(s.distance - dist);
+      if (d < bestD) { bestD = d; best = s; }
     });
-
-    // totals: distance and kicks add up; depths do not, so they stay blank
-    const totalM = legs.reduce((a, lg) => a + lg.metres, 0);
-    const foot = ['Total', '', u.from(totalM * M_TO_FT).toFixed(u.dp === 0 ? 0 : 1)];
-    if (kickM > 0) foot.push(Math.round(totalM / kickM).toString());
-    foot.push('', '');
-    return { head: head, body: body, foot: foot, count: legs.length };
+    return best ? best.cuft : null;
   }
 
-  function openLegTable(p) {
-    const rows = legRows(p);
-    if (!rows.count) { toast('A leg table needs at least two nodes.', true); return; }
-    legsPath = p;
-    $('legs-title').textContent = p.name + ' · leg table';
+  function legData(p) {
+    const legs = Paths.legsOf(p.id);
+    const cum = Paths.nodeDistances(p);
+    const gp = state.params.showGas ? gasProfile(p) : null;
+    const used = {};                      // cylinder id -> cuft drawn so far
+    p.legGas = p.legGas || {};
+    return legs.map((lg, i) => {
+      const cylId = p.legGas[i] || (cylinders()[0] && cylinders()[0].id) || null;
+      const cyl = cylinderById(cylId);
+      const startCuft = gasAt(gp, cum[i]);
+      const endCuft = gasAt(gp, cum[i + 1]);
+      const spend = (startCuft !== null && endCuft !== null) ? endCuft - startCuft : null;
+      let over = false, drawn = null;
+      if (cyl && spend !== null) {
+        used[cylId] = (used[cylId] || 0) + spend;
+        drawn = used[cylId];
+        over = drawn > usableCuft(cyl);
+      }
+      return Object.assign({}, lg, {
+        kicks: state.params.kickDistance > 0 ? Math.round(lg.metres / state.params.kickDistance) : null,
+        startCuft: startCuft, endCuft: endCuft, drawn: drawn,
+        cylId: cylId, cyl: cyl, over: over
+      });
+    });
+  }
 
+  /*
+   * Both the DOM table and the CSV are generated from this one column
+   * description, so the file can never drift from what is on screen.
+   */
+  function legColumns() {
+    const u = depthU();
+    const cols = [
+      { key: 'leg', head: 'Leg', get: (r) => String(r.leg) },
+      { key: 'heading', head: 'Heading (T)', get: (r) => Math.round(r.heading) + '°' },
+      { key: 'dist', head: 'Distance (' + u.label + ')',
+        get: (r) => u.from(r.metres * M_TO_FT).toFixed(u.dp === 0 ? 0 : 1) }
+    ];
+    if (state.params.kickDistance > 0) {
+      cols.push({ key: 'kicks', head: 'Kicks', get: (r) => (r.kicks === null ? '—' : String(r.kicks)) });
+    }
+    cols.push(
+      { key: 'max', head: 'Max depth (' + u.label + ')',
+        get: (r) => (r.maxFt === null ? '—' : u.from(r.maxFt).toFixed(u.dp)) },
+      { key: 'avg', head: 'Avg depth (' + u.label + ')',
+        get: (r) => (r.avgFt === null ? '—' : u.from(r.avgFt).toFixed(u.dp)) }
+    );
+    if (state.params.showGas) {
+      cols.push(
+        { key: 'gasStart', head: 'Gas in (cuft)', get: (r) => (r.startCuft === null ? '—' : r.startCuft.toFixed(1)) },
+        { key: 'gasEnd', head: 'Gas out (cuft)', get: (r) => (r.endCuft === null ? '—' : r.endCuft.toFixed(1)) }
+      );
+      // pressures only mean something once a cylinder describes the gas
+      if (cylinders().length) {
+        const pl = pressU().label;
+        cols.push(
+          { key: 'psiIn', head: 'In (' + pl + ')',
+            get: (r) => { const v = (r.cyl && r.startCuft !== null) ? cuftToPressure(r.cyl, r.startCuft) : null;
+                          return v === null ? '—' : Math.round(v).toString(); } },
+          { key: 'psiOut', head: 'Out (' + pl + ')',
+            get: (r) => { const v = (r.cyl && r.endCuft !== null) ? cuftToPressure(r.cyl, r.endCuft) : null;
+                          return v === null ? '—' : Math.round(v).toString(); } }
+        );
+      }
+      if (cylinders().length > 1) {
+        cols.push({ key: 'source', head: 'Gas source', get: (r) => (r.cyl ? r.cyl.name : '—') });
+      }
+    }
+    return cols;
+  }
+
+  /*
+   * Rows carry data-leg so hovering the profile can highlight the leg under
+   * the cursor, and the gas-source cell becomes a live picker once more than
+   * one cylinder exists.
+   */
+  function renderLegTable(p, host) {
+    const rows = legData(p);
+    const cols = legColumns();
+    host.textContent = '';
+    if (!rows.length) {
+      const t = document.createElement('div');
+      t.className = 'hint'; t.textContent = 'A leg table needs at least two nodes.';
+      host.appendChild(t);
+      return;
+    }
+
+    const tools = document.createElement('div');
+    tools.className = 'legs-tools';
+    const printBtn = document.createElement('button');
+    printBtn.type = 'button'; printBtn.className = 'menu-action'; printBtn.textContent = 'Print';
+    printBtn.addEventListener('click', () => printLegTable(p));
+    const csvBtn = document.createElement('button');
+    csvBtn.type = 'button'; csvBtn.className = 'menu-action'; csvBtn.textContent = 'Save CSV';
+    csvBtn.addEventListener('click', () => saveLegCsv(p));
+    tools.appendChild(printBtn); tools.appendChild(csvBtn);
+    host.appendChild(tools);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'legs-scroll';
     const table = document.createElement('table');
     table.className = 'legs-table';
     const thead = document.createElement('thead');
     const htr = document.createElement('tr');
-    rows.head.forEach((h) => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
+    cols.forEach((c) => { const th = document.createElement('th'); th.textContent = c.head; htr.appendChild(th); });
     thead.appendChild(htr); table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    rows.body.forEach((r) => {
+    rows.forEach((r, i) => {
       const tr = document.createElement('tr');
-      r.forEach((c) => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tr.dataset.leg = String(i);
+      if (r.over) tr.classList.add('over-budget');
+      cols.forEach((c) => {
+        const td = document.createElement('td');
+        if (c.key === 'source' && cylinders().length > 1) {
+          const sel = document.createElement('select');
+          sel.className = 'pp-units';
+          cylinders().forEach((cy) => {
+            const o = document.createElement('option');
+            o.value = String(cy.id); o.textContent = cy.name;
+            if (cy.id === r.cylId) o.selected = true;
+            sel.appendChild(o);
+          });
+          sel.addEventListener('change', () => {
+            p.legGas[i] = +sel.value;
+            renderLegTable(p, host);      // every budget downstream of this leg shifts
+          });
+          td.appendChild(sel);
+        } else {
+          td.textContent = c.get(r);
+        }
+        tr.appendChild(td);
+      });
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
 
+    const totalM = rows.reduce((a, r) => a + r.metres, 0);
+    const last = rows[rows.length - 1];
     const tfoot = document.createElement('tfoot');
     const ftr = document.createElement('tr');
-    rows.foot.forEach((c) => { const td = document.createElement('td'); td.textContent = c; ftr.appendChild(td); });
+    cols.forEach((c) => {
+      const td = document.createElement('td');
+      if (c.key === 'leg') td.textContent = 'Total';
+      else if (c.key === 'dist') td.textContent = depthU().from(totalM * M_TO_FT).toFixed(depthU().dp === 0 ? 0 : 1);
+      else if (c.key === 'kicks') td.textContent = String(Math.round(totalM / state.params.kickDistance));
+      else if (c.key === 'gasEnd') td.textContent = last.endCuft === null ? '—' : last.endCuft.toFixed(1);
+      ftr.appendChild(td);
+    });
     tfoot.appendChild(ftr); table.appendChild(tfoot);
+    scroller.appendChild(table);
+    host.appendChild(scroller);
 
-    const body = $('legs-body');
-    body.textContent = '';
-    body.appendChild(table);
+    // per-cylinder verdict: what each source is asked for against what it has
+    if (state.params.showGas && cylinders().length) {
+      const drawnBy = {};
+      rows.forEach((r) => { if (r.cyl && r.drawn !== null) drawnBy[r.cylId] = r.drawn; });
+      const sum = document.createElement('div');
+      sum.className = 'legs-budget-list';
+      cylinders().forEach((cy) => {
+        const need = drawnBy[cy.id];
+        if (need === undefined) return;
+        const short = need > usableCuft(cy);
+        const line = document.createElement('div');
+        line.className = 'legs-budget' + (short ? ' over-budget-cell' : '');
+        line.textContent = cy.name + ': needs ' + need.toFixed(1) + ' of ' +
+          usableCuft(cy).toFixed(1) + ' cuft usable (' + cy.totalCuft +
+          ' total less ' + reserveCuft(cy).toFixed(1) + ' reserve)' +
+          (short ? ' — OVER BUDGET' : '');
+        sum.appendChild(line);
+      });
+      host.appendChild(sum);
+    }
 
     const note = document.createElement('div');
     note.className = 'legs-note';
     const bits = ['Headings are TRUE bearings — add local magnetic declination (about 11–12° E in the Santa Barbara Channel) to steer them on a compass.'];
     if (!p.profile) bits.push('Depths are blank until the profile finishes reading.');
-    if (state.params.kickDistance <= 0) bits.push('Set a kick distance in the Paths panel to add a kick-cycle column.');
+    if (state.params.kickDistance <= 0) bits.push('Set a kick distance in Path options to add a kick-cycle column.');
+    if (!state.params.showGas) bits.push('Turn Gas on to budget cylinders across the legs.');
     note.textContent = bits.join(' ');
-    body.appendChild(note);
-
-    $('legs-modal').hidden = false;
+    host.appendChild(note);
   }
 
-  function closeLegTable() { $('legs-modal').hidden = true; legsPath = null; }
-  $('legs-close').addEventListener('click', closeLegTable);
-  $('legs-modal').addEventListener('click', (ev) => {
-    if (ev.target === $('legs-modal')) closeLegTable();   // click the backdrop
-  });
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && !$('legs-modal').hidden) closeLegTable();
-  });
-  $('legs-print').addEventListener('click', () => window.print());
-  $('legs-csv').addEventListener('click', () => {
-    if (!legsPath) return;
-    const rows = legRows(legsPath);
-    const all = [rows.head].concat(rows.body, [rows.foot]);
-    const csv = all.map((r) => r.map((c) => {
+  function legCsv(p) {
+    const rows = legData(p);
+    const cols = legColumns();
+    const all = [cols.map((c) => c.head)].concat(rows.map((r) => cols.map((c) => c.get(r))));
+    return all.map((r) => r.map((c) => {
       const s = String(c == null ? '' : c);
       return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     }).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  }
+
+  function saveLegCsv(p) {
+    const url = URL.createObjectURL(new Blob([legCsv(p)], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = legsPath.name.replace(/[^\w-]+/g, '_') + '_legs.csv';
+    a.download = p.name.replace(/[^\w-]+/g, '_') + '_legs.csv';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    say('Leg table saved for ' + legsPath.name, 'ok');
-  });
+    say('Leg table saved for ' + p.name, 'ok');
+  }
+
+  /*
+   * Printing marks the one table to print; the @media print rules hide
+   * everything else. Without the mark, every open leg table would print.
+   */
+  function printLegTable(p) {
+    document.querySelectorAll('.legs-panel').forEach((el) => el.classList.remove('printing'));
+    const host = document.querySelector('.pp-item[data-path="' + p.id + '"] .legs-panel');
+    if (host) host.classList.add('printing');
+    window.print();
+  }
 
   // ---- paths panel ----
   // Depth-vs-distance sparkline. Depth increases downward, which is the way a
@@ -1474,8 +1810,16 @@
     // by the caller) rather than fixed, so 1 viewBox unit == 1 CSS px and text
     // never needs non-uniform scaling to fill the panel — see the comment on
     // preserveAspectRatio below.
+    /*
+     * Height tracks the panel's width at a fixed aspect ratio (so widening
+     * the dock makes the profile genuinely taller, not just wider), capped
+     * so a very wide dock does not hand one path the whole column. Dragging
+     * the resize grip opts a path out of that and pins its own height.
+     */
     const W = Math.max(120, Math.round(pxWidth) || 240);
-    const H = Math.max(32, Math.round(p.plotHeight) || 62);
+    const H = p.plotHeightManual
+      ? Math.max(32, Math.round(p.plotHeight) || 62)
+      : Math.round(Math.max(62, Math.min(240, W / 3.2)));
     const PADL = 26, PADB = 12, PADT = 4;
     const maxD = Math.max.apply(null, pts.map((s) => -s.feet));
     const maxX = pts[pts.length - 1].distance || 1;
@@ -1635,6 +1979,7 @@
     list.forEach((p) => {
       const item = document.createElement('div');
       item.className = 'pp-item' + (p.id === Paths.selectedId ? ' sel' : '');
+      item.dataset.path = String(p.id);   // printLegTable finds its panel by this
 
       const row = document.createElement('div');
       row.className = 'pp-row';
@@ -1705,12 +2050,6 @@
       nodesBtn.setAttribute('aria-pressed', p.showNodes ? 'true' : 'false');
       nodesBtn.addEventListener('click', () => Paths.toggleShowNodes(p.id));
 
-      const legsBtn = document.createElement('button');
-      legsBtn.className = 'pp-mirror'; legsBtn.type = 'button'; legsBtn.textContent = '🧭';
-      legsBtn.title = 'Leg table — headings, distances and depths';
-      legsBtn.disabled = p.nodes.length < 2;
-      legsBtn.addEventListener('click', () => openLegTable(p));
-
       const cog = document.createElement('button');
       cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
 
@@ -1742,7 +2081,7 @@
       });
 
       row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
-      row.appendChild(mirror); row.appendChild(nodesBtn); row.appendChild(legsBtn);
+      row.appendChild(mirror); row.appendChild(nodesBtn);
       row.appendChild(caret); row.appendChild(cog);
       item.appendChild(row); item.appendChild(menu);
 
@@ -1804,7 +2143,10 @@
           let dragH = null;
           resizeHandle.addEventListener('pointerdown', (ev) => {
             if (ev.button !== 0) return;
-            dragH = { startY: ev.clientY, startH: p.plotHeight || 62 };
+            // dragging pins this path's height, opting it out of the
+            // width-derived aspect ratio from then on
+            p.plotHeightManual = true;
+            dragH = { startY: ev.clientY, startH: svg.getBoundingClientRect().height || 62 };
             try { resizeHandle.setPointerCapture(ev.pointerId); } catch (err) { /* best-effort */ }
             ev.preventDefault();
           });
@@ -1823,6 +2165,57 @@
             Paths.setPlotHeight(p.id, p.plotHeight);
           });
           wrap.appendChild(resizeHandle);
+        }
+
+        /*
+         * Leg table, expanded in place beneath its own graph rather than in a
+         * modal — so the profile stays visible while the numbers are read,
+         * and hovering the graph can highlight the leg under the cursor.
+         */
+        const legsToggle = document.createElement('button');
+        legsToggle.className = 'pp-legs-toggle'; legsToggle.type = 'button';
+        legsToggle.textContent = (p.showLegs ? '▾' : '▸') + ' 🧭 Leg table';
+        legsToggle.title = 'Headings, distances, depths and gas per segment';
+        legsToggle.disabled = p.nodes.length < 2;
+        legsToggle.setAttribute('aria-expanded', p.showLegs ? 'true' : 'false');
+        legsToggle.addEventListener('click', () => {
+          p.showLegs = !p.showLegs;
+          renderPaths();
+        });
+        wrap.appendChild(legsToggle);
+
+        if (p.showLegs) {
+          const panel = document.createElement('div');
+          panel.className = 'legs-panel';
+          renderLegTable(p, panel);
+          wrap.appendChild(panel);
+
+          /*
+           * Tie the graph to the table: whichever leg the cursor is over on
+           * the profile gets highlighted in the rows below it. Uses the same
+           * distance-under-cursor the depth readout already computes.
+           */
+          if (svg) {
+            const cum = Paths.nodeDistances(p);
+            const pts = (p.profile || []).filter((s) => s.feet !== null);
+            const maxX = pts.length ? pts[pts.length - 1].distance : 0;
+            svg.addEventListener('mousemove', (ev) => {
+              const r = svg.getBoundingClientRect();
+              if (!r.width || !maxX) return;
+              const frac = (ev.clientX - r.left) / r.width;
+              const dist = frac * maxX;
+              let leg = -1;
+              for (let i = 0; i < cum.length - 1; i++) {
+                if (dist >= cum[i] && dist <= cum[i + 1]) { leg = i; break; }
+              }
+              panel.querySelectorAll('tbody tr').forEach((tr) => {
+                tr.classList.toggle('leg-active', +tr.dataset.leg === leg);
+              });
+            });
+            svg.addEventListener('mouseleave', () => {
+              panel.querySelectorAll('tbody tr').forEach((tr) => tr.classList.remove('leg-active'));
+            });
+          }
         }
       }
     });
@@ -2115,6 +2508,126 @@
     state.params.kickUnit = $('pp-kick-unit').value;   // same distance, restated
     syncGasBar();
   });
+
+  /*
+   * ---- path options: diver + cylinders ----
+   * Collapsed by default so the panel opens on the paths themselves; the
+   * numbers behind the planning live one disclosure away.
+   */
+  $('pp-opts-toggle').addEventListener('click', () => {
+    const open = $('pp-opts').hidden;
+    $('pp-opts').hidden = !open;
+    $('pp-opts-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+    $('pp-opts-toggle').querySelector('.sect-caret').textContent = open ? '▾' : '▸';
+  });
+
+  function numField(labelText, value, dp, title, onCommit) {
+    const wrap = document.createElement('label');
+    wrap.className = 'pp-field'; wrap.title = title || '';
+    const lab = document.createElement('span');
+    lab.className = 'pp-opts-label'; lab.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.className = 'pp-num'; inp.min = '0';
+    inp.value = isFinite(value) ? String(+(+value).toFixed(dp)) : '';
+    inp.addEventListener('change', () => {
+      const v = parseFloat(inp.value);
+      if (isFinite(v) && v >= 0) onCommit(v);
+      renderCylinders(); renderPaths();
+    });
+    wrap.appendChild(lab); wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function checkField(labelText, checked, onToggle) {
+    const wrap = document.createElement('label');
+    wrap.className = 'check pp-cyl-check';
+    const box = document.createElement('input');
+    box.type = 'checkbox'; box.checked = !!checked;
+    box.addEventListener('change', () => { onToggle(box.checked); renderCylinders(); renderPaths(); });
+    const lab = document.createElement('span');
+    lab.className = 'label'; lab.textContent = labelText;
+    wrap.appendChild(box); wrap.appendChild(lab);
+    return wrap;
+  }
+
+  function renderCylinders() {
+    const host = $('pp-cyl-list');
+    host.textContent = '';
+    cylinders().forEach((cyl) => {
+      const card = document.createElement('div');
+      card.className = 'pp-cyl';
+
+      const head = document.createElement('div');
+      head.className = 'pp-cyl-head';
+      const name = document.createElement('input');
+      name.type = 'text'; name.className = 'pp-cyl-name'; name.value = cyl.name;
+      name.setAttribute('aria-label', 'Gas source name');
+      name.addEventListener('change', () => {
+        cyl.name = name.value.trim() || 'Cylinder';
+        renderCylinders(); renderPaths();
+      });
+      head.appendChild(name);
+      // the last cylinder cannot be removed — legs must have somewhere to draw from
+      if (cylinders().length > 1) {
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'pp-cyl-del'; del.textContent = '×';
+        del.title = 'Remove this gas source';
+        del.addEventListener('click', () => {
+          state.params.cylinders = cylinders().filter((c) => c.id !== cyl.id);
+          // legs pointing at the removed source fall back to the first one
+          Paths.list.forEach((p) => {
+            if (!p.legGas) return;
+            Object.keys(p.legGas).forEach((k) => { if (p.legGas[k] === cyl.id) delete p.legGas[k]; });
+          });
+          renderCylinders(); renderPaths();
+          say(cyl.name + ' removed');
+        });
+        head.appendChild(del);
+      }
+      card.appendChild(head);
+
+      card.appendChild(numField('Total cuft', cyl.totalCuft, 1, 'Rated volume of the cylinder',
+        (v) => { cyl.totalCuft = v; }));
+      card.appendChild(numField('Start ' + pressU().label, cyl.startPsi, 0, 'Pressure it is filled to',
+        (v) => { cyl.startPsi = v; }));
+
+      // reserve: by volume, by pressure, or both — the larger wins (see reserveCuft)
+      const resVol = document.createElement('div');
+      resVol.className = 'pp-cyl-reserve';
+      resVol.appendChild(checkField('Reserve cuft', cyl.useReserveCuft, (on) => { cyl.useReserveCuft = on; }));
+      resVol.appendChild(numField('', cyl.reserveCuft, 1, 'Volume held back', (v) => { cyl.reserveCuft = v; }));
+      card.appendChild(resVol);
+
+      const resPsi = document.createElement('div');
+      resPsi.className = 'pp-cyl-reserve';
+      resPsi.appendChild(checkField('Reserve ' + pressU().label, cyl.useReservePsi, (on) => { cyl.useReservePsi = on; }));
+      resPsi.appendChild(numField('', cyl.reservePsi, 0, 'Gauge pressure held back', (v) => { cyl.reservePsi = v; }));
+      card.appendChild(resPsi);
+
+      const summary = document.createElement('div');
+      summary.className = 'pp-cyl-summary';
+      summary.textContent = usableCuft(cyl).toFixed(1) + ' cuft usable · ' +
+        reserveCuft(cyl).toFixed(1) + ' cuft reserve';
+      card.appendChild(summary);
+
+      host.appendChild(card);
+    });
+  }
+
+  $('pp-cyl-add').addEventListener('click', () => {
+    const nextId = cylinders().reduce((a, c) => Math.max(a, c.id), 0) + 1;
+    const base = cylinders()[0];
+    state.params.cylinders = cylinders().concat([{
+      id: nextId, name: 'Cylinder ' + nextId,
+      totalCuft: base ? base.totalCuft : 77.4, startPsi: base ? base.startPsi : 3000,
+      useReserveCuft: false, reserveCuft: 15,
+      useReservePsi: true, reservePsi: 500
+    }]);
+    renderCylinders(); renderPaths();
+    say('Added a gas source — assign legs to it in the leg table');
+  });
+
+  renderCylinders();
   syncGasBar();
 
   $('pp-add').addEventListener('click', () => {
@@ -2234,7 +2747,9 @@
         name: p.name, color: p.color, mirrored: p.mirrored,
         preMirrorNodes: p.preMirrorNodes
           ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
-        plotHeight: p.plotHeight, expanded: p.expanded, showNodes: p.showNodes,
+        plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
+        expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
+        legGas: p.legGas,
         nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
       }))));
       const sc = state.scenes[state.idx];
@@ -2311,6 +2826,8 @@
     DemSampler.init(cfg);
     CustomContours.init(cfg, L, map, say);
     Paths.init(cfg, L, map, say, toast, renderPaths);
+    // map-hover depth labels borrow the console's unit formatting
+    Paths.setDepthFormatter((s) => fmtDepth(-s.feet));
     try {
       const saved = JSON.parse(localStorage.getItem('kelp.paths') || 'null');
       if (Array.isArray(saved) && saved.length) Paths.restore(saved);

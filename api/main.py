@@ -17,6 +17,7 @@ to the browser.
 """
 import datetime as dt
 import logging
+import re
 import os
 import threading
 import time
@@ -66,6 +67,7 @@ KELP_PALETTES = {
     "ice":     ["0d3b66", "3fa7d6", "90e0ef", "caf0f8"],
 }
 KELP_PALETTE = KELP_PALETTES["amber"]
+HEX6 = re.compile(r"[0-9a-fA-F]{6}")
 
 # Bounds mirror the slider ranges in js/config.js. Values outside these are
 # clamped rather than rejected, so a stale client still gets a usable map.
@@ -212,7 +214,7 @@ def render(kelp, idx, params):
     hi = lo + ramp
     strength = idx.subtract(lo).divide(ramp).clamp(0, 1)
     alpha = strength.pow(0.7).multiply(kelp)
-    palette = KELP_PALETTES.get(params.get("palette", "amber"), KELP_PALETTE)
+    palette = params.get("stops") or KELP_PALETTES.get(params.get("palette", "amber"), KELP_PALETTE)
     # Keyword arguments, NOT a params dict. The JavaScript API takes
     # visualize({min, max, palette}); the Python signature is
     # visualize(bands, gain, bias, min, max, gamma, palette, ...), so a dict is
@@ -271,11 +273,16 @@ def read_params(args):
     palette = args.get("palette", "amber")
     if palette not in KELP_PALETTES:
         palette = "amber"
+    # The client may send an explicit ramp (the named palette already sliced to
+    # the legend's selected range). Only accept well-formed 6-digit hex so a
+    # crafted query cannot inject arbitrary strings into the EE call.
+    stops = [s for s in args.get("stops", "").split(",") if HEX6.fullmatch(s)]
     return {
         "indexType": index_type,
         "kelpThresh": clamp(kelp_thresh, limits["min"], limits["max"]),
         "b11Thresh": clamp(b11_thresh, 0.0, 0.1),
         "palette": palette,
+        "stops": stops[:16] if len(stops) >= 2 else [],
     }
 
 
@@ -361,9 +368,10 @@ def layer():
     try:
         if mode == "composite":
             start, end = read_dates(request.args)
-            cache_key = "layer|composite|%s|%s|%s|%s|%s|%s|%s" % (
+            cache_key = "layer|composite|%s|%s|%s|%s|%s|%s|%s|%s" % (
                 start, end, max_cloud, params["indexType"],
                 params["kelpThresh"], params["b11Thresh"], params["palette"],
+                ",".join(params["stops"]),
             )
         elif mode == "truecolor":
             date = request.args.get("date", "")
@@ -372,9 +380,9 @@ def layer():
         else:
             date = request.args.get("date", "")
             dt.date.fromisoformat(date)          # validate
-            cache_key = "layer|single|%s|%s|%s|%s|%s" % (
+            cache_key = "layer|single|%s|%s|%s|%s|%s|%s" % (
                 date, params["indexType"], params["kelpThresh"],
-                params["b11Thresh"], params["palette"],
+                params["b11Thresh"], params["palette"], ",".join(params["stops"]),
             )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400

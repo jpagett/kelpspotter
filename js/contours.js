@@ -27,7 +27,10 @@ const CustomContours = (function () {
 
   function init(config, leaflet, leafletMap, logger) {
     cfg = config; L = leaflet; map = leafletMap; say = logger || function () {};
-    map.createPane(PANE).style.zIndex = 270;
+    // above every reorderable imagery overlay (240-300, see applyOverlayOrder
+    // in app.js), below the path pane: hand-drawn depth references stay
+    // visible whatever is stacked underneath them
+    map.createPane(PANE).style.zIndex = 350;
     map.on('moveend zoomend', () => refresh(false));
   }
 

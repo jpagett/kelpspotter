@@ -736,64 +736,58 @@ input[type=range]::-moz-range-thumb {
 /* node positions marked on the profile, behind the eye toggle */
 .pp-node-dot { stroke: var(--abyss); stroke-width: 1; }
 
-/* ---------- leg table viewer ---------- */
-.modal {
-  position: fixed; inset: 0; z-index: 1200;
-  display: grid; place-items: center; padding: 24px;
-  background: rgba(5,22,28,0.72); backdrop-filter: blur(3px);
-}
-.modal[hidden] { display: none; }
-.modal-card {
-  display: flex; flex-direction: column; min-width: 0;
-  max-width: 760px; width: 100%; max-height: 100%;
-  background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
-  box-shadow: 0 20px 60px -20px rgba(0,0,0,0.9);
-}
-.modal-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 14px; border-bottom: 1px solid var(--line);
-}
-.modal-head .eyebrow {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
-  text-transform: uppercase; color: var(--tide-dim);
-}
-.modal-tools { display: flex; align-items: center; gap: 8px; }
-.modal-x {
-  width: 24px; height: 24px; cursor: pointer; display: grid; place-items: center;
+/* ---------- leg table (expands under its own profile graph) ---------- */
+.pp-legs-toggle {
+  width: 100%; margin-top: 6px; padding: 4px 6px; cursor: pointer; text-align: left;
   background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 14px; line-height: 1;
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; line-height: 1.4;
 }
-.modal-x:hover { color: #e2725b; border-color: #e2725b; }
-/* the table can be wide and long; scroll it rather than the page */
-.modal-body { overflow: auto; padding: 12px 14px 14px; }
+.pp-legs-toggle:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
+.pp-legs-toggle:disabled { opacity: 0.35; cursor: not-allowed; }
+.legs-panel { margin-top: 6px; }
+.legs-tools { display: flex; gap: 6px; margin-bottom: 6px; }
+.legs-tools .menu-action { font-family: var(--mono); font-size: 10px; padding: 3px 8px; }
+/* the table is usually wider than the dock; scroll it here, not the panel */
+.legs-scroll { overflow-x: auto; }
 
-.legs-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11px; }
+.legs-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 10px; }
 .legs-table th, .legs-table td {
-  padding: 5px 8px; text-align: right; white-space: nowrap;
+  padding: 3px 6px; text-align: right; white-space: nowrap;
   border-bottom: 1px solid var(--line);
 }
-.legs-table th {
-  color: var(--tide-dim); font-weight: 500; text-align: right;
-  position: sticky; top: 0; background: var(--deep);
-}
+.legs-table th { color: var(--tide-dim); font-weight: 500; }
 .legs-table td { color: var(--foam); }
 .legs-table th:first-child, .legs-table td:first-child { text-align: left; }
 .legs-table tfoot td { color: var(--tide); border-bottom: none; border-top: 1px solid var(--line); }
-.legs-note {
-  margin-top: 10px; font-size: 10px; line-height: 1.5; color: var(--tide-dim);
-}
+/* the leg currently under the cursor on the graph above */
+.legs-table tbody tr.leg-active td { background: rgba(242,177,52,0.18); }
+/* a leg whose gas source has already passed its usable volume */
+.legs-table tbody tr.over-budget td { color: #e2725b; }
+.over-budget-cell { color: #e2725b; font-weight: 600; }
+.legs-budget-list { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.legs-budget { font-family: var(--mono); font-size: 10px; color: var(--tide); }
+.legs-note { margin-top: 6px; font-size: 10px; line-height: 1.5; color: var(--tide-dim); }
 
 /*
- * Paper is white and ink is expensive: print only the table, inverted out of
- * the dark theme. Without this the browser either drops the backgrounds and
- * prints pale-on-white, or floods the page with the panel's dark fill.
+ * Paper is white and ink is expensive: print only the leg table the user
+ * asked for (marked .printing by printLegTable), inverted out of the dark
+ * theme. Without that mark every expanded table on the page would print.
  */
 @media print {
-  body > *:not(#legs-modal) { display: none !important; }
-  .modal {
-    position: static; inset: auto; display: block; padding: 0;
-    background: none; backdrop-filter: none;
+  body > *:not(.paths-panel) { display: none !important; }
+  .paths-panel {
+    position: static; width: auto; max-width: none; border: none;
+    background: #fff; color: #000;
   }
+  .pp-inner { overflow: visible; height: auto; }
+  .pp-head, .pp-global-tools, .pp-row, .pp-profile svg, .pp-readout,
+  .pp-plot-resize, .pp-legs-toggle, .legs-tools, #pp-note { display: none !important; }
+  .legs-panel:not(.printing) { display: none !important; }
+  .legs-scroll { overflow: visible; }
+  .legs-table th, .legs-table td, .legs-budget, .legs-note { color: #000; border-color: #999; }
+  .legs-table tbody tr.over-budget td, .over-budget-cell { color: #000; font-weight: 700; }
+}
   .modal-card {
     max-width: none; max-height: none; border: none; box-shadow: none;
     background: #fff; color: #000;
@@ -846,6 +840,16 @@ input[type=range]::-moz-range-thumb {
 .path-node span {
   display: block; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid var(--abyss); box-sizing: border-box;
+}
+/* box-selected nodes: ringed so a multi-selection is obvious before dragging */
+.path-node.picked span {
+  border-color: var(--foam);
+  box-shadow: 0 0 0 2px var(--kelp-hot);
+}
+/* shift-drag rubber band (replaces Leaflet's box zoom) */
+.node-select-box {
+  position: absolute; z-index: 800; pointer-events: none;
+  border: 1px dashed var(--kelp-hot); background: rgba(255,209,102,0.12);
 }
 .leaflet-container.drawing { cursor: copy; }
 
@@ -1012,3 +1016,54 @@ input[type=range]::-moz-range-thumb {
   .sweep::after { animation: none; }
   * { transition: none !important; }
 }
+
+/* ---------- path options: diver + cylinders ---------- */
+.pp-global-tools { align-items: center; }
+.pp-opts-toggle {
+  margin-left: auto; height: 20px; padding: 0 8px; cursor: pointer;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; line-height: 1;
+}
+.pp-opts-toggle:hover { border-color: var(--kelp); color: var(--kelp); }
+.pp-opts {
+  padding: 0 10px 10px; display: flex; flex-direction: column; gap: 10px;
+  font-family: var(--mono); font-size: 10px; color: var(--tide-dim);
+}
+.pp-opts[hidden] { display: none; }
+.pp-opts-group {
+  border: 1px solid var(--line); border-radius: 3px; padding: 7px 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pp-opts-head {
+  display: flex; align-items: center; justify-content: space-between;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--tide-dim);
+}
+.pp-opts-label { min-width: 34px; }
+.pp-cyl-add {
+  width: 18px; height: 18px; cursor: pointer; display: grid; place-items: center;
+  background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+}
+.pp-cyl-add:hover { border-color: var(--kelp); color: var(--kelp); }
+.pp-cyl-list { display: flex; flex-direction: column; gap: 8px; }
+.pp-cyl {
+  border: 1px solid var(--line); border-radius: 3px; padding: 6px 7px;
+  display: flex; flex-direction: column; gap: 5px;
+  background: rgba(111,183,189,0.05);
+}
+.pp-cyl-head { display: flex; align-items: center; gap: 6px; }
+.pp-cyl-name {
+  flex: 1; min-width: 0; background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; padding: 2px 4px;
+}
+.pp-cyl-del {
+  width: 18px; height: 18px; flex: none; cursor: pointer; display: grid; place-items: center;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 11px; line-height: 1;
+}
+.pp-cyl-del:hover { color: #e2725b; border-color: #e2725b; }
+.pp-cyl-reserve { display: flex; align-items: center; gap: 6px; }
+.pp-cyl-check { font-size: 10px; color: var(--tide-dim); flex: 1; min-width: 0; }
+.pp-cyl-summary { color: var(--tide); }

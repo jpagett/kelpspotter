@@ -171,28 +171,57 @@
    * ---- true color (B4/B3/B2) ----
    * A plain RGB read of the current scene, tied to whatever single day is
    * selected — an alternative to the kelp mask rather than a layer stacked on
-   * top of it, so it lives in its own pane just under depth. Fetched lazily,
-   * the first time its opacity goes above zero, and refetched if the selected
-   * scene date changes while it's visible.
+   * top of it, so it lives in its own pane just under depth.
+   *
+   * Loading it has two slow halves, each addressed separately:
+   *   1. Minting a tile-URL template (getMapId / the API call) — cached here
+   *     per engine+date with a TTL just under the backend's map-id expiry, so
+   *     revisiting a scene never re-pays the mint round trip.
+   *   2. EE rendering tiles on first request — once true color has been used
+   *     this session (kelp.tcUsed), the layer is rebuilt in the background on
+   *     every scene change even at opacity 0. The pane is hidden but the tile
+   *     <img>s still fetch, so EE renders and caches the CURRENT VIEWPORT's
+   *     tiles while the user is looking at the kelp mask — toggling the eye is
+   *     then instant for the exact ROI on screen. Users who never touch true
+   *     color never trigger any of this.
    */
   let trueColorLayer = null, trueColorDate = null, trueColorLoading = false;
+  const tcUrlCache = new Map();          // engine|date -> {url, at}
+  const TC_URL_TTL_MS = 25 * 60 * 1000;  // under the backend's 30-min map-id life
+  let tcUsed = false;
+  try { tcUsed = sessionStorage.getItem('kelp.tcUsed') === '1'; } catch (err) { /* fine */ }
 
-  async function ensureTrueColor() {
+  async function mintTrueColor(date) {
+    const key = state.engine.name + '|' + date;
+    const hit = tcUrlCache.get(key);
+    if (hit && Date.now() - hit.at < TC_URL_TTL_MS) return hit.url;
+    const res = await state.engine.trueColorLayer(date);
+    if (typeof res === 'string') {
+      if (tcUrlCache.size > 60) tcUrlCache.clear();   // crude bound; entries expire anyway
+      tcUrlCache.set(key, { url: res, at: Date.now() });
+    }
+    return res;
+  }
+
+  async function ensureTrueColor(prewarm) {
     const sc = state.scenes[state.idx];
     if (!sc || trueColorLoading) return;
-    if (trueColorLayer && trueColorDate === sc.date) return;   // already showing this date
+    if (trueColorLayer && trueColorDate === sc.date) return;   // already built for this date
     if (typeof state.engine.trueColorLayer !== 'function') return;
     trueColorLoading = true;
-    say('Loading true color · ' + sc.date + '…');
+    if (!prewarm) say('Loading true color · ' + sc.date + '…');
     try {
-      const res = await state.engine.trueColorLayer(sc.date);
+      const res = await mintTrueColor(sc.date);
+      const now = state.scenes[state.idx];
+      if (!now || now.date !== sc.date) return;   // scene changed mid-mint; next call rebuilds
       if (trueColorLayer) map.removeLayer(trueColorLayer);
       trueColorLayer = toLeafletLayer(res, { pane: 'truecolor', opacity: state.params.trueColorOpacity });
       trueColorLayer.addTo(map);
       trueColorDate = sc.date;
-      say('True color ready · ' + sc.date, 'ok');
+      if (!prewarm) say('True color ready · ' + sc.date, 'ok');
     } catch (err) {
       console.warn(err);
+      if (prewarm) return;    // background warm-up failing is not worth a toast
       say('True color unavailable — ' + err.message, 'warn');
       toast(err.message, true);
       setTrueColorOpacity(0);
@@ -208,7 +237,13 @@
   function setTrueColorOpacity(v) {
     state.params.trueColorOpacity = v;
     map.getPane('truecolor').style.display = v > 0 ? '' : 'none';
-    if (v > 0) ensureTrueColor();
+    if (v > 0) {
+      if (!tcUsed) {
+        tcUsed = true;   // from here on, scene changes prewarm the layer in the background
+        try { sessionStorage.setItem('kelp.tcUsed', '1'); } catch (err) { /* fine */ }
+      }
+      ensureTrueColor();
+    }
     if (trueColorLayer && trueColorLayer.setOpacity) trueColorLayer.setOpacity(v);
   }
 
@@ -760,9 +795,14 @@
       } else {
         say('Kelp layer drawn', 'ok');
       }
-      // keep a visible true-color layer on the scene now being shown — this is
-      // also what re-materialises it after a restore, once scenes exist
+      /*
+       * Keep a visible true-color layer on the scene now being shown — this is
+       * also what re-materialises it after a restore, once scenes exist. With
+       * the layer hidden but previously used, warm it in the background
+       * instead, so the eye toggle is instant for the viewport on screen.
+       */
       if (state.params.trueColorOpacity > 0) ensureTrueColor();
+      else if (tcUsed) ensureTrueColor(true);
     } catch (err) {
       console.warn(err);
       say('Kelp computation failed — see console', 'warn');
@@ -789,12 +829,17 @@
    * keepBuffer + updateWhenIdle mirror cfg.DEPTH.tuning's rationale: hold
    * panned-past tiles so panning back is free, and wait for the map to
    * settle before requesting new ones — every kelp tile is an EE render.
+   *
+   * bounds clips tile REQUESTS to the AOI: the imagery is AOI-filtered
+   * server-side anyway, so tiles outside it are guaranteed-empty renders
+   * that still cost an EE round trip each. This stops asking for them.
    */
+  const AOI_BOUNDS = L.latLngBounds([[s, w], [n, e]]);
   function toLeafletLayer(res, opts) {
     if (typeof res === 'string') {
       return L.tileLayer(res, Object.assign(
         { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane',
-          keepBuffer: 4, updateWhenIdle: true }, opts));
+          keepBuffer: 4, updateWhenIdle: true, bounds: AOI_BOUNDS }, opts));
     }
     return res; // already a Leaflet layer (demo overlay)
   }

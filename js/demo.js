@@ -97,7 +97,10 @@ const DemoEngine = (function () {
         this._c = L.DomUtil.create('canvas', 'kelp-overlay');
         this._c.style.position = 'absolute';
         this._c.style.pointerEvents = 'none';
-        map.getPanes().overlayPane.appendChild(this._c);
+        // kelpPane, not overlayPane: the overlay picker reorders the map
+        // layers by pane z-index, and the demo canvas has to move with the
+        // real kelp tile layer rather than always floating above everything.
+        (map.getPanes().kelpPane || map.getPanes().overlayPane).appendChild(this._c);
         map.on('moveend zoomend resize', this._draw, this);
         this._draw();
       },

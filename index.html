@@ -204,6 +204,18 @@
             <span id="pp-sac-unit" class="pp-field-unit"></span>
           </label>
         </div>
+        <div class="pp-tool-group">
+          <span class="pp-group-label">Kick</span>
+          <label class="pp-field pp-field-below"
+                 title="Distance covered per kick cycle — leave blank to omit kicks from the leg table">
+            <input id="pp-kick-input" type="number" class="pp-num" min="0" placeholder="—"
+                   aria-label="Distance per kick cycle">
+            <select id="pp-kick-unit" class="pp-units" aria-label="Kick distance units">
+              <option value="m">m</option>
+              <option value="ft">ft</option>
+            </select>
+          </label>
+        </div>
         <div class="pp-tool-group pp-tool-group-wide">
           <div class="pp-mode-btns">
             <button id="pp-time-btn" class="pp-mode-btn" type="button" aria-pressed="false">Time</button>
@@ -241,8 +253,19 @@
         <div class="ramp"></div>
         <div class="ramp-labels"><span>Low</span><span>High</span></div>
       </div>
-      <!-- hover flyout: pick the kelp overlay's colormap; built by app.js -->
-      <div id="legend-menu" class="legend-menu" aria-label="Kelp colormap"></div>
+      <!-- hover flyout: pick the kelp colormap and the slice of it in use.
+           Swatch buttons are built by app.js; the range bar is static. -->
+      <div class="legend-menu" aria-label="Kelp colormap">
+        <div id="legend-swatches" class="legend-swatches"></div>
+        <div class="legend-range" title="Drag the handles to use only part of the colormap">
+          <div id="legend-range-bar" class="legend-range-bar">
+            <span id="legend-range-top" class="legend-range-grip top" role="slider"
+                  tabindex="0" aria-label="Colormap upper bound"></span>
+            <span id="legend-range-bottom" class="legend-range-grip bottom" role="slider"
+                  tabindex="0" aria-label="Colormap lower bound"></span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="zoom-control" aria-label="Zoom">
@@ -250,14 +273,20 @@
       <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </div>
 
-    <div class="overlay-picker" aria-label="Base overlay">
-      <div class="ov-item">
+    <div class="overlay-picker" aria-label="Map overlays">
+      <div class="ov-item" data-overlay="kelp" draggable="true">
+        <button id="ov-kelp" class="ov-icon ov-icon-kelp" type="button" aria-pressed="false" title="Kelp overlay"></button>
+        <div class="ov-flyout">
+          <input id="ov-kelp-slider" type="range" min="0" max="1" step="0.05" value="0.85" aria-label="Kelp overlay opacity">
+        </div>
+      </div>
+      <div class="ov-item" data-overlay="truecolor" draggable="true">
         <button id="ov-eye" class="ov-icon" type="button" aria-pressed="false" title="True color (Sentinel-2 B4/B3/B2)">👁</button>
         <div class="ov-flyout">
           <input id="ov-eye-slider" type="range" min="0" max="1" step="0.05" value="0.3" aria-label="True color opacity">
         </div>
       </div>
-      <div class="ov-item">
+      <div class="ov-item" data-overlay="depth" draggable="true">
         <button id="ov-ruler" class="ov-icon" type="button" aria-pressed="false" title="Depth overlay">📏</button>
         <div class="ov-flyout">
           <input id="ov-ruler-slider" type="range" min="0" max="1" step="0.05" value="0.45" aria-label="Depth overlay opacity">
@@ -269,6 +298,21 @@
   <div id="depth-probe" class="depth-probe" aria-hidden="true"></div>
 
   <div id="toast" class="toast"></div>
+
+  <!-- leg table viewer; body is built by app.js when the compass button is pressed -->
+  <div id="legs-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legs-title">
+      <div class="modal-head">
+        <span id="legs-title" class="eyebrow">Leg table</span>
+        <div class="modal-tools">
+          <button id="legs-print" class="btn ghost" type="button">Print</button>
+          <button id="legs-csv" class="btn ghost" type="button">Save CSV</button>
+          <button id="legs-close" class="modal-x" type="button" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div id="legs-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

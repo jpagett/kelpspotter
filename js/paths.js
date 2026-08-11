@@ -209,6 +209,13 @@ const Paths = (function () {
       setTimeout(() => { if (parseCoords(input.value)) apply(); }, 0);
     });
     wrap.appendChild(input);
+
+    // same action as right-clicking the node, reachable without a right button
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'node-coord-del';
+    del.textContent = '×'; del.title = 'Delete this node';
+    del.addEventListener('click', () => removeNode(p, i));
+    wrap.appendChild(del);
     nodePopup = L.popup({
       className: 'node-coord-popup', closeButton: false,
       closeOnClick: true, offset: [0, -8], autoPan: false
@@ -237,6 +244,32 @@ const Paths = (function () {
       opacity: isSel ? 0.95 : 0.5
     });
 
+    /*
+     * A fat, fully transparent companion line under the visible one: it is
+     * the click target for "add a node here", so the hit radius is generous
+     * without thickening the stroke. Only the selected path gets one, and
+     * never while drawing (it would swallow the clicks that place nodes).
+     */
+    if (p.hitLine) { map.removeLayer(p.hitLine); p.hitLine = null; }
+    if (isSel && !drawing) {
+      p.hitLine = L.polyline(latlngs, {
+        pane: PANE, weight: 16, opacity: 0, interactive: true
+      }).addTo(map);
+      p.hitLine.on('click', (ev) => {
+        const oe = ev.originalEvent;
+        // Ctrl/Cmd means "start a new path", even over an existing one
+        if (oe && (oe.ctrlKey || oe.metaKey)) {
+          startDrawing();
+          drawing.nodes.push(ev.latlng);
+          redraw(drawing);
+          onChange();
+        } else {
+          insertNodeAt(p, ev.latlng);
+        }
+        L.DomEvent.stop(ev);
+      });
+    }
+
     // rebuild node handles
     p.markers.forEach((m) => map.removeLayer(m));
     p.markers = [];
@@ -254,6 +287,10 @@ const Paths = (function () {
       });
       m.on('dragend', () => { p.profile = null; refreshProfile(p); });
       m.on('contextmenu', () => removeNode(p, i));
+      m.on('click', (ev) => {
+        const oe = ev.originalEvent;
+        if (oe && oe.shiftKey) { snapNodeToContour(p, i); L.DomEvent.stop(ev); }
+      });
       m.on('mouseover', () => showNodeEditor(p, i));
       m.on('mouseout', scheduleNodeEditorClose);
       m.on('dragstart', closeNodeEditor);
@@ -266,13 +303,128 @@ const Paths = (function () {
     if (p.nodes.length <= 2) { toast('A path needs at least two nodes.', true); return; }
     p.nodes.splice(i, 1);
     p.profile = null;
+    closeNodeEditor();
     redraw(p); refreshProfile(p);
+    onChange();
+  }
+
+  /*
+   * Drop a node into the segment nearest the click, rather than appending to
+   * the end — this is how the middle of a finished path gets edited. Work is
+   * done in projected pixel space (via L.LineUtil) so "nearest" matches what
+   * the eye sees on screen, and the new node lands exactly ON the line.
+   */
+  function insertNodeAt(p, latlng) {
+    if (p.nodes.length < 2) return;
+    const pt = map.latLngToLayerPoint(latlng);
+    let best = -1, bestD = Infinity, bestPt = null;
+    for (let i = 0; i < p.nodes.length - 1; i++) {
+      const a = map.latLngToLayerPoint(p.nodes[i]);
+      const b = map.latLngToLayerPoint(p.nodes[i + 1]);
+      const cp = L.LineUtil.closestPointOnSegment(pt, a, b);
+      const d = pt.distanceTo(cp);
+      if (d < bestD) { bestD = d; best = i; bestPt = cp; }
+    }
+    if (best < 0) return;
+    p.nodes.splice(best + 1, 0, map.layerPointToLatLng(bestPt));
+    p.profile = null;
+    // an inserted node invalidates the stored pre-mirror list; drop the pairing
+    if (p.mirrored) { p.mirrored = false; p.preMirrorNodes = null; }
+    redraw(p); refreshProfile(p);
+    say('Node added to ' + p.name + ' — now ' + p.nodes.length + ' nodes');
+    onChange();
+  }
+
+  /*
+   * Shift-click pulls a node onto the nearest custom depth contour, so a path
+   * can be pinned to "the 40 ft line" without eyeballing it. Bounded by
+   * SNAP_PX of screen distance: past that the nearest contour is not what the
+   * user meant, and silently teleporting the node would be worse than a miss.
+   */
+  const SNAP_PX = 70;
+  function snapNodeToContour(p, i) {
+    const contours = (window.CustomContours && CustomContours.items) || [];
+    const src = map.latLngToLayerPoint(p.nodes[i]);
+    let bestPt = null, bestD = Infinity, bestFt = null;
+    contours.forEach((it) => {
+      if (!it.layer) return;
+      const rings = it.layer.getLatLngs();
+      (Array.isArray(rings[0]) ? rings : [rings]).forEach((ring) => {
+        for (let k = 0; k < ring.length - 1; k++) {
+          const a = map.latLngToLayerPoint(ring[k]);
+          const b = map.latLngToLayerPoint(ring[k + 1]);
+          const cp = L.LineUtil.closestPointOnSegment(src, a, b);
+          const d = src.distanceTo(cp);
+          if (d < bestD) { bestD = d; bestPt = cp; bestFt = Math.abs(it.feet); }
+        }
+      });
+    });
+    if (!contours.length) { toast('No custom contours to snap to — add one on the depth ruler.', true); return; }
+    if (!bestPt || bestD > SNAP_PX) { toast('No contour within snapping range of that node.', true); return; }
+    p.nodes[i] = map.layerPointToLatLng(bestPt);
+    p.profile = null;
+    closeNodeEditor();
+    redraw(p); refreshProfile(p);
+    say('Node ' + (i + 1) + ' snapped to the ' + bestFt + ' ft contour');
+    onChange();
   }
 
   function lengthOf(p) {
     let d = 0;
     for (let i = 1; i < p.nodes.length; i++) d += DemSampler.haversine(p.nodes[i - 1], p.nodes[i]);
     return d;
+  }
+
+  // Cumulative distance (metres) from the start of the path to each node —
+  // the bridge between node indices and the evenly-spaced profile samples.
+  function nodeDistances(p) {
+    const out = [0];
+    let d = 0;
+    for (let i = 1; i < p.nodes.length; i++) {
+      d += DemSampler.haversine(p.nodes[i - 1], p.nodes[i]);
+      out.push(d);
+    }
+    return out;
+  }
+
+  /*
+   * TRUE bearing (degrees from true north). Note for navigation: a diver's
+   * compass reads MAGNETIC, which differs from this by the local declination
+   * — roughly 11-12° east in the Santa Barbara Channel. The leg table labels
+   * the column accordingly rather than silently implying magnetic.
+   */
+  function bearing(a, b) {
+    const rad = Math.PI / 180;
+    const lat1 = a.lat * rad, lat2 = b.lat * rad;
+    const dLng = (b.lng - a.lng) * rad;
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (Math.atan2(y, x) / rad + 360) % 360;
+  }
+
+  /*
+   * One row per segment: what a diver would write on a slate. Depths come
+   * from whichever profile samples fall inside the leg's distance span, so
+   * they are null until the profile has been read.
+   */
+  function legsOf(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || p.nodes.length < 2) return [];
+    const cum = nodeDistances(p);
+    const samples = (p.profile || []).filter((s) => s.feet !== null);
+    return p.nodes.slice(0, -1).map((from, i) => {
+      const to = p.nodes[i + 1];
+      const depths = samples
+        .filter((s) => s.distance >= cum[i] && s.distance <= cum[i + 1])
+        .map((s) => -s.feet);
+      return {
+        leg: i + 1, from: from, to: to,
+        heading: bearing(from, to),
+        metres: cum[i + 1] - cum[i],
+        maxFt: depths.length ? Math.max.apply(null, depths) : null,
+        avgFt: depths.length ? depths.reduce((a, b) => a + b, 0) / depths.length : null
+      };
+    });
   }
 
   /* ---------- drawing ---------- */
@@ -284,7 +436,7 @@ const Paths = (function () {
       id: id, name: 'Path ' + id, nodes: [],
       color: COLORS[(id - 1) % COLORS.length],
       line: null, markers: [], profile: null, expanded: true,
-      mirrored: false, preMirrorNodes: null, plotHeight: 62
+      mirrored: false, preMirrorNodes: null, plotHeight: 62, showNodes: false
     };
     paths.push(p);
     selectedId = p.id;
@@ -398,6 +550,11 @@ const Paths = (function () {
    * since that already redraws the SVG directly for a smooth drag and only
    * needs to persist the final value here.
    */
+  function toggleShowNodes(id) {
+    const p = paths.find((x) => x.id === id);
+    if (p) { p.showNodes = !p.showNodes; onChange(); }
+  }
+
   function setPlotHeight(id, px) {
     const p = paths.find((x) => x.id === id);
     if (!p || !(px > 0)) return;
@@ -418,6 +575,7 @@ const Paths = (function () {
     if (i < 0) return;
     const p = paths[i];
     if (p.line) map.removeLayer(p.line);
+    if (p.hitLine) map.removeLayer(p.hitLine);
     p.markers.forEach((m) => map.removeLayer(m));
     paths.splice(i, 1);
     if (selectedId === id) selectedId = paths.length ? paths[paths.length - 1].id : null;
@@ -449,7 +607,8 @@ const Paths = (function () {
         mirrored: !!s.mirrored,
         preMirrorNodes: Array.isArray(s.preMirrorNodes)
           ? s.preMirrorNodes.filter(valid).map((n) => L.latLng(n.lat, n.lng)) : null,
-        plotHeight: s.plotHeight > 0 ? s.plotHeight : 62
+        plotHeight: s.plotHeight > 0 ? s.plotHeight : 62,
+        showNodes: !!s.showNodes
       });
     });
     if (!paths.length) return;
@@ -502,7 +661,7 @@ const Paths = (function () {
         id: id, name: file.name.replace(/\.xlsx?$/i, ''), nodes: nodes,
         color: COLORS[(id - 1) % COLORS.length],
         line: null, markers: [], profile: null, expanded: true,
-        mirrored: false, preMirrorNodes: null, plotHeight: 62
+        mirrored: false, preMirrorNodes: null, plotHeight: 62, showNodes: false
       };
       paths.push(p);
       selectedId = p.id;
@@ -526,7 +685,10 @@ const Paths = (function () {
     rename: rename,
     toggleExpand: toggleExpand,
     setMirrored: setMirrored,
+    toggleShowNodes: toggleShowNodes,
     setPlotHeight: setPlotHeight,
+    legsOf: legsOf,
+    nodeDistances: nodeDistances,
     setColor: setColor,
     remove: remove,
     exportPath: exportPath,

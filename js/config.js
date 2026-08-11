@@ -149,8 +149,15 @@ window.KELP_CONFIG = {
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
     kelpPalette: 'amber',   // key into KELP_PALETTES above
+    // sub-range of that palette actually used, 0..1 from its dark end to its
+    // bright end — the legend's vertical bar drags these
+    paletteMin: 0,
+    paletteMax: 1,
     dockWidth: 360,         // width of the docked paths panel, in px
-    mode: 'single',         // 'single' scene, or 'composite' (mean composite over the range)
+    // stacking order of the map overlays, bottom to top; dragged in the
+    // bottom-right overlay picker and applied as pane z-indexes
+    overlayOrder: ['truecolor', 'depth', 'kelp'],
+    mode: 'composite',      // 'single' scene, or 'composite' (median composite over the range)
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
     sacUnit: 'cuft/min',    // gas planning: 'cuft/min' | 'L/min'
@@ -165,6 +172,8 @@ window.KELP_CONFIG = {
     time: 30,               // minutes — used when timeMode is 'time'
     timeMode: 'speed',      // 'speed' | 'time'
     showGas: true,
+    kickDistance: 0,        // metres per kick cycle; 0 = omit kicks from the leg table
+    kickUnit: 'm',          // how that number is typed/shown: 'm' | 'ft'
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
     depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it

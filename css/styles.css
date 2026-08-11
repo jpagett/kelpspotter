@@ -143,6 +143,18 @@ body {
 }
 .ov-icon:hover { border-color: var(--kelp); }
 .ov-icon[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+/* the kelp frond drawn as a mask so it takes currentColor and inverts with
+   the pressed state, exactly like the emoji icons beside it */
+.ov-icon-kelp::before {
+  content: ''; display: block; width: 19px; height: 19px;
+  background-color: currentColor;
+  -webkit-mask: url(../kelp-icon.svg) center / contain no-repeat;
+  mask: url(../kelp-icon.svg) center / contain no-repeat;
+}
+/* dragging an overlay item re-stacks the map layers */
+.ov-item { cursor: grab; }
+.ov-item.ov-dragging { opacity: 0.4; }
+.ov-item.ov-drop-target .ov-icon { border-color: var(--kelp-hot); box-shadow: 0 0 0 2px var(--kelp-hot); }
 .ov-flyout {
   position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
   background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
@@ -436,7 +448,7 @@ input[type=range]::-moz-range-thumb {
 /* colormap picker — same show-instantly / linger-1s pattern as .ov-flyout */
 .legend-menu {
   position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  display: flex; flex-direction: column; gap: 5px; padding: 7px;
+  display: flex; align-items: stretch; gap: 8px; padding: 7px;
   background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
   box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
   opacity: 0; visibility: hidden;
@@ -446,12 +458,30 @@ input[type=range]::-moz-range-thumb {
   opacity: 1; visibility: visible;
   transition: opacity 120ms ease, visibility 0s linear;
 }
+.legend-swatches { display: flex; flex-direction: column; gap: 5px; }
 .legend-swatch {
   width: 96px; height: 16px; cursor: pointer;
   border: 1px solid var(--line); border-radius: 2px; padding: 0;
 }
 .legend-swatch:hover { border-color: var(--kelp); }
 .legend-swatch[aria-pressed="true"] { border-color: var(--kelp); box-shadow: 0 0 0 1px var(--kelp); }
+
+/*
+ * Range bar: the live colormap drawn bottom-to-top (dark end at the bottom,
+ * matching the horizontal legend's Low->High), with two grips bounding the
+ * slice actually used. Full range by default.
+ */
+.legend-range { display: flex; align-items: stretch; padding: 0 4px; }
+.legend-range-bar {
+  position: relative; width: 18px; border-radius: 2px;
+  border: 1px solid var(--line); touch-action: none;
+}
+.legend-range-grip {
+  position: absolute; left: -3px; right: -3px; height: 7px;
+  background: var(--foam); border: 1px solid var(--abyss); border-radius: 2px;
+  cursor: ns-resize; touch-action: none;
+}
+.legend-range-grip:hover, .legend-range-grip:focus-visible { background: var(--kelp-hot); outline: none; }
 .legend .eyebrow {
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--tide-dim); margin: 0; flex: none;
@@ -466,9 +496,21 @@ input[type=range]::-moz-range-thumb {
   font-family: var(--mono); font-size: 8px; color: var(--tide);
 }
 
-/* ENC contours are drawn as black lines on transparent, which vanish against the
-   dark basemap — invert flips them to white without touching the clear areas. */
-.leaflet-contour-pane { filter: invert(1); opacity: 0.6; }
+/*
+ * ENC contours are drawn as black lines on transparent, which vanish against
+ * the dark basemap — invert flips them to white without touching the clear
+ * areas.
+ *
+ * The filter goes on the TILE IMAGES, never on the pane. A filter on a pane
+ * forces the browser to rasterize that whole pane as one compositing layer,
+ * and Leaflet transforms the pane every frame of a zoom animation — which
+ * renders as grey/black rectangles mid-zoom (this pane caused the grey ones;
+ * a drop-shadow on the kelp pane caused black ones earlier). Per-image is
+ * cheap and animates cleanly. Opacity stays on the pane: plain opacity is
+ * what Leaflet itself animates and is not affected.
+ */
+.leaflet-contour-pane { opacity: 0.6; }
+.leaflet-contour-pane img { filter: invert(1); }
 
 /*
  * NOTE: do not put a CSS `filter` on .leaflet-kelp-pane (or any pane holding
@@ -690,6 +732,78 @@ input[type=range]::-moz-range-thumb {
   margin-top: 4px; padding: 0 2px;
 }
 .pp-readout-speed.warn { color: #e2725b; font-weight: 600; }
+.pp-group-label { height: 20px; display: flex; align-items: center; color: var(--tide-dim); }
+/* node positions marked on the profile, behind the eye toggle */
+.pp-node-dot { stroke: var(--abyss); stroke-width: 1; }
+
+/* ---------- leg table viewer ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 1200;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(5,22,28,0.72); backdrop-filter: blur(3px);
+}
+.modal[hidden] { display: none; }
+.modal-card {
+  display: flex; flex-direction: column; min-width: 0;
+  max-width: 760px; width: 100%; max-height: 100%;
+  background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 20px 60px -20px rgba(0,0,0,0.9);
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+}
+.modal-head .eyebrow {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--tide-dim);
+}
+.modal-tools { display: flex; align-items: center; gap: 8px; }
+.modal-x {
+  width: 24px; height: 24px; cursor: pointer; display: grid; place-items: center;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 14px; line-height: 1;
+}
+.modal-x:hover { color: #e2725b; border-color: #e2725b; }
+/* the table can be wide and long; scroll it rather than the page */
+.modal-body { overflow: auto; padding: 12px 14px 14px; }
+
+.legs-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 11px; }
+.legs-table th, .legs-table td {
+  padding: 5px 8px; text-align: right; white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.legs-table th {
+  color: var(--tide-dim); font-weight: 500; text-align: right;
+  position: sticky; top: 0; background: var(--deep);
+}
+.legs-table td { color: var(--foam); }
+.legs-table th:first-child, .legs-table td:first-child { text-align: left; }
+.legs-table tfoot td { color: var(--tide); border-bottom: none; border-top: 1px solid var(--line); }
+.legs-note {
+  margin-top: 10px; font-size: 10px; line-height: 1.5; color: var(--tide-dim);
+}
+
+/*
+ * Paper is white and ink is expensive: print only the table, inverted out of
+ * the dark theme. Without this the browser either drops the backgrounds and
+ * prints pale-on-white, or floods the page with the panel's dark fill.
+ */
+@media print {
+  body > *:not(#legs-modal) { display: none !important; }
+  .modal {
+    position: static; inset: auto; display: block; padding: 0;
+    background: none; backdrop-filter: none;
+  }
+  .modal-card {
+    max-width: none; max-height: none; border: none; box-shadow: none;
+    background: #fff; color: #000;
+  }
+  .modal-tools { display: none; }
+  .modal-head { border-color: #999; }
+  .modal-head .eyebrow, .legs-table th, .legs-table td, .legs-note { color: #000; }
+  .legs-table th { background: #fff; }
+  .legs-table th, .legs-table td { border-color: #999; }
+}
 
 .pp-plot-resize {
   height: 7px; margin-top: 4px; border-radius: 2px;
@@ -720,6 +834,13 @@ input[type=range]::-moz-range-thumb {
   font-family: var(--mono); font-size: 11px; padding: 3px 6px;
 }
 .node-coord input:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 1px; }
+.node-coord { display: flex; align-items: center; gap: 5px; }
+.node-coord-del {
+  width: 20px; height: 20px; flex: none; cursor: pointer; display: grid; place-items: center;
+  background: none; color: var(--tide-dim);
+  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+}
+.node-coord-del:hover { color: #e2725b; border-color: #e2725b; }
 
 /* draggable node handles */
 .path-node span {

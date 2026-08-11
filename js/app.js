@@ -1356,6 +1356,114 @@
     return { points: points, total: cum };
   }
 
+  /*
+   * ---- leg table ----
+   * The slate view: one row per segment with the compass heading and distance
+   * you would actually swim, plus the depths along it.
+   *
+   * Leg distances are shown in the DEPTH unit (ft/m) rather than distUnit —
+   * legs are tens of metres, and "0.06 mi" is useless on a slate. Headings are
+   * true bearings (see Paths.bearing); the note under the table says so,
+   * because a diver's compass reads magnetic.
+   */
+  let legsPath = null;   // the path the open table belongs to
+
+  function legRows(p) {
+    const legs = Paths.legsOf(p.id);
+    const u = depthU();
+    const kickM = state.params.kickDistance;
+    const head = ['Leg', 'Heading (T)', 'Distance (' + u.label + ')'];
+    if (kickM > 0) head.push('Kicks');
+    head.push('Max depth (' + u.label + ')', 'Avg depth (' + u.label + ')');
+
+    const body = legs.map((lg) => {
+      const distU_ = u.from(lg.metres * M_TO_FT);       // metres -> ft -> chosen unit
+      const row = [
+        String(lg.leg),
+        Math.round(lg.heading) + '°',
+        distU_.toFixed(u.dp === 0 ? 0 : 1)
+      ];
+      if (kickM > 0) row.push(Math.round(lg.metres / kickM).toString());
+      row.push(lg.maxFt === null ? '—' : u.from(lg.maxFt).toFixed(u.dp),
+               lg.avgFt === null ? '—' : u.from(lg.avgFt).toFixed(u.dp));
+      return row;
+    });
+
+    // totals: distance and kicks add up; depths do not, so they stay blank
+    const totalM = legs.reduce((a, lg) => a + lg.metres, 0);
+    const foot = ['Total', '', u.from(totalM * M_TO_FT).toFixed(u.dp === 0 ? 0 : 1)];
+    if (kickM > 0) foot.push(Math.round(totalM / kickM).toString());
+    foot.push('', '');
+    return { head: head, body: body, foot: foot, count: legs.length };
+  }
+
+  function openLegTable(p) {
+    const rows = legRows(p);
+    if (!rows.count) { toast('A leg table needs at least two nodes.', true); return; }
+    legsPath = p;
+    $('legs-title').textContent = p.name + ' · leg table';
+
+    const table = document.createElement('table');
+    table.className = 'legs-table';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    rows.head.forEach((h) => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
+    thead.appendChild(htr); table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.body.forEach((r) => {
+      const tr = document.createElement('tr');
+      r.forEach((c) => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    const tfoot = document.createElement('tfoot');
+    const ftr = document.createElement('tr');
+    rows.foot.forEach((c) => { const td = document.createElement('td'); td.textContent = c; ftr.appendChild(td); });
+    tfoot.appendChild(ftr); table.appendChild(tfoot);
+
+    const body = $('legs-body');
+    body.textContent = '';
+    body.appendChild(table);
+
+    const note = document.createElement('div');
+    note.className = 'legs-note';
+    const bits = ['Headings are TRUE bearings — add local magnetic declination (about 11–12° E in the Santa Barbara Channel) to steer them on a compass.'];
+    if (!p.profile) bits.push('Depths are blank until the profile finishes reading.');
+    if (state.params.kickDistance <= 0) bits.push('Set a kick distance in the Paths panel to add a kick-cycle column.');
+    note.textContent = bits.join(' ');
+    body.appendChild(note);
+
+    $('legs-modal').hidden = false;
+  }
+
+  function closeLegTable() { $('legs-modal').hidden = true; legsPath = null; }
+  $('legs-close').addEventListener('click', closeLegTable);
+  $('legs-modal').addEventListener('click', (ev) => {
+    if (ev.target === $('legs-modal')) closeLegTable();   // click the backdrop
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !$('legs-modal').hidden) closeLegTable();
+  });
+  $('legs-print').addEventListener('click', () => window.print());
+  $('legs-csv').addEventListener('click', () => {
+    if (!legsPath) return;
+    const rows = legRows(legsPath);
+    const all = [rows.head].concat(rows.body, [rows.foot]);
+    const csv = all.map((r) => r.map((c) => {
+      const s = String(c == null ? '' : c);
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = legsPath.name.replace(/[^\w-]+/g, '_') + '_legs.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say('Leg table saved for ' + legsPath.name, 'ok');
+  });
+
   // ---- paths panel ----
   // Depth-vs-distance sparkline. Depth increases downward, which is the way a
   // profile is conventionally read.
@@ -1441,6 +1549,29 @@
     }
 
     /*
+     * Node markers: where each drawn node falls along the profile. Each node's
+     * cumulative distance is matched to the nearest sample so the dot sits on
+     * the depth curve rather than floating beside it.
+     */
+    if (p.showNodes) {
+      Paths.nodeDistances(p).forEach((d) => {
+        if (d > maxX) return;
+        let best = pts[0], bestD = Infinity;
+        pts.forEach((s) => {
+          const gap = Math.abs(s.distance - d);
+          if (gap < bestD) { bestD = gap; best = s; }
+        });
+        const dot = document.createElementNS(NS, 'circle');
+        dot.setAttribute('class', 'pp-node-dot');
+        dot.setAttribute('cx', x(d).toFixed(1));
+        dot.setAttribute('cy', y(-best.feet).toFixed(1));
+        dot.setAttribute('r', '2.5');
+        dot.setAttribute('fill', p.color);
+        svg.appendChild(dot);
+      });
+    }
+
+    /*
      * Hovering the plot drops a dot on the map at the matching point along the
      * path, so a feature in the profile can be located on the water. The svg is
      * preserveAspectRatio="none", so a fraction across the element maps straight
@@ -1509,6 +1640,7 @@
       row.className = 'pp-row';
       row.addEventListener('click', (ev) => {
         if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil, .pp-mirror, .pp-name-input')) return;
+        // (.pp-mirror also covers the node-marker and leg-table buttons, which share its styling)
         Paths.select(p.id);
       });
 
@@ -1567,6 +1699,18 @@
       mirror.setAttribute('aria-pressed', p.mirrored ? 'true' : 'false');
       mirror.addEventListener('click', () => Paths.setMirrored(p.id, !p.mirrored));
 
+      const nodesBtn = document.createElement('button');
+      nodesBtn.className = 'pp-mirror'; nodesBtn.type = 'button'; nodesBtn.textContent = '👁';
+      nodesBtn.title = p.showNodes ? 'Hide node markers on the plot' : 'Show node markers on the plot';
+      nodesBtn.setAttribute('aria-pressed', p.showNodes ? 'true' : 'false');
+      nodesBtn.addEventListener('click', () => Paths.toggleShowNodes(p.id));
+
+      const legsBtn = document.createElement('button');
+      legsBtn.className = 'pp-mirror'; legsBtn.type = 'button'; legsBtn.textContent = '🧭';
+      legsBtn.title = 'Leg table — headings, distances and depths';
+      legsBtn.disabled = p.nodes.length < 2;
+      legsBtn.addEventListener('click', () => openLegTable(p));
+
       const cog = document.createElement('button');
       cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
 
@@ -1597,8 +1741,9 @@
         menu.hidden = !menu.hidden;
       });
 
-      row.appendChild(sw); row.appendChild(nameWrap);
-      row.appendChild(meta); row.appendChild(mirror); row.appendChild(caret); row.appendChild(cog);
+      row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
+      row.appendChild(mirror); row.appendChild(nodesBtn); row.appendChild(legsBtn);
+      row.appendChild(caret); row.appendChild(cog);
       item.appendChild(row); item.appendChild(menu);
 
       let wrap = null;
@@ -1920,6 +2065,13 @@
     $('pp-mode-unit').textContent = isTime ? 'min' : speedU().label;
 
     $('pp-gas-btn').setAttribute('aria-pressed', state.params.showGas ? 'true' : 'false');
+
+    // kick distance is stored in metres; the input shows it in the chosen unit
+    $('pp-kick-unit').value = state.params.kickUnit;
+    const kickM = state.params.kickDistance;
+    $('pp-kick-input').value = kickM > 0
+      ? +(state.params.kickUnit === 'ft' ? kickM * M_TO_FT : kickM).toFixed(2)
+      : '';
   }
   $('pp-sac-input').addEventListener('change', () => {
     const v = parseFloat($('pp-sac-input').value);
@@ -1950,6 +2102,18 @@
     state.params.showGas = !state.params.showGas;
     syncGasBar();
     renderPaths();
+  });
+  $('pp-kick-input').addEventListener('change', () => {
+    const v = parseFloat($('pp-kick-input').value);
+    // blank or nonsense means "no kick column", not an error
+    state.params.kickDistance = (isFinite(v) && v > 0)
+      ? (state.params.kickUnit === 'ft' ? v / M_TO_FT : v)
+      : 0;
+    syncGasBar();
+  });
+  $('pp-kick-unit').addEventListener('change', () => {
+    state.params.kickUnit = $('pp-kick-unit').value;   // same distance, restated
+    syncGasBar();
   });
   syncGasBar();
 
@@ -2070,7 +2234,7 @@
         name: p.name, color: p.color, mirrored: p.mirrored,
         preMirrorNodes: p.preMirrorNodes
           ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
-        plotHeight: p.plotHeight, expanded: p.expanded,
+        plotHeight: p.plotHeight, expanded: p.expanded, showNodes: p.showNodes,
         nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
       }))));
       const sc = state.scenes[state.idx];

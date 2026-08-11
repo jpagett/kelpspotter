@@ -55,6 +55,9 @@
    * needs its own pane above it, and the kelp needs a pane above that. The demo
    * engine's canvas lives in Leaflet's overlayPane (400) and stays on top.
    */
+  // both unit systems, matching the configurable readouts everywhere else
+  L.control.scale({ position: 'bottomleft', maxWidth: 130, imperial: true, metric: true }).addTo(map);
+
   map.createPane('truecolor').style.zIndex = 240;   // an alternative base image, so it sits just under depth
   map.createPane('depth').style.zIndex = 250;
   map.createPane('contour').style.zIndex = 260;
@@ -1056,6 +1059,84 @@
     undoTimer = setTimeout(() => el.classList.remove('show'), 6000);
   }
   Paths.onRemoved = showUndoToast;
+
+  /*
+   * ---- map context menu ----
+   * Right-click (long-press on touch) on open water: add a POI, start a path,
+   * or copy the coordinates. Node markers, grips and the plot own their own
+   * context menus and stop propagation, so this only fires on the map itself.
+   */
+  function openMapMenu(latlng, cx, cy) {
+    closePlotMenu();
+    const menu = document.createElement('div');
+    menu.className = 'plot-menu';
+    const head = document.createElement('div');
+    head.className = 'plot-menu-head';
+    head.textContent = latlng.lat.toFixed(5) + ', ' + latlng.lng.toFixed(5);
+    menu.appendChild(head);
+    const item = (label, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = label;
+      b.addEventListener('click', () => { closePlotMenu(); fn(); });
+      menu.appendChild(b);
+    };
+    item('Add POI here', () => {
+      const name = window.prompt('Name for this point:', 'Marked spot');
+      if (name === null) return;
+      POI.upsert({ name: (name.trim() || 'Marked spot'), lat: latlng.lat, lng: latlng.lng,
+                   symbol: 'marker', visible: true });
+      say('POI added at ' + latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4), 'ok');
+      persistNow();
+    });
+    item('Start path here', () => {
+      if (!Paths.drawing) Paths.startDrawing();
+      Paths.insertAt(Paths.selectedId, latlng);
+      say('Path started — keep clicking to add nodes, Esc or ✓ to finish');
+    });
+    item('Copy coordinates', () => {
+      const txt = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+        .then(() => say('Copied ' + txt, 'ok'))
+        .catch(() => toast(txt, false));   // clipboard blocked: show it instead
+    });
+    document.body.appendChild(menu);
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.min(cx, window.innerWidth - mw - 8) + 'px';
+    menu.style.top = Math.min(cy, window.innerHeight - mh - 8) + 'px';
+    plotMenuEl = menu;
+  }
+  map.on('contextmenu', (ev) => {
+    if (Paths.drawing) return;             // placing nodes; a menu would ambush
+    L.DomEvent.preventDefault(ev.originalEvent);
+    openMapMenu(ev.latlng, ev.originalEvent.clientX, ev.originalEvent.clientY);
+  });
+  /*
+   * Touch long-press on the map. Leaflet no longer synthesises contextmenu for
+   * tap-hold everywhere, so this is our own: 550ms still-finger on the map
+   * container, tolerance 10px, skipped over markers and while drawing.
+   */
+  (function mapLongPress() {
+    const el = map.getContainer();
+    let t = null, sx = 0, sy = 0;
+    const cancel = () => { if (t) { clearTimeout(t); t = null; } };
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType === 'mouse' || Paths.drawing) return;
+      if (ev.target.closest('.leaflet-marker-icon, .poi-pin, .plot-menu')) return;
+      sx = ev.clientX; sy = ev.clientY;
+      cancel();
+      t = setTimeout(() => {
+        t = null;
+        const pt = map.mouseEventToLatLng({ clientX: sx, clientY: sy });
+        openMapMenu(pt, sx, sy);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 550);
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (!t) return;
+      if (Math.abs(ev.clientX - sx) > 10 || Math.abs(ev.clientY - sy) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel'].forEach((k) => el.addEventListener(k, cancel));
+  })();
 
   // ---- date range ----
   // Read-only in the console; edited from the calendar's Start / End buttons.
@@ -2089,6 +2170,21 @@
     };
     (p.ceilings || []).forEach((c) => addBoundGrip(c, 'ceiling'));
     (p.floors || []).forEach((f) => addBoundGrip(f, 'floor'));
+    /*
+     * A flat capped segment looks the same whichever bound produced it, so
+     * each span carries a small ≤ / ≥ tag at its left edge — enough to tell a
+     * "no deeper than" from a "no shallower than" at a glance.
+     */
+    const tagBound = (b, glyph) => {
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('class', 'pp-axis');
+      t.setAttribute('x', x(Math.max(0, b.start)) + 2);
+      t.setAttribute('y', Math.max(PADT + 6, y(b.feet) - 2));
+      t.textContent = glyph + Math.round(depthU().from(b.feet));
+      svg.appendChild(t);
+    };
+    (p.ceilings || []).forEach((c) => tagBound(c, '≤'));
+    (p.floors || []).forEach((f) => tagBound(f, '≥'));
 
     // dotted true bottom, drawn only over the capped stretches
     if ((p.ceilings || []).length || (p.floors || []).length) {
@@ -2254,22 +2350,37 @@
       const at = plotPoint(ev.clientX, ev.clientY);
       if (at) openPlotMenu(p, at, ev.clientX, ev.clientY);
     });
-    // touch: long-press for the same menu
-    let plotPress = null;
+    /*
+     * Touch: long-press for the same menu. Two things make this actually work
+     * on a phone where the naive version did not:
+     *   - a 10px movement tolerance, because a resting fingertip jitters a few
+     *     pixels and a zero-tolerance cancel meant the press almost never
+     *     matured;
+     *   - touch-action: pan-y on the svg (see CSS), so a still finger is ours
+     *     to time while vertical sheet-scrolling stays native — a real scroll
+     *     fires pointercancel, which correctly abandons the press.
+     */
+    let plotPress = null, pressX = 0, pressY = 0;
+    const cancelPlotPress = () => { if (plotPress) { clearTimeout(plotPress); plotPress = null; } };
     svg.addEventListener('pointerdown', (ev) => {
       if (ev.pointerType === 'mouse') return;
-      const sx = ev.clientX, sy = ev.clientY;
+      pressX = ev.clientX; pressY = ev.clientY;
+      cancelPlotPress();
       plotPress = setTimeout(() => {
-        const at = plotPoint(sx, sy);
-        if (at) openPlotMenu(p, at, sx, sy);
+        plotPress = null;
+        const at = plotPoint(pressX, pressY);
+        if (at) openPlotMenu(p, at, pressX, pressY);
         if (navigator.vibrate) navigator.vibrate(12);
       }, 450);
     });
-    ['pointerup', 'pointercancel', 'pointermove'].forEach((t) =>
-      svg.addEventListener(t, (ev) => {
-        if (t === 'pointermove' && plotPress === null) return;
-        if (t !== 'pointermove' || ev.pointerType !== 'mouse') { clearTimeout(plotPress); plotPress = null; }
-      }));
+    svg.addEventListener('pointermove', (ev) => {
+      if (!plotPress || ev.pointerType === 'mouse') return;
+      if (Math.abs(ev.clientX - pressX) > 10 || Math.abs(ev.clientY - pressY) > 10) cancelPlotPress();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) =>
+      svg.addEventListener(t, cancelPlotPress));
+    // the OS long-press callout would race our menu
+    svg.addEventListener('contextmenu', (ev) => ev.preventDefault());
     return svg;
   }
 
@@ -2570,6 +2681,16 @@
       const color = document.createElement('input');
       color.type = 'color'; color.value = p.color; color.title = 'Path colour';
       color.addEventListener('change', () => { Paths.setColor(p.id, color.value); });
+      const rev = document.createElement('button');
+      rev.className = 'pp-del'; rev.type = 'button'; rev.textContent = '⇋';
+      rev.title = 'Reverse direction — run the line from the other end';
+      rev.addEventListener('click', () => Paths.reverse(p.id));
+
+      const dup = document.createElement('button');
+      dup.className = 'pp-del'; dup.type = 'button'; dup.textContent = '⧉';
+      dup.title = 'Duplicate — plan a variant without touching this one';
+      dup.addEventListener('click', () => Paths.duplicate(p.id));
+
       const del = document.createElement('button');
       del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
       del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
@@ -2586,7 +2707,8 @@
         state.params.speedUnit = v; syncGasBar(); renderPaths();
       });
       menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu);
-      menu.appendChild(su); menu.appendChild(pu); menu.appendChild(del);
+      menu.appendChild(su); menu.appendChild(pu);
+      menu.appendChild(rev); menu.appendChild(dup); menu.appendChild(del);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = !menu.hidden;

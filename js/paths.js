@@ -799,6 +799,58 @@ const Paths = (function () {
     return planned;
   }
 
+  /*
+   * Reverse the direction of travel. Headings, leg order and the profile's
+   * x-axis all flip, so this is for running the same line from the other end —
+   * ceilings and floors are remapped (start' = total - end) so they stay glued
+   * to the same stretch of seabed.
+   */
+  function reversePath(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || p.nodes.length < 2) return;
+    const total = lengthOf(p);
+    p.nodes.reverse();
+    if (p.preMirrorNodes) p.preMirrorNodes.reverse();
+    ['ceilings', 'floors'].forEach((k) => {
+      (p[k] || []).forEach((b) => {
+        const s0 = b.start;
+        b.start = Math.max(0, total - b.end);
+        b.end = Math.max(0, total - s0);
+      });
+    });
+    p.profile = null;
+    redraw(p);
+    refreshProfile(p);
+    say(p.name + ' reversed — headings and legs now run from the far end');
+    onChange();
+  }
+
+  // A planning variant without touching the original: same geometry and
+  // bounds, next colour, selected so edits land on the copy.
+  function duplicatePath(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p) return;
+    const nid = nextId++;
+    const copy = {
+      id: nid, name: p.name + ' copy',
+      nodes: p.nodes.map((n) => L.latLng(n.lat, n.lng)),
+      color: COLORS[(nid - 1) % COLORS.length],
+      line: null, markers: [], profile: null, expanded: true,
+      mirrored: false, preMirrorNodes: null,
+      plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
+      showNodes: false, showLegs: false, legGas: {},
+      ceilings: (p.ceilings || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet })),
+      floors: (p.floors || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet }))
+    };
+    collapseOthers(nid);
+    paths.push(copy);
+    selectedId = nid;
+    paths.forEach(redraw);
+    refreshProfile(copy);
+    say(copy.name + ' created');
+    onChange();
+  }
+
   // Insert a node into the selected geometry at this position — the same
   // operation as clicking the path line, exposed for the profile-plot menu.
   function insertAt(id, latlng) {
@@ -1208,6 +1260,8 @@ const Paths = (function () {
     plannedFtAt: plannedFtAt,
     undoRemove: undoRemove,
     insertAt: insertAt,
+    reverse: reversePath,
+    duplicate: duplicatePath,
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,
     select: select,

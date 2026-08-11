@@ -82,6 +82,8 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
 | **Floors** | The ceiling's mirror: a *minimum* planned depth over a span ("stay below 20 ft through the boat channel"). Set from the same right-click menu. Where a floor and ceiling conflict, the floor wins; where the bottom is shallower than the floor, the bottom wins — rock is not negotiable. |
 | **Bound editing** | Drag a ceiling/floor segment on the plot vertically to change its depth; right-click the segment to remove just that one. |
+| **Map right-click** | Right-click (long-press on touch) open water: **Add POI here**, **Start path here**, **Copy coordinates**. |
+| **Reverse / duplicate** | In a path's cog menu: ⇋ runs the line from the other end (headings, legs and bounds all remap); ⧉ copies it for a planning variant. |
 | **Undo** | Deleting a path shows a 6-second toast with an Undo button. |
 | **Keys** | `[` `]` step scenes (arrows still work), `n` starts/finishes drawing a path. |
 | **Profile right-click** | Right-click (long-press on touch) the depth plot for actions at that distance: **Add node here**, **Set ceiling start / end**, **Clear ceilings**. A ceiling caps the *planned* depth over a span — the plot draws the capped line solid with the true bottom dotted, hover reads both, and gas is burned at the capped depth. The cap's depth is the y-position of the click. |

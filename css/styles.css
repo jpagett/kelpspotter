@@ -1119,6 +1119,21 @@ input[type=range]::-moz-range-thumb {
 
 
 
+/* the profile plot: vertical sheet-scroll stays native, but a still finger is
+   ours to time for the long-press menu; grips must own their whole gesture */
+.pp-profile svg { touch-action: pan-y; }
+.bound-grip { touch-action: none; }
+
+/* Leaflet scale bar, restyled to the instrument look */
+.leaflet-control-scale-line {
+  background: rgba(5,22,28,0.72) !important; color: var(--tide) !important;
+  border-color: var(--tide-dim) !important; font-family: var(--mono); font-size: 9px;
+}
+@media (max-width: 820px) {
+  /* keep it clear of the tab bar */
+  .leaflet-bottom.leaflet-left { bottom: 4px; }
+}
+
 /* ---------- undo toast ---------- */
 .undo-toast {
   position: fixed; z-index: 1200; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
@@ -1516,6 +1531,7 @@ input[type=range]::-moz-range-thumb {
   .cc-cog, .pp-cog, .pp-caret, .pp-pencil { padding: 4px 6px; font-size: 13px; }
   /* the node editor is reached by long-press on a phone, so size it for a thumb */
   .node-coord input { font-size: 13px; padding: 8px 9px; }
+  .bound-grip { stroke-width: 20; }
   .node-coord-del { min-width: 44px; min-height: 44px; font-size: 18px; }
   input[type=range] { height: 26px; }
 

@@ -191,6 +191,13 @@ const POI = (function () {
    * a dive-site list without depths is half a list. Best-effort: a failed
    * batch leaves the rows without a depth rather than failing the import.
    */
+  // Coalesce bursts (a session import upserts one POI at a time) into one
+  // batched NOAA request rather than one per marker.
+  let annotateTimer = null;
+  function scheduleAnnotate() {
+    clearTimeout(annotateTimer);
+    annotateTimer = setTimeout(annotateDepths, 250);
+  }
   async function annotateDepths() {
     const todo = items.filter((i) => i.depthFt === undefined);
     if (!todo.length || !window.DemSampler) return;
@@ -384,6 +391,7 @@ const POI = (function () {
       items.push(p);
     }
     render();
+    scheduleAnnotate();
   }
 
   function removeByUid(uid) {

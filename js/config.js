@@ -141,6 +141,21 @@ window.KELP_CONFIG = {
     ice:     ['0d3b66', '3fa7d6', '90e0ef', 'caf0f8']
   },
 
+  /*
+   * Common cylinders, as rated volume at rated fill pressure. Picking one
+   * fills in a gas source's numbers; they stay editable afterwards, since
+   * actual fills and cylinder vintages vary (LP steels in particular are
+   * routinely filled past their 2400 psi rating).
+   */
+  CYLINDERS: [
+    { name: 'AL80',         totalCuft: 77.4, startPsi: 3000 },
+    { name: 'HP80',         totalCuft: 80,   startPsi: 3442 },
+    { name: 'LP85',         totalCuft: 85,   startPsi: 2400 },
+    { name: 'HP100',        totalCuft: 100,  startPsi: 3442 },
+    { name: 'HP100 doubles', totalCuft: 200, startPsi: 3442 },
+    { name: 'LP85 doubles',  totalCuft: 170, startPsi: 2400 }
+  ],
+
   // Default model parameters (all adjustable live in the console)
   DEFAULTS: {
     indexType: 'KD',        // 'KD', 'FAI' or 'NDVI'

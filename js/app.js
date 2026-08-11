@@ -2628,6 +2628,42 @@
         renderCylinders(); renderPaths();
       });
       head.appendChild(name);
+
+      /*
+       * Preset picker: fills the numbers in from a common cylinder. The name
+       * stays a free-text field, so a preset is a starting point rather than
+       * a constraint — actual fills vary (LP steels are routinely filled past
+       * their rating).
+       */
+      const presetWrap = document.createElement('div');
+      presetWrap.className = 'pp-cyl-preset';
+      const presetBtn = document.createElement('button');
+      presetBtn.type = 'button'; presetBtn.className = 'pp-cyl-preset-btn';
+      presetBtn.textContent = '▾'; presetBtn.title = 'Pick a common cylinder';
+      const presetList = document.createElement('div');
+      presetList.className = 'pp-cyl-preset-list'; presetList.hidden = true;
+      (cfg.CYLINDERS || []).forEach((spec) => {
+        const opt = document.createElement('button');
+        opt.type = 'button'; opt.className = 'pp-cyl-preset-opt';
+        opt.textContent = spec.name + ' · ' + spec.totalCuft + ' cuft @ ' + spec.startPsi;
+        opt.addEventListener('click', () => {
+          cyl.name = spec.name;
+          cyl.totalCuft = spec.totalCuft;
+          cyl.startPsi = spec.startPsi;
+          presetList.hidden = true;
+          renderCylinders(); renderPaths();
+          say('Gas source set to ' + spec.name);
+        });
+        presetList.appendChild(opt);
+      });
+      presetBtn.addEventListener('click', () => {
+        // one open at a time
+        host.querySelectorAll('.pp-cyl-preset-list').forEach((l) => { if (l !== presetList) l.hidden = true; });
+        presetList.hidden = !presetList.hidden;
+      });
+      presetWrap.appendChild(presetBtn); presetWrap.appendChild(presetList);
+      head.appendChild(presetWrap);
+
       // the last cylinder cannot be removed — legs must have somewhere to draw from
       if (cylinders().length > 1) {
         const del = document.createElement('button');
@@ -2647,10 +2683,14 @@
       }
       card.appendChild(head);
 
-      card.appendChild(numField('Total cuft', cyl.totalCuft, 1, 'Rated volume of the cylinder',
+      // capacity and fill read as one fact about the cylinder, so they pair up
+      const spec = document.createElement('div');
+      spec.className = 'pp-cyl-spec';
+      spec.appendChild(numField('cuft', cyl.totalCuft, 1, 'Rated volume of the cylinder',
         (v) => { cyl.totalCuft = v; }));
-      card.appendChild(numField('Start ' + pressU().label, cyl.startPsi, 0, 'Pressure it is filled to',
+      spec.appendChild(numField(pressU().label, cyl.startPsi, 0, 'Pressure it is filled to',
         (v) => { cyl.startPsi = v; }));
+      card.appendChild(spec);
 
       // reserve: by volume, by pressure, or both — the larger wins (see reserveCuft)
       const resVol = document.createElement('div');

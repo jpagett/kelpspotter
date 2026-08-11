@@ -43,9 +43,15 @@ const DemoEngine = (function () {
     const end = Date.parse(endISO + 'T00:00:00Z');
     if (!(start <= end)) return [];
     const step = CADENCE * DAY;
-    const out = [];
     let t = EPOCH + Math.ceil((start - EPOCH) / step) * step;
-    for (; t <= end && out.length < MAX_SCENES; t += step) {
+    // When the range holds more passes than the cap, keep the most RECENT
+    // ones: the dates a user actually works with (and the default window)
+    // sit at the end of the range, so filling oldest-first dropped exactly
+    // the passes they were looking at.
+    const total = Math.floor((end - t) / step) + 1;
+    if (total > MAX_SCENES) t += (total - MAX_SCENES) * step;
+    const out = [];
+    for (; t <= end; t += step) {
       const d = new Date(t).toISOString().slice(0, 10);
       // one decimal, matching the precision of the real CLOUDY_PIXEL_PERCENTAGE
       out.push({ id: 'demo_' + d, date: d, cloud: Math.round(Math.pow(rand(dateSeed(d)), 1.7) * 850) / 10 });

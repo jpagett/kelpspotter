@@ -44,7 +44,13 @@ ALLOWED_ORIGINS = [
 # anyone run a global computation against this project's quota.
 AOI = [-120.55, 34.30, -119.45, 34.55]
 
-MAX_RANGE_DAYS = 400          # a composite over more than this is refused
+# Generous bound: the whole Sentinel-2 archive (2015->now) fits, so any range a
+# user can actually pick works — including archive-wide composites, which the
+# paper itself ran. The guard only exists to refuse nonsense (e.g. year 9999)
+# before it reaches Earth Engine. Note /scenes shares this validator with
+# /layer: when it was 400, a wide-but-valid range failed at the *scene listing*
+# step and surfaced client-side as a bogus "no passes under N% cloud".
+MAX_RANGE_DAYS = 4500
 MAPID_TTL_SECONDS = 30 * 60   # minted ids are ephemeral; re-mint after this
 SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)

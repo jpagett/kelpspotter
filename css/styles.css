@@ -693,6 +693,21 @@ input[type=range]::-moz-range-thumb {
 }
 .path-hover-label::before { display: none; }   /* no tooltip arrow — the dot is the anchor */
 
+/* node coordinate editor — hover a node handle to open */
+.node-coord-popup .leaflet-popup-content-wrapper {
+  background: var(--deep); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
+}
+.node-coord-popup .leaflet-popup-content { margin: 6px 7px; }
+.node-coord-popup .leaflet-popup-tip { background: var(--deep); }
+.node-coord input {
+  width: 210px; background: var(--current); color: var(--foam);
+  border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 11px; padding: 3px 6px;
+}
+.node-coord input:focus-visible { outline: 2px solid var(--kelp-hot); outline-offset: 1px; }
+
 /* draggable node handles */
 .path-node span {
   display: block; width: 11px; height: 11px; border-radius: 50%;

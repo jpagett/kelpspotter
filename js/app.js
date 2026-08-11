@@ -370,14 +370,19 @@
     return out;
   }
 
+  let sceneLoadFailed = false;
   async function loadScenes() {
     const [start, end] = dateRangeISO();
+    sceneLoadFailed = false;
     try { state.allScenes = await fetchAllScenes(start, end); }
     catch (err) {
       console.warn(err);
       state.allScenes = [];
-      say('Scene listing failed — see console', 'warn');
-      toast('Could not list scenes — check the console.', true);
+      sceneLoadFailed = true;
+      // carry the actual reason forward — a range refused by the backend used
+      // to surface as a bogus "no passes under N% cloud" ceiling complaint
+      say('Scene listing failed — ' + (err && err.message ? err.message : 'see console'), 'warn');
+      toast('Could not list scenes — ' + (err && err.message ? err.message : 'check the console.'), true);
     }
     applyCloudCeiling();
   }
@@ -399,8 +404,18 @@
       $('date-big').textContent = '—';
       $('date-meta').textContent = 'no clear scenes';
       renderCalendar();
-      say('No passes at or under ' + state.params.maxCloud + '% cloud', 'warn');
-      toast('No scenes under ' + state.params.maxCloud + '% cloud. Raise the ceiling.', true);
+      /*
+       * Say what actually happened. Only blame the cloud ceiling when the
+       * ceiling is what filtered everything out — an empty or failed listing
+       * has nothing to do with it, and "raise the ceiling" is a dead end there.
+       */
+      if (!sceneLoadFailed && (state.allScenes || []).length) {
+        say('No passes at or under ' + state.params.maxCloud + '% cloud', 'warn');
+        toast('No scenes under ' + state.params.maxCloud + '% cloud. Raise the ceiling.', true);
+      } else if (!sceneLoadFailed) {
+        say('No passes found in this date range', 'warn');
+        toast('No passes found in this date range.', true);
+      } // on a failed listing, loadScenes already reported the real reason
       clearLayer();
       return;
     }

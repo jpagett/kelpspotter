@@ -69,6 +69,158 @@ const Paths = (function () {
     if (hoverDot) { map.removeLayer(hoverDot); hoverDot = null; }
   }
 
+  /* ---------- GPS coordinate parsing ----------
+   *
+   * Accepts most of the ways people write a position:
+   *   34.4123, -119.8765            decimal degrees (comma/space/semicolon)
+   *   N34.4123 W119.8765           hemisphere prefix or suffix
+   *   34°24.738'N 119°52.59'W      degrees + decimal minutes
+   *   34°24'44.3"N 119°52'35.4"W   degrees minutes seconds (any quote/degree glyphs)
+   *   34 24 44.3 N 119 52 35.4 W   bare DMS
+   *   (34.4123, -119.8765)         parenthesised, e.g. copied from elsewhere
+   *   .../maps/@34.41,-119.87,14z  first two numbers of a maps URL
+   *   -119.8765, 34.4123           lon-lat order, fixed up when unambiguous
+   *
+   * Returns {lat, lng} or null. Minutes/seconds must be < 60; a group with a
+   * second number >= 60 is taken as the start of the other coordinate instead
+   * (that is what distinguishes "34 24 119 52" = two DDM pairs from nonsense).
+   */
+  function parseCoords(text) {
+    if (!text) return null;
+    let t = String(text).toUpperCase()
+      .replace(/\bNORTH\b/g, ' N ').replace(/\bSOUTH\b/g, ' S ')
+      .replace(/\bEAST\b/g, ' E ').replace(/\bWEST\b/g, ' W ')
+      .replace(/[()\[\]{}]/g, ' ')
+      .replace(/[°º]/g, ' ')
+      .replace(/[′’']/g, ' ')
+      .replace(/[″”"]/g, ' ')
+      .replace(/−/g, '-')             // unicode minus
+      .replace(/[;|]/g, ',')
+      .replace(/[A-Z]{2,}/g, ' ')          // drop words (URLs, LAT:, DEG, ...)
+      .replace(/[A-DF-MO-RT-VX-Z]/g, ' '); // drop stray letters except N/S/E/W
+    const tokens = t.match(/[NSEW]|[-+]?\d+(?:\.\d+)?|,/g);
+    if (!tokens) return null;
+
+    // Split the token stream into coordinate groups.
+    const groups = [];
+    let cur = [];
+    const close = () => { if (cur.some((x) => !/[NSEW]/.test(x))) groups.push(cur); cur = []; };
+    const hasNumbers = () => cur.some((x) => !/[NSEW]/.test(x));
+    const hasLetter = () => cur.some((x) => /[NSEW]/.test(x));
+    tokens.forEach((tok) => {
+      if (tok === ',') { close(); return; }
+      if (/[NSEW]/.test(tok)) {
+        // a letter closes a numbered group (suffix) unless the group already
+        // carries its letter as a prefix — then this one starts the next group
+        if (hasNumbers() && !hasLetter()) { cur.push(tok); close(); }
+        else if (hasNumbers()) { close(); cur.push(tok); }
+        else cur.push(tok);
+        return;
+      }
+      // number: a value that cannot be minutes/seconds starts the next group
+      if (hasNumbers() && Math.abs(parseFloat(tok)) >= 60) close();
+      cur.push(tok);
+    });
+    close();
+
+    // One undelimited run of 2/4/6 numbers splits evenly into the two halves.
+    if (groups.length === 1 && !groups[0].some((x) => /[NSEW]/.test(x))) {
+      const nums = groups[0];
+      if (nums.length === 2 || nums.length === 4 || nums.length === 6) {
+        groups[0] = nums.slice(0, nums.length / 2);
+        groups.push(nums.slice(nums.length / 2));
+      }
+    }
+    if (groups.length < 2) return null;
+
+    function parseGroup(g) {
+      const letter = g.find((x) => /^[NSEW]$/.test(x)) || null;
+      const nums = g.filter((x) => !/^[NSEW]$/.test(x)).map(parseFloat).slice(0, 3);
+      if (!nums.length || nums.some((n) => !isFinite(n))) return null;
+      const [d, m, s] = [nums[0], nums[1] || 0, nums[2] || 0];
+      if (m < 0 || m >= 60 || s < 0 || s >= 60) return null;
+      const neg = d < 0 || letter === 'S' || letter === 'W';
+      const value = (Math.abs(d) + m / 60 + s / 3600) * (neg ? -1 : 1);
+      return { value: value, axis: letter === 'N' || letter === 'S' ? 'lat' : (letter ? 'lng' : null) };
+    }
+    const a = parseGroup(groups[0]), b = parseGroup(groups[1]);
+    if (!a || !b) return null;
+
+    let lat, lng;
+    if (a.axis === 'lat' || b.axis === 'lng') { lat = a.value; lng = b.value; }
+    else if (a.axis === 'lng' || b.axis === 'lat') { lng = a.value; lat = b.value; }
+    else { lat = a.value; lng = b.value; }
+    // no hemisphere hints and an impossible latitude: assume lon-lat order
+    if (!a.axis && !b.axis && Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+      const swap = lat; lat = lng; lng = swap;
+    }
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    return { lat: lat, lng: lng };
+  }
+
+  /* ---------- node coordinate editor ----------
+   * Hovering a node opens a small editor with its position; typing or pasting
+   * a new position (any format parseCoords accepts) moves the node there.
+   */
+  let nodePopup = null, nodeCloseTimer = null;
+
+  function closeNodeEditor() {
+    if (nodeCloseTimer) { clearTimeout(nodeCloseTimer); nodeCloseTimer = null; }
+    if (nodePopup) { map.closePopup(nodePopup); nodePopup = null; }
+  }
+
+  function scheduleNodeEditorClose() {
+    if (nodeCloseTimer) clearTimeout(nodeCloseTimer);
+    nodeCloseTimer = setTimeout(() => {
+      const el = nodePopup && nodePopup.getElement();
+      if (el && el.matches(':hover')) { scheduleNodeEditorClose(); return; }   // still in use
+      closeNodeEditor();
+    }, 450);
+  }
+
+  function showNodeEditor(p, i) {
+    closeNodeEditor();
+    const ll = p.nodes[i];
+    const wrap = document.createElement('div');
+    wrap.className = 'node-coord';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6);
+    input.title = 'Edit or paste coordinates — decimal, DDM and DMS all work';
+    input.setAttribute('aria-label', 'Node ' + (i + 1) + ' coordinates');
+    const apply = () => {
+      const got = parseCoords(input.value);
+      if (!got) { toast('Could not read those coordinates.', true); return; }
+      p.nodes[i] = L.latLng(got.lat, got.lng);
+      p.profile = null;
+      closeNodeEditor();
+      redraw(p);
+      refreshProfile(p);
+      onChange();
+      say('Node ' + (i + 1) + ' moved to ' + got.lat.toFixed(5) + ', ' + got.lng.toFixed(5));
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') apply();
+      else if (ev.key === 'Escape') closeNodeEditor();
+      ev.stopPropagation();   // Enter/Escape here must not finish path drawing
+    });
+    // a pasted position that already parses applies immediately — no Enter needed
+    input.addEventListener('paste', () => {
+      setTimeout(() => { if (parseCoords(input.value)) apply(); }, 0);
+    });
+    wrap.appendChild(input);
+    nodePopup = L.popup({
+      className: 'node-coord-popup', closeButton: false,
+      closeOnClick: true, offset: [0, -8], autoPan: false
+    }).setLatLng(ll).setContent(wrap);
+    nodePopup.openOn(map);
+    const el = nodePopup.getElement();
+    if (el) {
+      el.addEventListener('mouseleave', scheduleNodeEditorClose);
+      el.addEventListener('mouseenter', () => { if (nodeCloseTimer) clearTimeout(nodeCloseTimer); });
+    }
+  }
+
   /* ---------- geometry ---------- */
 
   function redraw(p) {
@@ -102,6 +254,9 @@ const Paths = (function () {
       });
       m.on('dragend', () => { p.profile = null; refreshProfile(p); });
       m.on('contextmenu', () => removeNode(p, i));
+      m.on('mouseover', () => showNodeEditor(p, i));
+      m.on('mouseout', scheduleNodeEditorClose);
+      m.on('dragstart', closeNodeEditor);
       m.addTo(map);
       p.markers.push(m);
     });
@@ -338,6 +493,7 @@ const Paths = (function () {
     lengthOf: lengthOf,
     hoverAt: hoverAt,
     hoverOff: hoverOff,
+    parseCoords: parseCoords,
     get list() { return paths; },
     get selectedId() { return selectedId; },
     get drawing() { return !!drawing; }

@@ -963,6 +963,34 @@ const Paths = (function () {
     onChange();
   }
 
+  /*
+   * Re-enter draw mode on an EXISTING path, appending new nodes after its
+   * last one — startDrawing() only ever begins a brand new path, so a
+   * finished path had no way back into the click-to-extend flow short of
+   * dragging the endpoint node repeatedly. Shares onMapClick/finishDrawing
+   * with fresh drawing: both just push onto `drawing.nodes`.
+   */
+  function resumeDrawing(id) {
+    if (drawing) {
+      const wasThis = drawing.id === id;
+      finishDrawing();
+      if (wasThis) return;   // same path's button toggles it back off
+    }
+    const p = paths.find((q) => q.id === id);
+    if (!p) return;
+    // a mirrored path's nodes already carry the out-and-back leg baked in;
+    // appending past that end would extend the return leg, not the outbound
+    // one, so drop the pairing first — same rule insertNodeAt follows
+    if (p.mirrored) { p.mirrored = false; p.preMirrorNodes = null; }
+    collapseOthers(p.id);
+    p.expanded = true;
+    selectedId = p.id;
+    drawing = p;
+    map.getContainer().classList.add('drawing');
+    say('Draw mode — click the map to add nodes after the last one, Esc or ✓ to finish');
+    onChange();
+  }
+
   function onMapClick(ev) {
     /*
      * Ctrl (or Cmd) + click starts a path and drops its first node in one go,
@@ -1310,6 +1338,7 @@ const Paths = (function () {
     duplicate: duplicatePath,
     startDrawing: startDrawing,
     finishDrawing: finishDrawing,
+    resumeDrawing: resumeDrawing,
     select: select,
     rename: rename,
     toggleExpand: toggleExpand,
@@ -1332,7 +1361,11 @@ const Paths = (function () {
     parseCoords: parseCoords,
     get list() { return paths; },
     get selectedId() { return selectedId; },
-    get drawing() { return !!drawing; }
+    get drawing() { return !!drawing; },
+    // which path is being drawn/extended, or null — drawing above is
+    // deliberately just a boolean everywhere else, but a per-row "is THIS
+    // the one" button needs the id
+    get drawingId() { return drawing ? drawing.id : null; }
   };
 })();
 

@@ -476,6 +476,16 @@ input[type=range]::-moz-range-thumb {
 .legend-swatch[aria-pressed="true"] { border-color: var(--kelp); box-shadow: 0 0 0 1px var(--kelp); }
 
 /*
+ * depth colormap: same swatch look, in a row, small enough to sit inline
+ * with the eyebrow rather than behind a hover flyout. inline-flex (not
+ * flex) on purpose — .legend is a block on the mobile sheet, not a flex
+ * row, and a block-level flex container there stretches to the sheet's
+ * full width by default; inline-flex sizes to content either way.
+ */
+.depth-swatches { display: inline-flex; flex-direction: row; gap: 5px; flex: none; }
+.legend-swatch.sq { width: 20px; height: 16px; }
+
+/*
  * Range bar: the live colormap drawn bottom-to-top (dark end at the bottom,
  * matching the horizontal legend's Low->High), with two grips bounding the
  * slice actually used. Full range by default.
@@ -1138,8 +1148,21 @@ input[type=range]::-moz-range-thumb {
   border-color: var(--tide-dim) !important; font-family: var(--mono); font-size: 9px;
 }
 @media (max-width: 820px) {
-  /* keep it clear of the tab bar */
-  .leaflet-bottom.leaflet-left { bottom: 4px; }
+  /*
+   * The bottom-left corner is where it sits on desktop, but on a phone that's
+   * also where an open sheet's grab handle lands, and the tab bar crowds it
+   * from below. Detach it from Leaflet's own corner layout (position: fixed,
+   * not the inherited absolute-in-corner-box) and pin it top-right instead,
+   * clear of both the tab bar and the bottom-right zoom/locate/overlay
+   * cluster. It can still sit under the sign-in banner when that is showing
+   * (dismissible, and both are small enough that the overlap reads fine).
+   */
+  .leaflet-control-scale {
+    position: fixed !important; z-index: 800;
+    top: calc(var(--header-h) + 8px) !important; right: 8px !important;
+    left: auto !important; bottom: auto !important; margin: 0 !important;
+  }
+  .leaflet-control-scale-line { font-size: 8px; padding: 1px 4px; }
 }
 
 /* offline chip in the header */
@@ -1588,13 +1611,41 @@ input[type=range]::-moz-range-thumb {
   .node-coord-del { min-width: 44px; min-height: 44px; font-size: 18px; }
   input[type=range] { height: 26px; }
 
-  /* ---- the sign-in notice was running off-screen; make it a full-width strip */
+  /*
+   * ---- the sign-in notice was running off-screen; make it a full-width strip ----
+   * Pushed down clear of the scale control's row (below): full width would
+   * otherwise run directly under the header at the same top offset the scale
+   * control uses, and on a first visit — the exact case this banner is for —
+   * it would sit on top of the scale control and steal its corner.
+   */
   .signin-notice {
     left: 8px !important; right: 8px !important; transform: none !important;
     width: auto !important; max-width: none !important;
-    top: calc(var(--header-h) + 8px) !important; bottom: auto !important;
+    top: calc(var(--header-h) + 40px) !important; bottom: auto !important;
   }
   .signin-cta { font-size: 11px; line-height: 1.35; text-align: left; }
+
+  /*
+   * The map's own chrome (attribution, popups, scale) at the desktop 12px
+   * base reads oversized against everything else on a phone-width map — drop
+   * it a size. Explicit-font-size children (the node coordinate editor's
+   * inputs, sized up for a thumb) are unaffected since they don't inherit.
+   */
+  .leaflet-container { font-size: 10px; }
+  .leaflet-control-attribution { font-size: 8px !important; }
+
+  /*
+   * Notifications popped up bottom-centre, where they sat on top of the
+   * bottom-right zoom/locate/overlay cluster on narrow screens. Moved under
+   * the header — but true centre still reaches into the scale control's
+   * corner on a message long enough to push past ~187px either side of
+   * centre, so this is left-aligned with a fixed clearance on the right
+   * instead of centred, rather than trusting message length to stay short.
+   */
+  .toast {
+    top: calc(var(--header-h) + 8px); bottom: auto;
+    left: 8px; right: 115px; transform: none; max-width: none;
+  }
 
   /* the cursor readout is hover-driven and meaningless on touch */
   .depth-probe { display: none !important; }

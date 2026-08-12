@@ -25,7 +25,7 @@ const Session = (function () {
   const VIEW_KEYS = [
     'indexType', 'kelpThresh', 'maxCloud', 'opacity', 'kelpPalette',
     'paletteMin', 'paletteMax', 'mode', 'overlayOrder', 'dockWidth',
-    'showRelief', 'showContours', 'depthOpacity', 'trueColorOpacity'
+    'showRelief', 'showContours', 'depthStyle', 'depthOpacity', 'trueColorOpacity'
   ];
   const USER_KEYS = [
     'sac', 'sacUnit', 'speed', 'speedUnit', 'time', 'timeMode', 'showGas',

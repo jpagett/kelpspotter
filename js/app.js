@@ -135,6 +135,13 @@
     contours: { cfgKey: 'contours', pane: 'contour', label: 'NOAA depth contours', layer: null }
   };
 
+  // the relief WMS layer name for whichever colormap is currently selected
+  function reliefLayerName() {
+    const styles = cfg.DEPTH.reliefStyles || {};
+    const style = styles[state.params.depthStyle] || styles.blue;
+    return style ? style.layers : cfg.DEPTH.relief.layers;
+  }
+
   function setDepthLayer(key, on) {
     const rec = DEPTH_LAYERS[key];
     const pane = map.getPane(rec.pane);
@@ -158,7 +165,8 @@
       busy(false);
     };
     rec.layer = L.tileLayer.wms(src.url, Object.assign({
-      layers: src.layers, format: 'image/png', transparent: true,
+      layers: key === 'relief' ? reliefLayerName() : src.layers,
+      format: 'image/png', transparent: true,
       version: '1.1.1', attribution: src.attribution, pane: rec.pane,
       opacity: state.params.depthOpacity
     }, cfg.DEPTH.tuning));
@@ -1605,6 +1613,39 @@
   updateLegendRamp();
 
   /*
+   * ---- depth colormap picker ----
+   * Small, always-visible swatches next to the Kelp ones — there is no range
+   * to restrict (NOAA ships each style as one fixed rendering), so this skips
+   * the hover flyout and range bar entirely and just swaps which of the two
+   * relief styles is requested from NOAA.
+   */
+  function setDepthStyle(key) {
+    if (!(cfg.DEPTH.reliefStyles || {})[key] || key === state.params.depthStyle) return;
+    state.params.depthStyle = key;
+    $('depth-swatches').querySelectorAll('.legend-swatch').forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.depthStyle === key ? 'true' : 'false');
+    });
+    // redraw in place if the relief layer is already built; nothing to do
+    // otherwise — setDepthLayer picks up the new style next time it's built
+    if (DEPTH_LAYERS.relief.layer && DEPTH_LAYERS.relief.layer.setParams) {
+      DEPTH_LAYERS.relief.layer.setParams({ layers: reliefLayerName() });
+    }
+    say('Depth colormap: ' + cfg.DEPTH.reliefStyles[key].label);
+  }
+  Object.keys(cfg.DEPTH.reliefStyles || {}).forEach((key) => {
+    const style = cfg.DEPTH.reliefStyles[key];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'legend-swatch sq';
+    btn.dataset.depthStyle = key;
+    btn.title = style.label;
+    btn.setAttribute('aria-pressed', key === state.params.depthStyle ? 'true' : 'false');
+    btn.style.background = gradient(style.swatch, 90);
+    btn.addEventListener('click', () => setDepthStyle(key));
+    $('depth-swatches').appendChild(btn);
+  });
+
+  /*
    * ---- custom contours: draggable depth ruler ----
    * A horizontal 0-200 ft ruler replaces the old numeric input. Click the bare
    * line to trace a new contour there; drag an existing marker to retarget it
@@ -3033,6 +3074,16 @@
       nodesBtn.setAttribute('aria-pressed', p.showNodes ? 'true' : 'false');
       nodesBtn.addEventListener('click', () => Paths.toggleShowNodes(p.id));
 
+      // re-enter draw mode on THIS path — click the map to append nodes
+      // after the last one, same click-to-extend flow as a brand new path
+      const drawingThis = Paths.drawingId === p.id;
+      const extendBtn = document.createElement('button');
+      extendBtn.className = 'pp-mirror'; extendBtn.type = 'button';
+      extendBtn.textContent = drawingThis ? '✓' : '+';
+      extendBtn.title = drawingThis ? 'Finish adding nodes' : 'Continue drawing — add nodes after the last one';
+      extendBtn.setAttribute('aria-pressed', drawingThis ? 'true' : 'false');
+      extendBtn.addEventListener('click', () => Paths.resumeDrawing(p.id));
+
       const cog = document.createElement('button');
       cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
 
@@ -3096,7 +3147,7 @@
 
       caret.classList.add('pp-caret-big');   // primary affordance: open the plot
       row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
-      row.appendChild(mirror); row.appendChild(nodesBtn);
+      row.appendChild(mirror); row.appendChild(nodesBtn); row.appendChild(extendBtn);
       row.appendChild(cog); row.appendChild(caret);
       item.appendChild(row); item.appendChild(menu);
 
@@ -3999,6 +4050,15 @@
         $('contours').checked = !!state.params.showContours;
         setDepthLayer('relief', !!state.params.showRelief);
         setDepthLayer('contours', !!state.params.showContours);
+        // setDepthLayer only builds a fresh layer when none exists yet, so an
+        // imported depthStyle needs its own push onto an already-built relief
+        // layer, same as the picker's own click handler does
+        if (DEPTH_LAYERS.relief.layer && DEPTH_LAYERS.relief.layer.setParams) {
+          DEPTH_LAYERS.relief.layer.setParams({ layers: reliefLayerName() });
+        }
+        document.querySelectorAll('#depth-swatches .legend-swatch').forEach((b) => {
+          b.setAttribute('aria-pressed', b.dataset.depthStyle === state.params.depthStyle ? 'true' : 'false');
+        });
         syncOverlayPicker();
         syncGasBar();          // SAC, speed/time, declination, kick distance
         renderCylinders && renderCylinders();

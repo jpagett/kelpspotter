@@ -93,6 +93,21 @@ window.KELP_CONFIG = {
       attribution: 'Depth: NOAA NCEI DEM global mosaic'
     },
     /*
+     * The relief service's own GetCapabilities lists exactly two colored
+     * renderers (a third, "None", turns out to be a flat mid-grey — not a
+     * usable colormap, so it is left out). Both are the same hillshade,
+     * recoloured; `swatch` is a 2-stop approximation of each for the legend
+     * picker, sampled from actual tile output rather than guessed, since
+     * NOAA bakes shading and colour together and there is no ramp to read
+     * programmatically.
+     */
+    reliefStyles: {
+      blue:  { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Blue',
+               swatch: ['0c253d', '4f83b2'] },
+      slate: { layers: 'DEM_global_mosaic:ColorHillshade2', label: 'Slate',
+               swatch: ['08233e', '407cad'] }
+    },
+    /*
      * Charted depth contours from NOAA's ENC (Electronic Navigational Chart)
      * coastal service. WMS layer 95 is Coastal.Depth_Contour_line — note the WMS
      * numbering is NOT the same as the REST layer ids (there it is layer 82).
@@ -212,6 +227,7 @@ window.KELP_CONFIG = {
     pressureUnit: 'psi',    // 'psi' | 'bar'
     showRelief: true,       // NOAA shaded-relief depth overlay
     showContours: true,     // NOAA ENC charted depth contours
+    depthStyle: 'blue',      // key into DEPTH.reliefStyles
     depthOpacity: 0.45,     // kept well under 1 so the kelp layer still reads over it
     // The real view is the default: true colour is on at load, and the kelp
     // overlay rides on top of it independently.

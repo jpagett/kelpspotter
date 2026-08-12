@@ -43,6 +43,7 @@ const POI = (function () {
   let items = [];          // {id,name,desc,lat,lng,symbol,visible,marker}
   let shapes = [];         // non-point geometry, drawn but not listed
   let nextId = 1;
+  let filterText = '';     // live text of the panel's filter box
 
   function init(config, leaflet, leafletMap, logger, toaster) {
     cfg = config; L = leaflet; map = leafletMap;
@@ -161,6 +162,51 @@ const POI = (function () {
     return { points, lines, polys };
   }
 
+  /* ------------------------------------------------------------ GPX parsing */
+
+  /*
+   * GPX is the other file every mapping app exports — dive computers, Garmin
+   * units, phone GPS loggers. Same shape as the KML result so both formats
+   * flow through one import path: <wpt> are points, <trk>/<rte> draw as lines.
+   * Coordinates are attributes (lat/lon) rather than a text blob, and the
+   * usual metadata lives in <name>/<desc>/<cmt>/<sym>/<type>.
+   */
+  function parseGpx(text) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('malformed GPX');
+
+    const points = [], lines = [], polys = [];
+    const coordOf = (el) => {
+      const lat = parseFloat(el.getAttribute('lat'));
+      const lng = parseFloat(el.getAttribute('lon'));
+      return (isFinite(lat) && isFinite(lng)) ? [lat, lng] : null;
+    };
+
+    for (const wpt of doc.getElementsByTagName('wpt')) {
+      const c = coordOf(wpt);
+      if (!c) continue;
+      const name = textOf(wpt, 'name') || 'Unnamed';
+      const desc = textOf(wpt, 'desc') || textOf(wpt, 'cmt');
+      const hay = [name, desc, textOf(wpt, 'sym'), textOf(wpt, 'type')].join(' ');
+      points.push({ name, desc, folder: '', lat: c[0], lng: c[1], symbol: guessSymbol(hay) });
+    }
+
+    // tracks (recorded) and routes (planned) both draw as context lines;
+    // a track's segments stay separate so gaps in the recording stay gaps
+    for (const trk of doc.getElementsByTagName('trk')) {
+      const name = textOf(trk, 'name') || 'Track';
+      for (const seg of trk.getElementsByTagName('trkseg')) {
+        const coords = Array.from(seg.getElementsByTagName('trkpt')).map(coordOf).filter(Boolean);
+        if (coords.length > 1) lines.push({ name, coords });
+      }
+    }
+    for (const rte of doc.getElementsByTagName('rte')) {
+      const coords = Array.from(rte.getElementsByTagName('rtept')).map(coordOf).filter(Boolean);
+      if (coords.length > 1) lines.push({ name: textOf(rte, 'name') || 'Route', coords });
+    }
+    return { points, lines, polys };
+  }
+
   /* ---------------------------------------------------------------- markers */
 
   function iconFor(symbol) {
@@ -249,7 +295,7 @@ const POI = (function () {
       let text;
       if (/\.kmz$/i.test(file.name)) text = await unzipFirstKml(await file.arrayBuffer());
       else text = await file.text();
-      const parsed = parseKml(text);
+      const parsed = /\.gpx$/i.test(file.name) ? parseGpx(text) : parseKml(text);
       /*
        * Placemarks go through the same diff review the session importer uses:
        * additions and changes ticked, merge by default, overwrite (removals)
@@ -270,7 +316,7 @@ const POI = (function () {
     } catch (err) {
       console.warn(err);
       toast('Could not read that file — ' + err.message, true);
-      say('KML import failed — ' + err.message, 'warn');
+      say('Import failed — ' + err.message, 'warn');
     }
   }
 
@@ -319,18 +365,35 @@ const POI = (function () {
     say('Points of interest cleared');
   }
 
+  // does this record match the panel filter? name, description, symbol label
+  // and charted depth are all searchable ("wreck", "80 ft", "anacapa"…)
+  function matchesFilter(rec) {
+    if (!filterText) return true;
+    const hay = [rec.name, rec.desc,
+      (SYMBOLS[rec.symbol] || SYMBOLS.marker).label,
+      (typeof rec.depthFt === 'number' && rec.depthFt > 0) ? rec.depthFt + ' ft' : ''
+    ].join(' ').toLowerCase();
+    return filterText.split(/\s+/).every((w) => hay.includes(w));
+  }
+
   function render() {
     const box = document.getElementById('poi-list');
     const note = document.getElementById('poi-note');
+    const search = document.getElementById('poi-search');
     if (!box) return;
     box.textContent = '';
+    // the filter box only appears once the list is long enough to need one
+    if (search) search.hidden = items.length < 6 && !filterText;
     if (!items.length) {
       note.textContent = 'No points yet — import a KML from the ⚙ menu.';
       return;
     }
-    note.textContent = items.length + ' point' + (items.length === 1 ? '' : 's') +
-                       ' · tap one to jump to it';
-    items.forEach((rec) => {
+    const shown = items.filter(matchesFilter);
+    note.textContent = (filterText
+      ? shown.length + ' of ' + items.length + ' point' + (items.length === 1 ? '' : 's')
+      : items.length + ' point' + (items.length === 1 ? '' : 's')) +
+      ' · tap one to jump to it';
+    shown.forEach((rec) => {
       const row = document.createElement('div');
       row.className = 'poi-item' + (rec.visible ? '' : ' off');
 
@@ -405,6 +468,11 @@ const POI = (function () {
     });
     const clr = document.getElementById('poi-clear');
     if (clr) clr.addEventListener('click', clearAll);
+    const search = document.getElementById('poi-search');
+    if (search) search.addEventListener('input', () => {
+      filterText = search.value.trim().toLowerCase();
+      render();
+    });
     const fit = document.getElementById('poi-fit');
     if (fit) fit.addEventListener('click', fitAll);
   }
@@ -471,6 +539,7 @@ const POI = (function () {
     clearAll: clearAll,
     fitAll: fitAll,
     parseKml: parseKml,          // exported for testing
+    parseGpx: parseGpx,
     get list() { return items; },
     SYMBOLS: SYMBOLS
   };

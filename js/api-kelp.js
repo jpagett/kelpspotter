@@ -58,6 +58,14 @@ const ApiKelpEngine = (function () {
         .catch(() => { ready = false; return false; });
     },
 
+    // Trust a previously-healthy backend without re-probing — the boot memo's
+    // fast path. A wrong guess self-corrects on the first failed call.
+    assumeReady(config) {
+      cfg = config;
+      base = cfg.API_URL || '';
+      ready = !!base && base.indexOf('<') !== 0;
+    },
+
     // No sign-in exists for this engine; present for interface parity.
     login() { return Promise.resolve(ready); },
 

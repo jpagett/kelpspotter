@@ -18,7 +18,7 @@
  * API (its answers change with the archive), Google auth, fonts (Google's CDN
  * handles those with proper headers).
  */
-const SHELL = 'kelp-shell-v1';
+const SHELL = 'kelp-shell-v2';
 const NOAA = 'kelp-noaa-v1';
 const NOAA_HOSTS = ['gis.ngdc.noaa.gov', 'gis.charttools.noaa.gov'];
 const NOAA_MAX = 400;
@@ -60,7 +60,14 @@ async function swr(cacheName, request, maxEntries) {
   const cache = await caches.open(cacheName);
   const hit = await cache.match(request, { ignoreSearch: false });
   const refresh = fetch(request).then((res) => {
-    if (res && res.ok) {
+    /*
+     * Opaque responses MUST be cacheable here: Leaflet loads NOAA tiles in
+     * no-cors mode, so res.type is 'opaque' and res.ok is FALSE (status 0)
+     * even on success. The original ok-only check silently caches nothing —
+     * the NOAA cache sat empty from the day it shipped, discovered by a
+     * cache census reading 0 entries after a full tile load.
+     */
+    if (res && (res.ok || res.type === 'opaque')) {
       cache.put(request, res.clone()).then(() => {
         if (maxEntries) trim(cache, maxEntries);
       });

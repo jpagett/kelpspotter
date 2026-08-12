@@ -43,6 +43,7 @@
   // zoomControl:false — replaced by the custom horizontal control in .corner-br
   const map = L.map('map', { zoomControl: false, attributionControl: true })
     .fitBounds([[s, w], [n, e]]);
+  window.__kelpMap = map;   // console/debug handle; nothing in the app uses it
   $('zoom-in').addEventListener('click', () => map.zoomIn());
   $('zoom-out').addEventListener('click', () => map.zoomOut());
   /*
@@ -793,7 +794,15 @@
     busy(true);
     say('Computing ' + state.params.indexType + ' kelp mask · ' + what + '…');
     try {
-      clearLayer();
+      /*
+       * The old layer stays on the map until the new one has something to
+       * show. Clearing first meant every re-run flashed empty water for the
+       * full mint+tile round trip; now the swap happens at the new layer's
+       * first 'load' (with a timeout backstop for layers that never fire it),
+       * and a failed run leaves the previous result on screen instead of
+       * nothing.
+       */
+      const old = state.layer;
       let layer;
       if (composite) {
         const [start, end] = dateRangeISO();
@@ -810,11 +819,24 @@
       state.layer = layer;
       layer.addTo(map);
       if (layer.setOpacity) layer.setOpacity(state.params.opacity);
+      let oldGone = !old;
+      const dropOld = () => {
+        if (oldGone) return;
+        oldGone = true;
+        if (old !== state.layer && map.hasLayer(old)) map.removeLayer(old);
+      };
       // Earth Engine returns tiles that stream in; the demo layer draws immediately.
       if (layer.on && layer.getContainer) {
         let announced = false;
-        layer.on('load', () => { if (!announced) { announced = true; say('Kelp tiles rendered', 'ok'); } });
+        layer.on('load', () => {
+          dropOld();
+          if (!announced) { announced = true; say('Kelp tiles rendered', 'ok'); }
+        });
+        // 'load' never fires if every tile errors (offline, expired mint) —
+        // don't leave a stale layer masquerading as the new result forever
+        setTimeout(dropOld, 8000);
       } else {
+        dropOld();
         say('Kelp layer drawn', 'ok');
       }
       /*
@@ -1858,6 +1880,16 @@
   const pressU = () => PRESSURE_UNITS[state.params.pressureUnit] || PRESSURE_UNITS.psi;
   const cylinders = () => state.params.cylinders || [];
   const cylinderById = (id) => cylinders().find((c) => c.id === id) || cylinders()[0] || null;
+  /*
+   * A stable colour per cylinder, by position in the cylinder list, shared by
+   * the leg table, the per-cylinder budget list and the gas curve on the plot
+   * — so "which tank am I on here?" is answered by colour alone everywhere.
+   */
+  const CYL_COLORS = ['#5ec6c9', '#f2b134', '#c78bd9', '#a6d95b', '#e2725b', '#6fb7bd'];
+  function cylColour(id) {
+    const i = cylinders().findIndex((c) => c.id === id);
+    return i < 0 ? '#9dc3cc' : CYL_COLORS[i % CYL_COLORS.length];
+  }
 
   function reserveCuft(cyl) {
     if (!cyl) return 0;
@@ -2094,6 +2126,10 @@
       cols.forEach((c) => {
         const td = document.createElement('td');
         if (c.key === 'source' && cylinders().length > 1) {
+          const dot = document.createElement('span');
+          dot.className = 'cyl-dot';
+          dot.style.background = cylColour(r.cylId);
+          td.appendChild(dot);
           const sel = document.createElement('select');
           sel.className = 'pp-units';
           cylinders().forEach((cy) => {
@@ -2107,6 +2143,12 @@
             renderLegTable(p, host);      // every budget downstream of this leg shifts
           });
           td.appendChild(sel);
+        } else if (c.key === 'source' && r.cyl) {
+          const dot = document.createElement('span');
+          dot.className = 'cyl-dot';
+          dot.style.background = cylColour(r.cylId);
+          td.appendChild(dot);
+          td.appendChild(document.createTextNode(c.get(r)));
         } else {
           td.textContent = c.get(r);
         }
@@ -2155,11 +2197,15 @@
         const short = left < reserveCuft(cy);
         const line = document.createElement('div');
         line.className = 'legs-budget' + (short ? ' over-budget-cell' : '');
-        line.textContent = left < 0
+        const dot = document.createElement('span');
+        dot.className = 'cyl-dot';
+        dot.style.background = cylColour(cy.id);
+        line.appendChild(dot);
+        line.appendChild(document.createTextNode(left < 0
           ? cy.name + ': SHORT BY ' + (-left).toFixed(1) + ' cuft — needs ' +
             need.toFixed(1) + ' of ' + (cy.totalCuft || 0) + ' available'
           : cy.name + ': ' + left.toFixed(1) + ' cuft left of ' + (cy.totalCuft || 0) +
-            ', reserve ' + reserveCuft(cy).toFixed(1) + (short ? ' — INTO RESERVE' : '');
+            ', reserve ' + reserveCuft(cy).toFixed(1) + (short ? ' — INTO RESERVE' : '')));
         sum.appendChild(line);
       });
       host.appendChild(sum);
@@ -2491,14 +2537,35 @@
       const gp = gasProfile(p);
       if (gp && gp.total > 0) {
         const yG = (cuft) => PADT + (H - PADT - PADB) * (cuft / gp.total);
-        const gline = document.createElementNS(NS, 'polyline');
-        gline.setAttribute('points', gp.points.map((s) => x(s.distance).toFixed(1) + ',' + yG(s.cuft).toFixed(1)).join(' '));
-        gline.setAttribute('fill', 'none');
-        gline.style.stroke = 'var(--foam)';
-        gline.setAttribute('stroke-width', '1');
-        gline.setAttribute('stroke-dasharray', '3 2');
-        gline.setAttribute('opacity', '0.85');
-        svg.appendChild(gline);
+        const rows = legData(p);
+        const cum = Paths.nodeDistances(p);
+        const multiCyl = new Set(rows.map((r) => r.cylId)).size > 1;
+        const drawGas = (samples, colour) => {
+          if (samples.length < 2) return;
+          const gl = document.createElementNS(NS, 'polyline');
+          gl.setAttribute('points', samples.map((s) => x(s.distance).toFixed(1) + ',' + yG(s.cuft).toFixed(1)).join(' '));
+          gl.setAttribute('fill', 'none');
+          if (colour) gl.setAttribute('stroke', colour);
+          else gl.style.stroke = 'var(--foam)';
+          gl.setAttribute('stroke-width', multiCyl ? '1.4' : '1');
+          gl.setAttribute('stroke-dasharray', '3 2');
+          gl.setAttribute('opacity', '0.85');
+          svg.appendChild(gl);
+        };
+        if (multiCyl) {
+          /*
+           * More than one cylinder in play: the gas curve takes each leg's
+           * cylinder colour (matching the leg table's swatches), so where the
+           * plan switches tanks is visible on the profile itself.
+           */
+          rows.forEach((r, i) => {
+            const a = cum[i], b = cum[i + 1];
+            const seg = gp.points.filter((s) => s.distance >= a - 1e-6 && s.distance <= b + 1e-6);
+            drawGas(seg, cylColour(r.cylId));
+          });
+        } else {
+          drawGas(gp.points, null);   // single tank keeps the signature foam dash
+        }
 
         const gLabel = document.createElementNS(NS, 'text');
         gLabel.setAttribute('class', 'pp-axis');
@@ -2507,6 +2574,37 @@
         gLabel.setAttribute('text-anchor', 'end');
         gLabel.textContent = gp.total.toFixed(1) + ' cuft';
         svg.appendChild(gLabel);
+
+        /*
+         * Reserve crossing, drawn where it happens. The leg table already
+         * offers "add a node here"; the plot is where the eye actually reads
+         * the dive, so the crossing is marked on it too: an amber line at the
+         * distance where the first cylinder falls to its declared reserve.
+         */
+        const rp = reserveCrossing(p, rows);
+        if (rp && rp.dist <= maxX) {
+          const wl = document.createElementNS(NS, 'line');
+          wl.setAttribute('x1', x(rp.dist).toFixed(1)); wl.setAttribute('x2', x(rp.dist).toFixed(1));
+          wl.setAttribute('y1', PADT); wl.setAttribute('y2', H - PADB);
+          wl.setAttribute('stroke', '#e2725b');
+          wl.setAttribute('stroke-width', '1');
+          wl.setAttribute('stroke-dasharray', '4 3');
+          wl.setAttribute('opacity', '0.9');
+          svg.appendChild(wl);
+          const wt = document.createElementNS(NS, 'text');
+          wt.setAttribute('class', 'pp-axis');
+          wt.setAttribute('fill', '#e2725b');
+          wt.style.fill = '#e2725b';
+          const wx = x(rp.dist);
+          wt.setAttribute('x', wx < W / 2 ? wx + 3 : wx - 3);
+          wt.setAttribute('text-anchor', wx < W / 2 ? 'start' : 'end');
+          wt.setAttribute('y', H - PADB - 3);
+          wt.textContent = '⚠ reserve';
+          const wtTitle = document.createElementNS(NS, 'title');
+          wtTitle.textContent = rp.cylName + ' falls to its declared reserve at ' + fmtDist(rp.dist);
+          wt.appendChild(wtTitle);
+          svg.appendChild(wt);
+        }
       }
     }
 
@@ -3021,7 +3119,23 @@
 
         const svg = profileSvg(p, pxWidth);
         if (svg) wrap.appendChild(svg);
-        else {
+        else if (p.nodes.length >= 2 && p.profileLoading) {
+          /*
+           * Skeleton plot while alongPath is in flight — same height the real
+           * plot will take (so nothing jumps when it lands), with a shimmer
+           * and a placeholder waveline instead of a bare text row.
+           */
+          const skel = document.createElement('div');
+          skel.className = 'pp-skel';
+          skel.style.height = (p.plotHeightManual
+            ? Math.max(32, Math.round(p.plotHeight) || 62)
+            : Math.round(Math.max(62, Math.min(240, pxWidth / 3.2)))) + 'px';
+          skel.innerHTML = '<svg viewBox="0 0 100 32" preserveAspectRatio="none">' +
+            '<path d="M0 8 C 15 26, 30 12, 45 20 S 75 28, 100 14" fill="none" ' +
+            'stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>' +
+            '<span>Reading depth…</span>';
+          wrap.appendChild(skel);
+        } else {
           const t = document.createElement('div');
           t.className = 'hint';
           t.textContent = p.nodes.length < 2 ? 'Add at least two nodes.' : 'Reading depth…';
@@ -3980,6 +4094,62 @@
       navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw skipped:', e));
     }
 
+    /*
+     * NOAA tile warmup. Once the service worker is caching NOAA tiles, the
+     * cheapest time to pay for the zoom levels around the home view is while
+     * a fresh visit sits idle: warm zoom ±1 over the default AOI (a few dozen
+     * tiles) and the first pinch-zoom paints from cache instead of waiting
+     * ~500 ms per tile on NOAA's servers. Skipped for returning visitors
+     * (cache already has depth) and when no worker controls the page (the
+     * fetches would warm nothing — NOAA's cache-control:private makes the
+     * browser's own cache useless).
+     */
+    function warmNoaaTiles() {
+      if (!('caches' in window) || !navigator.serviceWorker ||
+          !navigator.serviceWorker.controller) return;
+      caches.open('kelp-noaa-v1').then((c) => c.keys()).then((keys) => {
+        if (keys.length > 60) return;   // returning visitor — already warm
+        const layers = [DEPTH_LAYERS.relief.layer, DEPTH_LAYERS.contours.layer]
+          .filter((ly) => ly && ly._map);
+        if (!layers.length) return;
+        const urls = [];
+        /*
+         * Zooms are derived from the AOI, not map.getZoom(): the AOI spans a
+         * ~1200 px viewport at z10-11 and a phone at z8-9, so 8..11 covers the
+         * first pinch in or out from any device's home view. (Also sidesteps
+         * environments where the map reports zoom 0 before its first layout.)
+         */
+        const urlsSeen = new Set();
+        [8, 9, 10, 11].forEach((z) => {
+          layers.forEach((ly) => {
+            const size = ly.getTileSize().x;
+            const nw = map.project(L.latLng(n, w), z);
+            const se = map.project(L.latLng(s, e), z);
+            for (let ty = Math.floor(nw.y / size); ty <= Math.floor(se.y / size); ty++) {
+              for (let tx = Math.floor(nw.x / size); tx <= Math.floor(se.x / size); tx++) {
+                const c = L.point(tx, ty); c.z = z;
+                const u = ly.getTileUrl(c);
+                if (!urlsSeen.has(u)) { urlsSeen.add(u); urls.push(u); }
+              }
+            }
+          });
+        });
+        // politeness cap + gentle pacing: NOAA is a shared public service
+        const batch = urls.slice(0, 48);
+        (function next() {
+          const chunk = batch.splice(0, 4);
+          if (!chunk.length) return;
+          Promise.allSettled(chunk.map((u) => fetch(u, { mode: 'no-cors' })))
+            .then(() => setTimeout(next, 250));
+        })();
+      }).catch(() => { /* warmup is never worth an error */ });
+    }
+    setTimeout(() => {
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(warmNoaaTiles, { timeout: 10000 });
+      } else warmNoaaTiles();
+    }, 8000);
+
     say('Starting up…');
     /*
      * Engine preference, best first:
@@ -4000,8 +4170,26 @@
     try {
       if (await withTimeout(KelpEngine.init(cfg), 2500)) {
         engine = KelpEngine;
+      } else if (localStorage.getItem('kelp.apiok') === '1') {
+        /*
+         * The backend answered on a previous visit, so trust it now and
+         * revalidate in the background: awaiting /health at boot cost 4.2s
+         * when Cloud Run was cold-starting, and that wait bought nothing —
+         * if the API has actually died, the first real call fails and the
+         * engine demotes to demo then.
+         */
+        ApiKelpEngine.assumeReady(cfg);
+        engine = ApiKelpEngine;
+        ApiKelpEngine.init(cfg).then((ok) => {
+          try { localStorage.setItem('kelp.apiok', ok ? '1' : '0'); } catch (e) { /* best effort */ }
+          if (!ok && state.engine === ApiKelpEngine) {
+            say('Backend unreachable — switching to demo data', 'warn');
+            DemoEngine.init(cfg, L).then(() => activateEngine(DemoEngine));
+          }
+        });
       } else if (await ApiKelpEngine.init(cfg)) {
         engine = ApiKelpEngine;
+        try { localStorage.setItem('kelp.apiok', '1'); } catch (e) { /* best effort */ }
       }
     } catch (err) { console.warn('engine probe skipped:', err); }
     finally { busy(false); }

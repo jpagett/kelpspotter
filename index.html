@@ -44,7 +44,7 @@
                 title="Settings">⚙</button>
         <div id="settings-list" class="hdr-menu-list" hidden>
           <button id="poi-import" class="menu-action" type="button"
-                  title="Add markers from a KML or KMZ file">Import KML / KMZ…</button>
+                  title="Add markers from a KML, KMZ or GPX file">Import KML / KMZ / GPX…</button>
           <button id="session-export" class="menu-action" type="button"
                   title="Save POIs, paths and settings to a file">Export session…</button>
           <button id="session-import" class="menu-action" type="button"
@@ -285,10 +285,12 @@
       </div>
     </div>
     <div id="poi-body">
+      <input id="poi-search" class="poi-search" type="search" placeholder="Filter points…"
+             aria-label="Filter points of interest" hidden>
       <div id="poi-list" class="poi-list"></div>
       <div id="poi-note" class="hint">No points yet — import a KML from the ⚙ menu.</div>
     </div>
-    <input id="poi-file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
+    <input id="poi-file" type="file" accept=".kml,.kmz,.gpx,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz,application/gpx+xml" hidden>
     <input id="session-file" type="file" accept=".json,application/json" hidden>
   </aside>
 

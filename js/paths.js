@@ -630,10 +630,15 @@ const Paths = (function () {
       remove(p.id);
       return;
     }
+    const gone = p.nodes[i];
+    lastRemoved = { kind: 'node', pathId: p.id, index: i, lat: gone.lat, lng: gone.lng };
     p.nodes.splice(i, 1);
     p.profile = null;
     closeNodeEditor();
     redraw(p); refreshProfile(p);
+    if (Paths.onRemoved) {
+      try { Paths.onRemoved('Node ' + (i + 1) + ' of ' + p.name); } catch (e) { /* ui only */ }
+    }
     onChange();
   }
 
@@ -1008,13 +1013,20 @@ const Paths = (function () {
     if (p.nodes.length < 2) return;
     try {
       say('Reading depth along ' + p.name + '…');
+      // flag + immediate re-render so the panel shows a skeleton plot while
+      // the DEM round trip is in flight, instead of a bare line of text
+      p.profileLoading = true;
+      onChange();
       p.profile = await DemSampler.alongPath(p.nodes, PROFILE_SAMPLES);
+      p.profileLoading = false;
       const deep = p.profile.filter((s) => s.feet !== null);
       say(p.name + ': ' + deep.length + ' depth samples over ' +
           Math.round(lengthOf(p)) + ' m', 'ok');
       onChange();
     } catch (err) {
       console.warn(err);
+      p.profileLoading = false;
+      onChange();   // clear the skeleton — leaving it pulsing forever would lie
       say('Depth profile failed — see console', 'warn');
     }
   }
@@ -1094,12 +1106,24 @@ const Paths = (function () {
 
   // Deleting is now one keypress, so it keeps a way back: the last removed
   // path's full record, resurrectable by undoRemove() until the next delete.
+  // Node deletes share the same single-slot stash (kind-tagged), so one Undo
+  // always reverses the most recent delete of either kind.
   let lastRemoved = null;
   function undoRemove() {
     if (!lastRemoved) return false;
-    const rec = lastRemoved;
+    const stash = lastRemoved;
     lastRemoved = null;
-    restore([rec]);
+    if (stash.kind === 'node') {
+      const p = paths.find((q) => q.id === stash.pathId);
+      if (!p) return false;   // the whole path was deleted since; nothing to graft onto
+      p.nodes.splice(Math.min(stash.index, p.nodes.length), 0,
+                     L.latLng(stash.lat, stash.lng));
+      p.profile = null;
+      redraw(p); refreshProfile(p);
+      onChange();
+      return true;
+    }
+    restore([stash.rec]);
     const p = paths[paths.length - 1];
     if (p) { selectedId = p.id; paths.forEach(redraw); refreshProfile(p); }
     onChange();
@@ -1110,7 +1134,7 @@ const Paths = (function () {
     const i = paths.findIndex((p) => p.id === id);
     if (i < 0) return;
     const p = paths[i];
-    lastRemoved = {
+    lastRemoved = { kind: 'path', rec: {
       name: p.name, color: p.color, mirrored: p.mirrored,
       preMirrorNodes: p.preMirrorNodes
         ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
@@ -1118,7 +1142,7 @@ const Paths = (function () {
       expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
       legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
       nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
-    };
+    } };
     if (Paths.onRemoved) { try { Paths.onRemoved(p.name); } catch (e) { /* ui only */ } }
     if (p.line) map.removeLayer(p.line);
     if (p.hitLine) map.removeLayer(p.hitLine);

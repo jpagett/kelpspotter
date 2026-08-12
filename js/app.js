@@ -1579,12 +1579,12 @@
 
   /*
    * ---- custom contours: draggable depth ruler ----
-   * A horizontal 0-100 ft ruler replaces the old numeric input. Click the bare
+   * A horizontal 0-200 ft ruler replaces the old numeric input. Click the bare
    * line to trace a new contour there; drag an existing marker to retarget it
    * (contour redraw — a DEM resample — only fires on release, not per pixel of
    * drag); click a marker for its colour picker; right-click to remove it.
    */
-  const CC_MAX_FT = 100;
+  const CC_MAX_FT = 200;
 
   function buildContourMarker(it) {
     const ruler = $('cc-ruler');
@@ -1943,6 +1943,43 @@
     return ((trueDeg - (state.params.declination || 0)) % 360 + 360) % 360;
   }
 
+  /*
+   * Where does the first cylinder cross into its reserve? Walk the legs in
+   * order, tracking gas drawn per cylinder; on the leg where a cylinder's
+   * remaining falls past reserve, interpolate the distance at the crossing
+   * and return it with the nearest profile sample's position.
+   */
+  function reserveCrossing(p, rows) {
+    const gp = state.params.showGas ? gasProfile(p) : null;
+    if (!gp) return null;
+    const cum = Paths.nodeDistances(p);
+    const used = {};
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.cyl) continue;
+      const startCuft = gasAt(gp, cum[i]);
+      const endCuft = gasAt(gp, cum[i + 1]);
+      if (startCuft === null || endCuft === null) continue;
+      const spend = endCuft - startCuft;
+      const before = used[r.cylId] || 0;
+      used[r.cylId] = before + spend;
+      const budget = (r.cyl.totalCuft || 0) - reserveCuft(r.cyl);
+      if (before < budget && used[r.cylId] >= budget && spend > 0) {
+        // fraction of this leg's spend at which the budget runs out
+        const frac = (budget - before) / spend;
+        const dist = cum[i] + frac * (cum[i + 1] - cum[i]);
+        const pts = (p.profile || []).filter((sm) => sm.feet !== null);
+        let best = pts[0];
+        pts.forEach((sm) => {
+          if (Math.abs(sm.distance - dist) < Math.abs(best.distance - dist)) best = sm;
+        });
+        if (!best) return null;
+        return { dist: dist, latlng: { lat: best.lat, lng: best.lng }, cylName: r.cyl.name };
+      }
+    }
+    return null;
+  }
+
   function legColumns() {
     const u = depthU();
     const cols = [
@@ -2009,6 +2046,23 @@
 
     const tools = document.createElement('div');
     tools.className = 'legs-tools';
+    /*
+     * If a cylinder falls to its reserve mid-path, offer to drop a node at the
+     * exact crossing so the plan can switch sources there: the new node splits
+     * the leg, and the leg after it can be assigned the next cylinder.
+     */
+    const rp = reserveCrossing(p, rows);
+    if (rp) {
+      const resBtn = document.createElement('button');
+      resBtn.type = 'button'; resBtn.className = 'menu-action reserve-node-btn';
+      resBtn.textContent = '＋ node at reserve (' + fmtDist(rp.dist) + ')';
+      resBtn.title = rp.cylName + ' reaches its reserve here — add a node to switch cylinders';
+      resBtn.addEventListener('click', () => {
+        Paths.insertAt(p.id, rp.latlng);
+        say('Node added where ' + rp.cylName + ' hits reserve — assign the next leg a fresh cylinder');
+      });
+      tools.appendChild(resBtn);
+    }
     const printBtn = document.createElement('button');
     printBtn.type = 'button'; printBtn.className = 'menu-action'; printBtn.textContent = 'Print';
     printBtn.addEventListener('click', () => printLegTable(p));
@@ -2168,7 +2222,15 @@
       ? Math.max(32, Math.round(p.plotHeight) || 62)
       : Math.round(Math.max(62, Math.min(240, W / 3.2)));
     const PADL = 26, PADB = 12, PADT = 4;
-    const maxD = Math.max.apply(null, pts.map((s) => -s.feet));
+    const fullMax = Math.max.apply(null, pts.map((s) => -s.feet));
+    /*
+     * Wheel over the plot zooms the DEPTH axis: shallow structure — the part a
+     * diver actually plans around — is unreadable when one deep sounding sets
+     * the scale. Zoom is per path, capped 8x, double-click resets. Deeper
+     * values clip at the plot edge rather than smearing over the axis labels.
+     */
+    p.depthZoom = Math.max(1, Math.min(8, p.depthZoom || 1));
+    const maxD = fullMax / p.depthZoom;
     const maxX = pts[pts.length - 1].distance || 1;
     const x = (d) => PADL + (W - PADL - 4) * (d / maxX);
     const y = (ft) => PADT + (H - PADT - PADB) * (ft / (maxD || 1));
@@ -2176,7 +2238,27 @@
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-    svg.style.height = H + 'px';   // draggable per path (p.plotHeight) — see the resize handle below
+    svg.style.height = H + 'px';
+
+    // series are clipped to the plot box so zoomed-off depths don't smear
+    const clipId = 'ppclip' + p.id;
+    const defs = document.createElementNS(NS, 'defs');
+    const clip = document.createElementNS(NS, 'clipPath');
+    clip.setAttribute('id', clipId);
+    const cr = document.createElementNS(NS, 'rect');
+    cr.setAttribute('x', 0); cr.setAttribute('y', 0);
+    cr.setAttribute('width', W); cr.setAttribute('height', H - PADB + 1);
+    clip.appendChild(cr); defs.appendChild(clip); svg.appendChild(defs);
+
+    svg.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
+      const next = Math.max(1, Math.min(8, (p.depthZoom || 1) * factor));
+      if (next !== p.depthZoom) { p.depthZoom = next; renderPaths(); }
+    }, { passive: false });
+    svg.addEventListener('dblclick', () => {
+      if ((p.depthZoom || 1) !== 1) { p.depthZoom = 1; renderPaths(); }
+    });   // draggable per path (p.plotHeight) — see the resize handle below
     /*
      * No preserveAspectRatio="none" here (unlike before): since W now matches
      * the container's real width and H matches the CSS height, the viewBox
@@ -2201,6 +2283,7 @@
     area.setAttribute('d', d);
     area.setAttribute('fill', p.color);
     area.setAttribute('fill-opacity', '0.22');
+    area.setAttribute('clip-path', 'url(#' + clipId + ')');
     svg.appendChild(area);
 
     const line = document.createElementNS(NS, 'polyline');
@@ -2208,6 +2291,7 @@
     line.setAttribute('fill', 'none');
     line.setAttribute('stroke', p.color);
     line.setAttribute('stroke-width', '1.4');
+    line.setAttribute('clip-path', 'url(#' + clipId + ')');
     svg.appendChild(line);
 
     /*
@@ -2277,6 +2361,69 @@
         }
       });
       svg.appendChild(grip);
+
+      /*
+       * Endpoint handles: each end of the span is a draggable node. Dragging
+       * moves that end in BOTH axes — x re-scopes the span, y retunes the
+       * bound's depth — and right-clicking an endpoint deletes the bound.
+       */
+      [['start', x1], ['end', x2]].forEach(([which, hx]) => {
+        const h = document.createElementNS(NS, 'circle');
+        h.setAttribute('cx', hx); h.setAttribute('cy', y(bound.feet));
+        h.setAttribute('r', 5);
+        h.setAttribute('class', 'bound-end');
+        h.setAttribute('fill', p.color);
+        h.setAttribute('stroke', '#05161c');
+        h.setAttribute('stroke-width', '1.5');
+        h.style.cursor = 'move';
+        let dragging2 = false;
+        const distFromX = (clientX) => {
+          const r = svg.getBoundingClientRect();
+          const vx = ((clientX - r.left) / r.width) * W;
+          return Math.max(0, Math.min(maxX, ((vx - PADL) / (W - PADL - 4)) * maxX));
+        };
+        h.addEventListener('pointerdown', (ev) => {
+          if (ev.button !== 0) return;
+          dragging2 = true;
+          try { h.setPointerCapture(ev.pointerId); } catch (e) { /* degrade */ }
+          ev.stopPropagation(); ev.preventDefault();
+        });
+        h.addEventListener('pointermove', (ev) => {
+          if (!dragging2) return;
+          h.setAttribute('cx', Math.max(PADL, Math.min(W - 4,
+            ((ev.clientX - svg.getBoundingClientRect().left) / svg.getBoundingClientRect().width) * W)));
+          h.setAttribute('cy', Math.max(PADT, Math.min(H - PADB,
+            ((ev.clientY - svg.getBoundingClientRect().top) / svg.getBoundingClientRect().height) * H)));
+        });
+        h.addEventListener('pointerup', (ev) => {
+          if (!dragging2) return;
+          dragging2 = false;
+          const d = distFromX(ev.clientX);
+          const ft = ftFromY(ev.clientY);
+          const MIN_SPAN = 20;   // metres — a bound needs somewhere to apply
+          if (which === 'start') bound.start = Math.min(d, bound.end - MIN_SPAN);
+          else bound.end = Math.max(d, bound.start + MIN_SPAN);
+          bound.start = Math.max(0, bound.start);
+          bound.end = Math.min(maxX, bound.end);
+          bound.feet = ft;
+          say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' ' + which + ' moved — ' +
+              fmtDist(bound.start) + '→' + fmtDist(bound.end) + ' at ' + fmtDepth(bound.feet));
+          renderPaths();
+          persistNow();
+        });
+        h.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          const list = kind === 'ceiling' ? p.ceilings : p.floors;
+          const i = list.indexOf(bound);
+          if (i >= 0) {
+            list.splice(i, 1);
+            say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' removed from ' + p.name);
+            renderPaths();
+            persistNow();
+          }
+        });
+        svg.appendChild(h);
+      });
     };
     (p.ceilings || []).forEach((c) => addBoundGrip(c, 'ceiling'));
     (p.floors || []).forEach((f) => addBoundGrip(f, 'floor'));
@@ -2293,8 +2440,8 @@
       t.textContent = glyph + Math.round(depthU().from(b.feet));
       svg.appendChild(t);
     };
-    (p.ceilings || []).forEach((c) => tagBound(c, '≤'));
-    (p.floors || []).forEach((f) => tagBound(f, '≥'));
+    (p.floors || []).forEach((f) => tagBound(f, '≤'));     // max depth
+    (p.ceilings || []).forEach((c) => tagBound(c, '≥'));   // min depth
 
     // dotted true bottom, drawn only over the capped stretches
     if ((p.ceilings || []).length || (p.floors || []).length) {
@@ -2320,7 +2467,8 @@
       flush();
     }
 
-    [[0, '0'], [maxD, fmtDepth(maxD)]].forEach(([v, label], i) => {
+    const axisMaxLabel = fmtDepth(maxD) + (p.depthZoom > 1 ? ' ×' + (Math.round(p.depthZoom * 10) / 10) : '');
+    [[0, '0'], [maxD, axisMaxLabel]].forEach(([v, label], i) => {
       const t = document.createElementNS(NS, 'text');
       t.setAttribute('class', 'pp-axis');
       t.setAttribute('x', '2');
@@ -2538,51 +2686,51 @@
 
     const pendingHere = pendingCeil && pendingCeil.pathId === p.id;
     const pendingFloorHere = pendingFloor && pendingFloor.pathId === p.id;
-    item('Set ceiling start — ' + fmtDepth(at.feet), () => {
-      pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
-      say('Ceiling started at ' + fmtDist(at.dist) + ', ' + fmtDepth(at.feet) +
-          ' — right-click the plot again to set the end');
-    }, false, 'Start a max-depth cap at this distance; its depth is where you clicked');
-
-    item(pendingHere
-          ? 'Set ceiling end — cap at ' + fmtDepth(pendingCeil.feet)
-          : 'Set ceiling end (no start yet)',
-      () => {
-        if (!pendingHere) return;
-        if (Paths.addCeiling(p.id, pendingCeil.dist, at.dist, pendingCeil.feet)) {
-          say('Ceiling: ' + fmtDepth(pendingCeil.feet) + ' from ' +
-              fmtDist(Math.min(pendingCeil.dist, at.dist)) + ' to ' +
-              fmtDist(Math.max(pendingCeil.dist, at.dist)), 'ok');
-          pendingCeil = null;
-          renderPaths();
-          persistNow();
-        } else {
-          toast('Could not set that ceiling — zero-length span?', true);
-        }
-      }, !pendingHere,
-      'Close the cap here, using the depth from the start click');
-
-    item('Set floor start — ' + fmtDepth(at.feet), () => {
+    item('Set floor start — max ' + fmtDepth(at.feet), () => {
       pendingFloor = { pathId: p.id, dist: at.dist, feet: at.feet };
-      say('Floor started at ' + fmtDist(at.dist) + ', ' + fmtDepth(at.feet) +
+      say('Floor started at ' + fmtDist(at.dist) + ', max ' + fmtDepth(at.feet) +
           ' — right-click the plot again to set the end');
-    }, false, 'Start a minimum-depth bound at this distance');
+    }, false, 'Deepest allowed over a span; its depth is where you clicked');
 
     item(pendingFloorHere
-          ? 'Set floor end — stay below ' + fmtDepth(pendingFloor.feet)
+          ? 'Set floor end — max ' + fmtDepth(pendingFloor.feet)
           : 'Set floor end (no start yet)',
       () => {
         if (!pendingFloorHere) return;
         if (Paths.addFloor(p.id, pendingFloor.dist, at.dist, pendingFloor.feet)) {
-          say('Floor: stay below ' + fmtDepth(pendingFloor.feet) + ' from ' +
+          say('Floor: max ' + fmtDepth(pendingFloor.feet) + ' from ' +
               fmtDist(Math.min(pendingFloor.dist, at.dist)) + ' to ' +
               fmtDist(Math.max(pendingFloor.dist, at.dist)), 'ok');
           pendingFloor = null;
           renderPaths();
           persistNow();
+        } else {
+          toast('Could not set that floor — zero-length span?', true);
         }
       }, !pendingFloorHere,
       'Close the floor here, using the depth from the start click');
+
+    item('Set ceiling start — min ' + fmtDepth(at.feet), () => {
+      pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
+      say('Ceiling started at ' + fmtDist(at.dist) + ', min ' + fmtDepth(at.feet) +
+          ' — right-click the plot again to set the end');
+    }, false, 'Shallowest allowed over a span — stay deeper than this');
+
+    item(pendingHere
+          ? 'Set ceiling end — min ' + fmtDepth(pendingCeil.feet)
+          : 'Set ceiling end (no start yet)',
+      () => {
+        if (!pendingHere) return;
+        if (Paths.addCeiling(p.id, pendingCeil.dist, at.dist, pendingCeil.feet)) {
+          say('Ceiling: stay deeper than ' + fmtDepth(pendingCeil.feet) + ' from ' +
+              fmtDist(Math.min(pendingCeil.dist, at.dist)) + ' to ' +
+              fmtDist(Math.max(pendingCeil.dist, at.dist)), 'ok');
+          pendingCeil = null;
+          renderPaths();
+          persistNow();
+        }
+      }, !pendingHere,
+      'Close the ceiling here, using the depth from the start click');
 
     if ((p.ceilings || []).length) {
       item('Clear ceilings (' + p.ceilings.length + ')', () => {
@@ -2804,6 +2952,14 @@
       const del = document.createElement('button');
       del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
       del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
+      const unitCell = (labelText, sel) => {
+        const cell = document.createElement('label');
+        cell.className = 'pp-unit-cell';
+        const lab = document.createElement('span');
+        lab.textContent = labelText;
+        cell.appendChild(lab); cell.appendChild(sel);
+        return cell;
+      };
       const du = unitSelect('dist', state.params.distUnit, (v) => {
         state.params.distUnit = v; renderPaths();
       });
@@ -2816,17 +2972,30 @@
       const pu = unitSelect('speed', state.params.speedUnit, (v) => {
         state.params.speedUnit = v; syncGasBar(); renderPaths();
       });
-      menu.appendChild(color); menu.appendChild(du); menu.appendChild(zu);
-      menu.appendChild(su); menu.appendChild(pu);
-      menu.appendChild(rev); menu.appendChild(dup); menu.appendChild(del);
+      /*
+       * Two labelled zones instead of seven bare widgets in a row: which of
+       * five identical dropdowns was "speed" was anyone's guess.
+       */
+      const unitsRow = document.createElement('div');
+      unitsRow.className = 'pp-menu-units';
+      unitsRow.appendChild(unitCell('dist', du));
+      unitsRow.appendChild(unitCell('depth', zu));
+      unitsRow.appendChild(unitCell('sac', su));
+      unitsRow.appendChild(unitCell('speed', pu));
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'pp-menu-actions';
+      actionsRow.appendChild(color); actionsRow.appendChild(rev);
+      actionsRow.appendChild(dup); actionsRow.appendChild(del);
+      menu.appendChild(unitsRow); menu.appendChild(actionsRow);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = !menu.hidden;
       });
 
+      caret.classList.add('pp-caret-big');   // primary affordance: open the plot
       row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
       row.appendChild(mirror); row.appendChild(nodesBtn);
-      row.appendChild(caret); row.appendChild(cog);
+      row.appendChild(cog); row.appendChild(caret);
       item.appendChild(row); item.appendChild(menu);
 
       let wrap = null;
@@ -3376,12 +3545,20 @@
         opt.type = 'button'; opt.className = 'pp-cyl-preset-opt';
         opt.textContent = spec.name + ' · ' + spec.totalCuft + ' cuft @ ' + spec.startPsi;
         opt.addEventListener('click', () => {
-          cyl.name = spec.name;
+          /*
+           * Two AL80s must stay tellable apart: the ids are already unique, but
+           * identical NAMES in the leg dropdown and the budget summary made it
+           * look like one tank being drained by everything. Number duplicates.
+           */
+          const taken = cylinders().filter((c) => c.id !== cyl.id)
+            .map((c) => c.name)
+            .filter((n) => n === spec.name || n.indexOf(spec.name + ' #') === 0).length;
+          cyl.name = taken ? spec.name + ' #' + (taken + 1) : spec.name;
           cyl.totalCuft = spec.totalCuft;
           cyl.startPsi = spec.startPsi;
           presetList.hidden = true;
           renderCylinders(); renderPaths();
-          say('Gas source set to ' + spec.name);
+          say('Gas source set to ' + cyl.name);
         });
         presetList.appendChild(opt);
       });
@@ -3572,6 +3749,7 @@
       // stamp the version with every write — data without its version key
       // would be discarded as stale on the next load
       localStorage.setItem('kelp.v', STORE_V);
+      localStorage.setItem('kelp.boundsv', '2');
       localStorage.setItem('kelp.params', JSON.stringify(state.params));
       Session.savePois();          // POIs persist alongside settings and paths
       localStorage.setItem('kelp.paths', JSON.stringify(Paths.list.map((p) => ({
@@ -3733,6 +3911,16 @@
     Paths.setDepthFormatter((s) => fmtDepth(-s.feet));
     try {
       const saved = JSON.parse(localStorage.getItem('kelp.paths') || 'null');
+      /*
+       * One-time migration: stored bounds predating the ceiling/floor meaning
+       * correction have the arrays the wrong way round. Swap once and flag it.
+       */
+      if (Array.isArray(saved) && localStorage.getItem('kelp.boundsv') !== '2') {
+        saved.forEach((p) => {
+          const c = p.ceilings; p.ceilings = p.floors || []; p.floors = c || [];
+        });
+        try { localStorage.setItem('kelp.boundsv', '2'); } catch (e) { /* best effort */ }
+      }
       if (Array.isArray(saved) && saved.length) Paths.restore(saved);
     } catch (err) { console.warn('path restore skipped:', err); }
     renderPaths();

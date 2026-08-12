@@ -1162,6 +1162,23 @@ input[type=range]::-moz-range-thumb {
 }
 .tap-cursor-label::before { display: none; }
 
+/* the plot-expand caret is the row's primary affordance — sized like one */
+.pp-caret-big { font-size: 15px; padding: 4px 8px; min-width: 30px; }
+
+/* cog menu: labelled unit cells + an actions row */
+.pp-menu-units { display: flex; gap: 6px; }
+.pp-unit-cell { display: flex; flex-direction: column; gap: 2px; }
+.pp-unit-cell > span {
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--tide-dim);
+}
+.pp-menu-actions { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.reserve-node-btn { color: var(--kelp); }
+
+/* bound endpoint handles */
+.bound-end { touch-action: none; }
+.bound-end:hover { stroke: var(--kelp-hot); }
+
 /* ---------- undo toast ---------- */
 .undo-toast {
   position: fixed; z-index: 1200; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
@@ -1544,6 +1561,10 @@ input[type=range]::-moz-range-thumb {
   .ov-item .ov-flyout {
     opacity: 0; visibility: hidden; pointer-events: none;
     transition: opacity 140ms ease;
+    /* the icon column hugs the right screen edge; centring the flyout above
+       the icon shoved it off-screen. Open it inboard instead. */
+    left: auto; right: calc(100% + 10px);
+    bottom: auto; top: 50%; transform: translateY(-50%);
   }
   .ov-item.open .ov-flyout { opacity: 1; visibility: visible; pointer-events: auto; }
 

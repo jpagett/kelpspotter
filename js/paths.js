@@ -562,6 +562,22 @@ const Paths = (function () {
         picked.forEach((k) => { groupFrom[k] = p.nodes[k]; });
       });
       m.on('drag', (ev) => {
+        /*
+         * Near-real-time profile: re-read depths every 500ms DURING the drag,
+         * not only on release. One in-flight request at a time; dragend still
+         * does the authoritative read.
+         */
+        if (!p._liveTimer) {
+          p._liveTimer = setTimeout(() => {
+            p._liveTimer = null;
+            if (!p._liveBusy) {
+              p._liveBusy = true;
+              refreshProfile(p).finally
+                ? refreshProfile(p).finally(() => { p._liveBusy = false; })
+                : (p._liveBusy = false);
+            }
+          }, 500);
+        }
         const now = ev.target.getLatLng();
         if (dragFrom && groupFrom) {
           const dLat = now.lat - dragFrom.lat, dLng = now.lng - dragFrom.lng;
@@ -720,13 +736,13 @@ const Paths = (function () {
     return xlsxLoading;
   }
 
-  /* ---------- depth ceilings ----------
-   * A ceiling caps the PLANNED depth over a span of the path: "over this 80 ft
-   * section we stay at 40 ft". Stored per path as {start, end, feet} in metres
-   * along the path / feet of depth. The bottom profile itself is untouched —
-   * the cap changes the effective depth used for display and gas planning,
-   * and the plot keeps the true bottom as a dotted line so the cap is never
-   * mistaken for bathymetry.
+  /* ---------- depth bounds ----------
+   * Ceilings and floors bound the PLANNED depth over a span: a ceiling is the
+   * shallowest allowed ("stay deeper than 20 ft"), a floor the deepest ("do
+   * not exceed 60 ft"). Stored per path as {start, end, feet}. The bottom
+   * profile itself is untouched — bounds change the effective depth used for
+   * display and gas planning, and the plot keeps the true bottom dotted so a
+   * bound is never mistaken for bathymetry.
    */
   function addCeiling(id, a, b, feet) {
     const p = paths.find((x) => x.id === id);
@@ -744,20 +760,25 @@ const Paths = (function () {
     p.ceilings = [];
     onChange();
   }
-  // the tightest cap covering this distance, or null
-  function ceilingFtAt(p, dist) {
+  /*
+   * DIVE SEMANTICS — these were swapped in the first release and are now
+   * correct: a CEILING is the shallowest the diver may be (deco/overhead:
+   * "stay deeper than 20 ft"), a FLOOR is the deepest ("do not exceed 60 ft").
+   * Overlapping bounds resolve to the most restrictive: deepest ceiling,
+   * shallowest floor.
+   */
+  function ceilingFtAt(p, dist) {           // minimum depth
     if (!p || !p.ceilings) return null;
-    let cap = null;
+    let c0 = null;
     p.ceilings.forEach((c) => {
-      if (dist >= c.start && dist <= c.end && (cap === null || c.feet < cap)) cap = c.feet;
+      if (dist >= c.start && dist <= c.end && (c0 === null || c.feet > c0)) c0 = c.feet;
     });
-    return cap;
+    return c0;
   }
 
   /*
-   * Floors are the ceiling's mirror: a MINIMUM planned depth over a span —
-   * "stay below 20 ft through the boat channel". The deepest floor covering
-   * the distance wins.
+   * Floors: the MAXIMUM planned depth over a span — "do not exceed 60 ft
+   * here". The shallowest floor covering the distance wins.
    */
   function addFloor(id, a, b, feet) {
     const p = paths.find((x) => x.id === id);
@@ -775,11 +796,11 @@ const Paths = (function () {
     p.floors = [];
     onChange();
   }
-  function floorFtAt(p, dist) {
+  function floorFtAt(p, dist) {             // maximum depth
     if (!p || !p.floors) return null;
     let f = null;
     p.floors.forEach((c) => {
-      if (dist >= c.start && dist <= c.end && (f === null || c.feet > f)) f = c.feet;
+      if (dist >= c.start && dist <= c.end && (f === null || c.feet < f)) f = c.feet;
     });
     return f;
   }
@@ -792,10 +813,10 @@ const Paths = (function () {
    */
   function plannedFtAt(p, dist, bottomFt) {
     let planned = bottomFt;
-    const c = ceilingFtAt(p, dist);
-    if (c !== null && c < planned) planned = c;
-    const f = floorFtAt(p, dist);
-    if (f !== null && f > planned) planned = Math.min(bottomFt, f);
+    const f = floorFtAt(p, dist);                       // max depth caps first
+    if (f !== null && f < planned) planned = f;
+    const c = ceilingFtAt(p, dist);                     // min depth pushes back down
+    if (c !== null && c > planned) planned = Math.min(bottomFt, c);
     return planned;
   }
 
@@ -982,7 +1003,8 @@ const Paths = (function () {
 
   /* ---------- depth profile ---------- */
 
-  async function refreshProfile(p) {
+  function refreshProfile(p) { return refreshProfileAsync(p); }
+  async function refreshProfileAsync(p) {
     if (p.nodes.length < 2) return;
     try {
       say('Reading depth along ' + p.name + '…');

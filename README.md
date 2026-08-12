@@ -80,13 +80,13 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Depth → Depth contours** | Charted depth contours from NOAA ENC (off by default). |
 | **Depth → Depth opacity** | Dims the relief so the kelp layer stays readable over it. |
 | **Depth → Custom contours** | Enter a depth in feet and press **+** to trace it across the current view. Each contour gets a tile with a cog for its colour and an **×** to remove it. |
-| **Floors** | The ceiling's mirror: a *minimum* planned depth over a span ("stay below 20 ft through the boat channel"). Set from the same right-click menu. Where a floor and ceiling conflict, the floor wins; where the bottom is shallower than the floor, the bottom wins — rock is not negotiable. |
-| **Bound editing** | Drag a ceiling/floor segment on the plot vertically to change its depth; right-click the segment to remove just that one. |
+| **Floors & ceilings** | Dive-correct: a **floor** is the deepest allowed ("do not exceed 60 ft"), a **ceiling** the shallowest ("stay deeper than 20 ft"). Set from the plot right-click menu; each bound's endpoints are draggable nodes (x re-scopes the span, y retunes the depth) and right-clicking an endpoint or the segment deletes it. Old sessions and files are migrated automatically. |
 | **Tap depth cursor** (touch) | Tapping the map plants a draggable crosshair whose label reads the depth under it; tap elsewhere to move it, drag to fine-tune, tap the cursor to dismiss. Long-press still opens the map menu. |
 | **Locate me** | ◎ (in the zoom stack on desktop, the action stack on mobile) tracks your position with an accuracy ring. |
 | **Map right-click** | Right-click (long-press on touch) open water: **Add POI here**, **Start path here**, **Copy coordinates**. |
 | **Reverse / duplicate** | In a path's cog menu: ⇋ runs the line from the other end (headings, legs and bounds all remap); ⧉ copies it for a planning variant. |
 | **Undo** | Deleting a path shows a 6-second toast with an Undo button. |
+| **Plot zoom** | Scroll wheel over a profile zooms the depth axis (per path, ×8 max, double-click resets) — shallow structure stays readable when one deep sounding sets the scale. |
 | **Keys** | `[` `]` step scenes (arrows still work), `n` starts/finishes drawing a path. |
 | **Profile right-click** | Right-click (long-press on touch) the depth plot for actions at that distance: **Add node here**, **Set ceiling start / end**, **Clear ceilings**. A ceiling caps the *planned* depth over a span — the plot draws the capped line solid with the true bottom dotted, hover reads both, and gas is burned at the capped depth. The cap's depth is the y-position of the click. |
 | **Drawing on a contour** | While drawing, a node placed within ~18 px of a custom depth contour snaps onto it, so a transect can follow "the 40 ft line". Shift-clicking an existing node snaps it the same way, with a wider catch. |

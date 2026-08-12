@@ -13,7 +13,7 @@
  * import would read as 100% additions and the diff would be worthless.
  */
 const Session = (function () {
-  const SCHEMA = 1;
+  const SCHEMA = 2;   // v2: ceiling/floor meanings corrected (v1 had them swapped)
   const STORE_POIS = 'kelp.pois';
 
   /*
@@ -104,11 +104,19 @@ const Session = (function () {
     if (data.kelpspotter > SCHEMA) {
       throw new Error('written by a newer version (schema ' + data.kelpspotter + ')');
     }
+    const paths = Array.isArray(data.paths) ? data.paths : [];
+    // v1 files used "ceilings" for max-depth caps; the dive-correct meaning is
+    // the reverse, so a v1 import swaps the arrays on the way in
+    if (data.kelpspotter === 1) {
+      paths.forEach((p) => {
+        const c = p.ceilings; p.ceilings = p.floors || []; p.floors = c || [];
+      });
+    }
     return {
       kelpspotter: data.kelpspotter,
       exported: data.exported || '',
       pois: Array.isArray(data.pois) ? data.pois : [],
-      paths: Array.isArray(data.paths) ? data.paths : [],
+      paths: paths,
       view: data.view && typeof data.view === 'object' ? data.view : {},
       user: data.user && typeof data.user === 'object' ? data.user : {}
     };

@@ -2375,7 +2375,7 @@
         h.setAttribute('fill', p.color);
         h.setAttribute('stroke', '#05161c');
         h.setAttribute('stroke-width', '1.5');
-        h.style.cursor = 'move';
+        h.style.cursor = 'ew-resize';
         let dragging2 = false;
         const distFromX = (clientX) => {
           const r = svg.getBoundingClientRect();
@@ -2390,24 +2390,23 @@
         });
         h.addEventListener('pointermove', (ev) => {
           if (!dragging2) return;
+          // x only: endpoints re-scope the span. Depth belongs to the segment
+          // drag — a diagonal endpoint drag made accidental depth nudges too
+          // easy while aiming for a distance.
           h.setAttribute('cx', Math.max(PADL, Math.min(W - 4,
             ((ev.clientX - svg.getBoundingClientRect().left) / svg.getBoundingClientRect().width) * W)));
-          h.setAttribute('cy', Math.max(PADT, Math.min(H - PADB,
-            ((ev.clientY - svg.getBoundingClientRect().top) / svg.getBoundingClientRect().height) * H)));
         });
         h.addEventListener('pointerup', (ev) => {
           if (!dragging2) return;
           dragging2 = false;
           const d = distFromX(ev.clientX);
-          const ft = ftFromY(ev.clientY);
           const MIN_SPAN = 20;   // metres — a bound needs somewhere to apply
           if (which === 'start') bound.start = Math.min(d, bound.end - MIN_SPAN);
           else bound.end = Math.max(d, bound.start + MIN_SPAN);
           bound.start = Math.max(0, bound.start);
           bound.end = Math.min(maxX, bound.end);
-          bound.feet = ft;
           say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' ' + which + ' moved — ' +
-              fmtDist(bound.start) + '→' + fmtDist(bound.end) + ' at ' + fmtDepth(bound.feet));
+              fmtDist(bound.start) + '→' + fmtDist(bound.end));
           renderPaths();
           persistNow();
         });

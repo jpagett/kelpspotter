@@ -370,6 +370,19 @@ the app warns rather than quietly returning stale values; replacing
 
 ## Performance notes
 
+- **The Earth Engine client (341 KB) is not shipped either** — injected during
+  idle time after boot, warm by the time anyone reaches Connect; the Connect
+  handler awaits the load if clicked first.
+- **The service worker now precaches the app shell** (stale-while-revalidate),
+  so a repeat visit paints from cache — measured DOMContentLoaded: 489 ms cold
+  before this work, 204 ms cold after, **40 ms on a repeat visit** — and the
+  whole app opens with no network at all. For a boat tool, offline is a
+  feature, not an edge case.
+- **Leaflet is vendored** (`vendor/leaflet/`), pinned and same-origin: no cold
+  third-party TLS handshake, cached by the shell, immune to CDN-tag drift.
+- **One CARTO subdomain instead of four** — sharding was an HTTP/1.1 trick that
+  splits tiles across four TLS connections on HTTP/2; a cold shard was the
+  third-slowest request of the boot.
 - **SheetJS is no longer shipped with the page.** At 882 KB it was the largest
   asset, parse-blocking every visit for spreadsheet features most sessions never
   touch; it now loads on first use. All other scripts are `defer`'d and the

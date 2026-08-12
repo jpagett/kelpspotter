@@ -45,8 +45,13 @@
     .fitBounds([[s, w], [n, e]]);
   $('zoom-in').addEventListener('click', () => map.zoomIn());
   $('zoom-out').addEventListener('click', () => map.zoomOut());
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19, subdomains: 'abcd'
+  /*
+   * One subdomain on purpose. Sharding across a-d was an HTTP/1.1 trick; on
+   * HTTP/2 it splits tiles over four TLS connections instead of multiplexing
+   * one, and a cold shard was the third-slowest request of the whole boot.
+   */
+  L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
   }).addTo(map);
 
   /*
@@ -3679,7 +3684,20 @@
       toast('Add your OAuth client ID and project in js/config.js first.', true);
       return;
     }
-    if (typeof ee === 'undefined') { toast('Earth Engine library did not load.', true); return; }
+    if (typeof ee === 'undefined') {
+      // idle load hasn't finished (or failed): fetch it now, then sign in.
+      // The GIS flow tolerates this await — see the loader's comment.
+      say('Loading sign-in library…');
+      busy(true);
+      (window.__loadEE ? window.__loadEE() : Promise.reject(new Error('loader missing')))
+        .then(() => { busy(false); connectEE(); })
+        .catch((err) => {
+          busy(false);
+          say('Sign-in unavailable — ' + err.message, 'warn');
+          toast('Could not load the sign-in library — check the connection.', true);
+        });
+      return;
+    }
 
     let pending;
     try {
@@ -3923,6 +3941,34 @@
       if (Array.isArray(saved) && saved.length) Paths.restore(saved);
     } catch (err) { console.warn('path restore skipped:', err); }
     renderPaths();
+
+    /*
+     * Earth Engine client, loaded during idle time rather than shipped with
+     * the page: 341 KB that only the sign-in flow uses, and most visits never
+     * sign in. By the time a human reaches the Connect button it is warm; if
+     * they somehow beat it, connectEE awaits this same promise. The GIS-based
+     * auth flow does not depend on the click's gesture window (that is why it
+     * could open a picker at boot, unprompted, before that was fixed), so
+     * awaiting the load inside the click handler is safe.
+     */
+    window.__eeLoad = null;
+    const loadEE = () => {
+      if (window.__eeLoad) return window.__eeLoad;
+      window.__eeLoad = new Promise((resolve, reject) => {
+        const tag = document.createElement('script');
+        tag.src = 'https://unpkg.com/@google/earthengine@0.1.404/build/ee_api_js.js';
+        tag.onload = () => resolve();
+        tag.onerror = () => { window.__eeLoad = null; reject(new Error('Earth Engine library failed to load')); };
+        document.head.appendChild(tag);
+      });
+      return window.__eeLoad;
+    };
+    window.__loadEE = loadEE;
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(() => { loadEE().catch(() => {}); }, { timeout: 6000 });
+    } else {
+      setTimeout(() => { loadEE().catch(() => {}); }, 3000);
+    }
 
     /*
      * Service worker: cache-first for the NOAA hosts, which send

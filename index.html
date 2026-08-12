@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -387,11 +387,15 @@
 
 
   <!-- Leaflet -->
-  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- vendored: kills a cold third-party TLS handshake, rides the Pages CDN,
+       pins the version, and joins the offline shell cache -->
+  <script defer src="vendor/leaflet/leaflet.js"></script>
   <!-- Google Identity Services (for live Earth Engine sign-in) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <!-- Earth Engine JS client library (optional; site falls back to demo if absent) -->
-  <script defer src="https://unpkg.com/@google/earthengine@latest/build/ee_api_js.js"></script>
+  <!-- The Earth Engine client (341 KB) is NOT shipped with the page: only the
+       sign-in flow uses it, and most visits never sign in. app.js injects it
+       during idle time after boot, so it is warm by the time anyone reaches
+       the Connect button. -->
 
   <script defer src="js/config.js"></script>
   <script defer src="js/wmm.js"></script>

@@ -668,34 +668,60 @@
    * minCoverage its aoiCloud describes a corner of the box, so those dates
    * report as fully clouded rather than as the best day of the year.
    */
+  /*
+   * A row counts as measured once it carries a `coverage` figure — NOT once it
+   * carries a cloud figure. The difference matters: a pass whose swath missed
+   * the box entirely comes back measured, with coverage 0 and no cloud number
+   * at all. Keying off the cloud number instead sent exactly those dates down
+   * the metadata path, where they read as "0.0% cloud" and were offered as the
+   * clearest days of the month — days on which the satellite never looked at
+   * this water. That is the failure this whole feature exists to prevent, so
+   * it must not survive in its most extreme form.
+   */
+  function cloudIsSampled(sc) {
+    return !!(state.params.useAoiCloud && sc && typeof sc.coverage === 'number');
+  }
+  function seenEnough(sc) {
+    return sc.coverage >= (state.params.minCoverage || 0) &&
+           sc.aoiCloud !== null && sc.aoiCloud !== undefined;
+  }
   function sceneCloud(sc) {
     if (!sc) return 100;
-    if (cloudIsSampled(sc)) {
-      if ((sc.coverage || 0) < (state.params.minCoverage || 0)) return 100;
-      return sc.aoiCloud;
-    }
-    return sc.cloud;
+    if (!cloudIsSampled(sc)) return typeof sc.cloud === 'number' ? sc.cloud : 100;
+    // measured, but this pass saw too little of the box to have an opinion
+    return seenEnough(sc) ? sc.aoiCloud : 100;
   }
-  function cloudIsSampled(sc) {
-    return !!(state.params.useAoiCloud && sc &&
-              sc.aoiCloud !== null && sc.aoiCloud !== undefined);
-  }
-  // "12% cloud" vs "12% cloud over the sample area" — the tooltip should say
-  // which question was answered, since the two can disagree wildly
+  // "12% cloud" vs "12% cloud over the sample area" — the tooltip has to say
+  // which question was answered, since the two routinely disagree
   function cloudLabel(sc) {
     if (!sc) return '';
-    const v = pct(sceneCloud(sc));
-    if (!cloudIsSampled(sc)) return v + '% cloud (whole scene)';
-    if ((sc.coverage || 0) < (state.params.minCoverage || 0)) {
-      return 'only ' + pct(sc.coverage) + '% of the sample area was seen';
-    }
-    return v + '% cloud over the sample area';
+    if (!cloudIsSampled(sc)) return pct(sc.cloud) + '% cloud (whole scene)';
+    if (!seenEnough(sc)) return 'this pass saw only ' + pct(sc.coverage) + '% of the sample area';
+    return pct(sc.aoiCloud) + '% cloud over the sample area';
   }
 
+  /*
+   * Two rules, and they were fighting each other.
+   *
+   * "Keep the clearest" is a statement about GRANULE METADATA — which of a
+   * date's granules to name. Comparing with sceneCloud() instead let a
+   * metadata row (4% whole-scene) beat a sampled one (50% over the box) and
+   * replace it, so every metadata refresh quietly threw away the measured
+   * numbers and the calendar fell back to "whole scene" tooltips a few seconds
+   * after showing the honest ones. So: compare on metadata, and carry any
+   * sampled numbers across onto the row that wins.
+   */
   function mergeScenes(list) {
     (list || []).forEach((s) => {
       const cur = sceneIndex.get(s.date);
-      if (!cur || sceneCloud(s) < sceneCloud(cur)) sceneIndex.set(s.date, s);  // keep the clearest
+      if (!cur) { sceneIndex.set(s.date, s); return; }
+      if (s.coverage === undefined && cur.coverage !== undefined) {
+        s.aoiCloud = cur.aoiCloud;
+        s.coverage = cur.coverage;
+      }
+      const a = typeof s.cloud === 'number' ? s.cloud : 100;
+      const b = typeof cur.cloud === 'number' ? cur.cloud : 100;
+      if (a < b) sceneIndex.set(s.date, s);
     });
   }
 
@@ -787,7 +813,10 @@
     (state.allScenes || []).forEach(add);
     let touched = 0;
     list.forEach((row) => {
-      if (row.aoiCloud === null || row.aoiCloud === undefined) return;
+      // Merge on `coverage`, not on a cloud number. Rows whose swath missed
+      // the box carry coverage 0 and no cloud value, and those are precisely
+      // the ones that must not be left looking unmeasured — see cloudIsSampled.
+      if (typeof row.coverage !== 'number') return;
       (byDate.get(row.date) || []).forEach((sc) => {
         sc.aoiCloud = row.aoiCloud;
         sc.coverage = row.coverage;

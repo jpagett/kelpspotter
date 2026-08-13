@@ -41,6 +41,13 @@ steps:
       - '--set-env-vars=^##^EE_PROJECT=kelpscape##ALLOWED_ORIGINS=https://jpagett.github.io,http://localhost:8000'
       - '--memory=512Mi'
       - '--cpu=1'
+      # Scale-to-zero is what keeps this free, so a visitor arriving at an idle
+      # service pays a container start plus ee.Initialize() before the first
+      # map id is minted — the one cost a signed-in visitor never pays, since
+      # their browser calls getMapId directly. Startup boost gives that window
+      # extra CPU and is billed only for its duration, so it shortens the cold
+      # path without giving up scale-to-zero.
+      - '--cpu-boost'
       - '--timeout=120'
       - '--max-instances=5'
 

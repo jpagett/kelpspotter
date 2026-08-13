@@ -87,6 +87,43 @@ const KelpEngine = (function () {
   }
 
   /*
+   * The reflectance bands a composite's render actually reads — mirrors
+   * reducer_bands() in api/main.py.
+   *
+   * A composite's cost is dominated by the reducer, and a reducer costs per
+   * band: a median over seven bands is roughly seven sorts per pixel, not one.
+   * reflectance() carries all seven because the three overlays want different
+   * subsets, but any one render reads far fewer — the kelp chain never touches
+   * B1/B2/B3, and the cloud tint reads nothing but the visible three.
+   * Narrowing the collection to this set BEFORE the reducer cannot change the
+   * result: everything downstream selects by name, and the bands dropped here
+   * are exactly the ones nothing downstream asks for.
+   *
+   * Composites only. A single-scene render reduces nothing, so it has no
+   * reducer to make cheaper, and bandCloud needs the full set anyway.
+   */
+  const BAND_ORDER = [S2_AERO, S2_BLUE, S2_GREEN, S2_RED, S2_RE6, S2_NIR, S2_SWIR];
+  const INDEX_BANDS = {
+    KD:   [S2_RE6, S2_RED],
+    NDVI: [S2_NIR, S2_RED],
+    FAI:  [S2_NIR, S2_RED, S2_SWIR]
+  };
+  function reducerBands(mode, p) {
+    if (mode === 'cloud') return [S2_BLUE, S2_GREEN, S2_RED];
+    // classify(): the index's own inputs, plus B11 for the land test
+    const keep = {};
+    (INDEX_BANDS[p.indexType] || INDEX_BANDS.KD).forEach((b) => { keep[b] = true; });
+    keep[S2_SWIR] = true;
+    if (mode === 'turbidity') {
+      // clarityValue() reads B1/B2/B3, plus B8 when deglinting; renderTurbidity
+      // also runs the whole kelp classify to exclude canopy
+      keep[S2_AERO] = true; keep[S2_BLUE] = true; keep[S2_GREEN] = true;
+      if (p.turbGlint !== false) keep[S2_NIR] = true;
+    }
+    return BAND_ORDER.filter((b) => keep[b]);
+  }
+
+  /*
    * Band-based cloud test: bright in the visible AND in SWIR, AND spectrally
    * flat. Turbid water and foam are bright in visible but dark at 1610 nm;
    * sand and algae are bright but coloured — both fail a gate. Thresholds are
@@ -360,12 +397,15 @@ const KelpEngine = (function () {
       // per-scene masking BEFORE the median: with the cloud mask enabled the
       // band test joins QA60, so cloudy observations never enter the composite
       const gated = cloudGated(p);
+      const keep = reducerBands('kelp', p);
       const clear = collection(startISO, endISO, maxCloud)
         .map((img) => {
           const b = reflectance(img);
           let m = clearSky(img);
+          // the band test reads B2/B3/B4/B11, so it runs against the full
+          // image — the narrowing below is what reaches the median
           if (gated) m = m.and(bandCloud(b, p).not());
-          return b.updateMask(m);
+          return b.select(keep).updateMask(m);
         });
       return tileLayerFromImage(renderKelp(classify(clear.median(), p, null), p), {});
     },
@@ -386,12 +426,13 @@ const KelpEngine = (function () {
 
     turbidityCompositeLayer(startISO, endISO, maxCloud, p) {
       const gated = cloudGated(p);
+      const keep = reducerBands('turbidity', p);
       const clear = collection(startISO, endISO, maxCloud)
         .map((img) => {
           const b = reflectance(img);
           let m = clearSky(img);
           if (gated) m = m.and(bandCloud(b, p).not());
-          return b.updateMask(m);
+          return b.select(keep).updateMask(m);
         });
       return tileLayerFromImage(renderTurbidity(clear.median(), p, null), {});
     },
@@ -421,7 +462,8 @@ const KelpEngine = (function () {
       // is vacuously true; without it the whole world outside the swaths
       // would paint as cloud
       const never = clearCount.eq(0).clip(region());
-      const med = col.map(reflectance).median();
+      const tint = reducerBands('cloud', p);
+      const med = col.map((img) => reflectance(img).select(tint)).median();
       return tileLayerFromImage(renderCloud(med, never, p), {});
     },
 

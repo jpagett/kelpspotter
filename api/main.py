@@ -224,6 +224,44 @@ def band_cloud(b, params):
     )
 
 
+def reducer_bands(mode, params):
+    """The reflectance bands a composite's render actually reads.
+
+    A composite's cost is dominated by the reducer, and a reducer costs per
+    band: median over seven bands is roughly seven sorts per pixel, not one.
+    reflectance() carries all seven because the three overlays want different
+    subsets, but any single render reads far fewer — the kelp chain never
+    touches B1/B2/B3, and the cloud tint never touches anything but the
+    visible three. Narrowing the collection to this set BEFORE the reducer is
+    the whole optimisation; it cannot change the result, because everything
+    downstream selects by name and the dropped bands are the ones nothing asks
+    for.
+
+    Applies to the composite modes only. Single-scene renders reduce nothing
+    (a one-day mosaic), so there is no reducer to make cheaper there, and the
+    full set has to survive anyway for band_cloud's own use.
+    """
+    if mode == "cloudComposite":
+        return [S2_BLUE, S2_GREEN, S2_RED]      # render_cloud reads the visible mean
+
+    # classify(): the index's own inputs, plus B11 for the land test
+    keep = {
+        "KD":   {S2_RE6, S2_RED},
+        "NDVI": {S2_NIR, S2_RED},
+        "FAI":  {S2_NIR, S2_RED, S2_SWIR},
+    }[params["indexType"]] | {S2_SWIR}
+
+    if mode == "turbidityComposite":
+        # clarity_value() reads B1/B2/B3, and B8 as well when deglinting;
+        # render_turbidity() also runs the whole kelp classify to exclude canopy
+        keep |= {S2_AERO, S2_BLUE, S2_GREEN}
+        if params["turbGlint"]:
+            keep.add(S2_NIR)
+
+    order = [S2_AERO, S2_BLUE, S2_GREEN, S2_RED, S2_RE6, S2_NIR, S2_SWIR]
+    return [b for b in order if b in keep]
+
+
 def spectral_index(b, index_type):
     red = b.select(S2_RED)
     re6 = b.select(S2_RE6)
@@ -544,13 +582,16 @@ def layer():
             """Per-scene cloud masking BEFORE the median: QA60 always, the
             band test joining in while the cloud-mask overlay is enabled."""
             gate = params["cloudMask"]
+            keep = reducer_bands(mode, params)
 
             def prep(img):
                 b = reflectance(img)
                 m = clear_sky(img)
                 if gate:
+                    # the band test reads B2/B3/B4/B11, so it runs against the
+                    # full image — the narrowing below is what reaches the median
                     m = m.And(band_cloud(b, params).Not())
-                return b.updateMask(m)
+                return b.select(keep).updateMask(m)
 
             return collection(start, end, max_cloud).map(prep)
 
@@ -580,7 +621,10 @@ def layer():
                 .toInt().unmask(0).rename("clear")
             ).sum()
             never = clear_count.eq(0).clip(region())
-            image = render_cloud(col.map(reflectance).median(), never, params)
+            tint = reducer_bands(mode, params)
+            image = render_cloud(
+                col.map(lambda img: reflectance(img).select(tint)).median(), never, params
+            )
         elif mode == "truecolor":
             day = ee.Date(date)
             img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())

@@ -125,14 +125,33 @@
   }
 
   /*
+   * A hidden overlay comes OFF the map rather than merely out of sight.
+   *
+   * Leaflet drives tile loading from map events, not from visibility, so a
+   * layer left attached under a display:none pane still fetches a full tile
+   * set on every pan and zoom. Measured at a 1280px viewport, one zoom change
+   * with two of the four Earth Engine overlays hidden created 96 tiles, 48 of
+   * them for panes nobody could see — and each Earth Engine tile is a
+   * server-side computation, not a file read.
+   *
+   * The cost of detaching is that re-showing refetches, which is why this used
+   * to hide instead. But the tile URLs are unchanged across a hide/show, and
+   * Earth Engine serves tiles with Cache-Control: max-age=3600 (NOAA's go
+   * through the service worker's own cache), so the second look is a browser
+   * cache hit rather than a recomputation. Paying that once on re-show beats
+   * paying a full tile set on every map move while hidden.
+   */
+  function attachOverlay(layer, on) {
+    if (!layer) return;
+    if (on && !map.hasLayer(layer)) layer.addTo(map);
+    else if (!on && map.hasLayer(layer)) map.removeLayer(layer);
+  }
+
+  /*
    * ---- NOAA depth overlays ----
    * Two independent WMS layers, each in its own pane so they toggle separately
-   * and always sit under the kelp.
-   *
-   * Turning a layer off hides its pane instead of calling map.removeLayer, which
-   * would destroy the tile container and force a full refetch on the next toggle.
-   * Hiding keeps the tiles in the DOM, so switching back is instant. Layers are
-   * still created lazily, so an overlay the user never enables costs nothing.
+   * and always sit under the kelp. Layers are created lazily, so an overlay the
+   * user never enables costs nothing.
    */
   const DEPTH_LAYERS = {
     relief:   { cfgKey: 'relief',   pane: 'depth',   label: 'NOAA depth relief', layer: null },
@@ -146,17 +165,23 @@
     return style ? style.layers : cfg.DEPTH.relief.layers;
   }
 
+  // Both conditions that make a depth layer visible: its own switch, and the
+  // shared depth opacity. Either one at zero takes it off the map.
+  function syncDepthAttachment() {
+    const lit = state.params.depthOpacity > 0;
+    attachOverlay(DEPTH_LAYERS.relief.layer, lit && !!state.params.showRelief);
+    attachOverlay(DEPTH_LAYERS.contours.layer, lit && !!state.params.showContours);
+  }
+
   function setDepthLayer(key, on) {
     const rec = DEPTH_LAYERS[key];
-    const pane = map.getPane(rec.pane);
     if (!on) {
-      if (rec.layer) pane.style.display = 'none';
+      attachOverlay(rec.layer, false);
       if (!depthEnabled()) hideProbe();   // nothing left to read a depth from
       say(rec.label + ' off');
       return;
     }
-    pane.style.display = '';
-    if (rec.layer) return;   // already built; tiles are still there
+    if (rec.layer) { syncDepthAttachment(); return; }   // already built
 
     const src = cfg.DEPTH[rec.cfgKey];
     say('Loading ' + rec.label + '…');
@@ -176,12 +201,14 @@
     }, cfg.DEPTH.tuning));
     rec.layer.on('load', () => done(rec.label + ' ready', 'ok'));
     rec.layer.on('tileerror', () => done(rec.label + ' — some tiles failed', 'warn'));
-    rec.layer.addTo(map);
+    syncDepthAttachment();
+    if (!map.hasLayer(rec.layer)) done(rec.label + ' ready', 'ok');   // built, but the opacity slider is at zero
   }
 
   function setDepthOpacity(v) {
     state.params.depthOpacity = v;
     if (DEPTH_LAYERS.relief.layer) DEPTH_LAYERS.relief.layer.setOpacity(v);
+    syncDepthAttachment();   // zeroing the slider takes both layers off the map
     // one opacity, two controls — keep the console slider and the corner
     // flyout showing the same value no matter which one moved
     $('depth-op').value = v;
@@ -248,7 +275,13 @@
       if (!now || now.date !== sc.date) return;   // scene changed mid-mint; next call rebuilds
       if (trueColorLayer) map.removeLayer(trueColorLayer);
       trueColorLayer = toLeafletLayer(res, { pane: 'truecolor', opacity: state.params.trueColorOpacity });
-      trueColorLayer.addTo(map);
+      /*
+       * A prewarm builds the layer and banks the minted URL — the slow half —
+       * but leaves it off the map. Attaching it would stream a full tile set
+       * now and another on every pan for as long as it stayed hidden; the eye
+       * toggle is still fast because the mint round trip is already paid.
+       */
+      attachOverlay(trueColorLayer, state.params.trueColorOpacity > 0);
       trueColorDate = sc.date;
       if (!prewarm) say('True color ready · ' + sc.date, 'ok');
     } catch (err) {
@@ -268,6 +301,7 @@
   function setTrueColorOpacity(v) {
     state.params.trueColorOpacity = v;
     map.getPane('truecolor').style.display = v > 0 ? '' : 'none';
+    attachOverlay(trueColorLayer, v > 0);
     if (v > 0) {
       if (!tcUsed) {
         tcUsed = true;   // from here on, scene changes prewarm the layer in the background
@@ -373,11 +407,12 @@
       if ((isTurb ? turbKey() : cloudKey()) !== key) return;
       const old = isTurb ? turbLayer : cloudLayer;
       if (old) map.removeLayer(old);
+      const opacity = isTurb ? state.params.turbidityOpacity : state.params.cloudOpacity;
       const layer = toLeafletLayer(res, {
         pane: isTurb ? 'turbidity' : 'cloudmask',
-        opacity: isTurb ? state.params.turbidityOpacity : state.params.cloudOpacity
+        opacity: opacity
       });
-      layer.addTo(map);
+      attachOverlay(layer, opacity > 0);
       if (isTurb) { turbLayer = layer; turbBuiltKey = key; turbBuiltAt = Date.now(); }
       else { cloudLayer = layer; cloudBuiltKey = key; cloudBuiltAt = Date.now(); }
       say(label + ' ready', 'ok');
@@ -399,6 +434,7 @@
   function setTurbidityOpacity(v) {
     state.params.turbidityOpacity = v;
     map.getPane('turbidity').style.display = v > 0 ? '' : 'none';
+    attachOverlay(turbLayer, v > 0);
     if (v > 0) ensureTurbidity();
     if (turbLayer && turbLayer.setOpacity) turbLayer.setOpacity(v);
     // one opacity, three controls — the corner flyout and the Models tab
@@ -413,6 +449,7 @@
   function setCloudOpacity(v) {
     state.params.cloudOpacity = v;
     map.getPane('cloudmask').style.display = v > 0 ? '' : 'none';
+    attachOverlay(cloudLayer, v > 0);
     if (v > 0) ensureCloudMask();
     if (cloudLayer && cloudLayer.setOpacity) cloudLayer.setOpacity(v);
     $('cloud-op').value = v;
@@ -560,13 +597,13 @@
 
   /*
    * The calendar is NOT limited to the current date range. It draws from its own
-   * index of every pass we have ever heard about, filled in a month at a time as
-   * the user navigates. Without this, browsing to a month outside the window
-   * showed no passes at all — not because there were none, but because nothing
-   * had ever asked for them.
+   * index of every pass we have ever heard about, filled in as the user
+   * navigates. Without this, browsing to a month outside the window showed no
+   * passes at all — not because there were none, but because nothing had ever
+   * asked for them.
    */
   const sceneIndex = new Map();   // 'YYYY-MM-DD' -> {date, cloud}
-  const loadedMonths = new Map(); // 'YYYY-MM'    -> true once fetched
+  const loadedYears = new Map();  // 'YYYY'       -> true once fetched
 
   function mergeScenes(list) {
     (list || []).forEach((s) => {
@@ -575,26 +612,33 @@
     });
   }
 
-  // Pull a month's passes on demand, then redraw. Fire-and-forget by design:
-  // the calendar renders immediately with whatever is known and fills in after.
-  async function ensureMonth(y, m) {
-    const key = y + '-' + String(m + 1).padStart(2, '0');
-    if (loadedMonths.has(key)) return;
-    loadedMonths.set(key, true);
-    const last = new Date(y, m + 1, 0).getDate();
+  /*
+   * Fill the index a YEAR at a time, not the single month being drawn.
+   *
+   * Paging month by month cost one scene listing per month stepped through,
+   * and each of those is an Earth Engine round trip; walking back through a
+   * season was a dozen of them. A year of passes over this AOI is a few
+   * kilobytes of JSON and one request, so a year of browsing now costs what a
+   * single month used to. Fire-and-forget by design: the calendar renders
+   * immediately with whatever is known and fills in when this lands.
+   */
+  async function ensureMonth(y) {
+    const key = String(y);
+    if (loadedYears.has(key)) return;
+    loadedYears.set(key, true);
     try {
-      const list = await state.engine.listScenes(ymd(y, m, 1), ymd(y, m, last), 100);
+      const list = await state.engine.listScenes(ymd(y, 0, 1), ymd(y, 11, 31), 100);
       mergeScenes(list);
       renderCalendar();
     } catch (err) {
-      loadedMonths.delete(key);         // let it retry next time
+      loadedYears.delete(key);          // let it retry next time
       console.warn(err);
     }
   }
 
   function clearSceneCache() {
     rawScenes.clear(); filtScenes.clear();
-    sceneIndex.clear(); loadedMonths.clear();
+    sceneIndex.clear(); loadedYears.clear();
   }
 
   async function fetchAllScenes(start, end) {
@@ -732,7 +776,7 @@
     const y = calMonth.getFullYear(), m = calMonth.getMonth();
     $('cal-month').textContent = MONTHS[m];
     $('cal-year').textContent = y;
-    ensureMonth(y, m);      // fills in and redraws if this month is new to us
+    ensureMonth(y);         // fills in and redraws if this year is new to us
 
     // Monday-first column offset
     const lead = (new Date(y, m, 1).getDay() + 6) % 7;
@@ -991,7 +1035,10 @@
         prefetchNeighbours();
       }
       state.layer = layer;
-      layer.addTo(map);
+      // Built and cached either way, but only attached when it will be seen —
+      // an invisible kelp layer would keep fetching tiles on every map move.
+      const lit = state.params.opacity > 0;
+      attachOverlay(layer, lit);
       if (layer.setOpacity) layer.setOpacity(state.params.opacity);
       let oldGone = !old;
       const dropOld = () => {
@@ -1000,7 +1047,9 @@
         if (old !== state.layer && map.hasLayer(old)) map.removeLayer(old);
       };
       // Earth Engine returns tiles that stream in; the demo layer draws immediately.
-      if (layer.on && layer.getContainer) {
+      // A layer that was never attached fires no 'load', so it takes the
+      // straight-through branch rather than waiting on tiles that never come.
+      if (lit && layer.on && layer.getContainer) {
         let announced = false;
         layer.on('load', () => {
           dropOld();
@@ -1104,17 +1153,29 @@
    * keepBuffer + updateWhenIdle mirror cfg.DEPTH.tuning's rationale: hold
    * panned-past tiles so panning back is free, and wait for the map to
    * settle before requesting new ones — every kelp tile is an EE render.
+   * updateWhenZooming joins them for the same reason: without it a multi-level
+   * zoom fetches a full tile set at each level it passes through.
    *
    * bounds clips tile REQUESTS to the AOI: the imagery is AOI-filtered
    * server-side anyway, so tiles outside it are guaranteed-empty renders
    * that still cost an EE round trip each. This stops asking for them.
    */
   const AOI_BOUNDS = L.latLngBounds([[s, w], [n, e]]);
+  /*
+   * Sentinel-2's optical bands are 10 m/pixel. At this latitude z14 works out
+   * to ~7.9 m per screen pixel, so z14 already resolves everything the source
+   * holds and z15-19 are Earth Engine upsampling data it has already returned.
+   * Capping the zoom we FETCH at 14 lets Leaflet stretch those tiles instead,
+   * which turns a five-level zoom-in from five fresh tile sets per layer into
+   * none. maxZoom stays at 19 so the map still zooms; only the fetching stops.
+   */
+  const EE_MAX_NATIVE_ZOOM = 14;
   function toLeafletLayer(res, opts) {
     if (typeof res === 'string') {
       return L.tileLayer(res, Object.assign(
         { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane',
-          keepBuffer: 4, updateWhenIdle: true, bounds: AOI_BOUNDS }, opts));
+          maxNativeZoom: EE_MAX_NATIVE_ZOOM, keepBuffer: 4,
+          updateWhenIdle: true, updateWhenZooming: false, bounds: AOI_BOUNDS }, opts));
     }
     return res; // already a Leaflet layer (demo overlay)
   }
@@ -1608,6 +1669,7 @@
 
   function setKelpOpacity(v) {
     state.params.opacity = v;
+    attachOverlay(state.layer, v > 0);
     if (state.layer && state.layer.setOpacity) state.layer.setOpacity(v);
     if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
     // one opacity, two controls — mirror the console slider (as depth does)
@@ -3437,7 +3499,11 @@
       row.addEventListener('click', (ev) => {
         if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil, .pp-mirror, .pp-name-input')) return;
         // (.pp-mirror also covers the node-marker and leg-table buttons, which share its styling)
+        // The row is the graph's title bar, so it opens and closes the plot —
+        // the caret is still there for keyboard use, and is excluded above so
+        // a click on it toggles once rather than twice.
         Paths.select(p.id);
+        Paths.toggleExpand(p.id);
       });
 
       const sw = document.createElement('span');

@@ -68,6 +68,19 @@ MODES = ("single", "composite", "truecolor", "turbidity", "turbidityComposite",
          "cloud", "cloudComposite")
 SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
+# Cloud sampled over a caller-chosen box (see cloud_over). 120 m is far coarser
+# than the 10 m source on purpose: this is a "how much of the channel was under
+# cloud" number, not a map, and the reduction runs once per date in the window.
+CLOUD_SAMPLE_SCALE = 120
+CLOUD_SAMPLE_MAX_PIXELS = 1e7
+MIN_SAMPLE_SPAN = 0.005       # degrees; below this the box reduces over nothing
+# One reduceRegion per date is cheap; a decade of them in one request is not,
+# and Cloud Run gives up at 120s. Guarded on the window's length rather than on
+# a date count, so the decision costs nothing — Sentinel-2 lands roughly 100-150
+# distinct dates a year on this AOI, so three years is comfortably inside the
+# budget. Past it the listing falls back to granule metadata and says so (rows
+# come back with aoiCloud null) instead of timing out with nothing.
+MAX_SAMPLE_DAYS = 1100
 
 S2_RED, S2_RE6, S2_NIR, S2_SWIR = "B4", "B6", "B8", "B11"
 S2_AERO, S2_BLUE, S2_GREEN = "B1", "B2", "B3"        # turbidity + cloud mask
@@ -231,6 +244,118 @@ def band_cloud(b, params):
         .And(b.select(S2_SWIR).gte(params["cloudSwirMin"]))
         .And(dev.divide(vis.max(1e-6)).lt(params["cloudWhiteness"]))
     )
+
+
+def sample_region(args):
+    """The box cloud is measured over, clamped to the AOI.
+
+    The AOI is fixed server-side on purpose (see the note beside it): a
+    caller-supplied geometry would let anyone run a global computation against
+    this project's quota. Clamping keeps the useful freedom — choosing *where
+    in the channel* to look — without handing over that lever. Returns the
+    whole AOI when nothing usable was asked for, so a malformed box degrades to
+    the old behaviour rather than to an error.
+    """
+    raw = args.get("region", "")
+    w, s, e, n = AOI
+    try:
+        rw, rs, re_, rn = [float(v) for v in raw.split(",")]
+    except (ValueError, AttributeError):
+        return region(), ""
+    rw, re_ = sorted((clamp(rw, w, e), clamp(re_, w, e)))
+    rs, rn = sorted((clamp(rs, s, n), clamp(rn, s, n)))
+    # a hairline box reduces over nothing and would report a meaningless number
+    if re_ - rw < MIN_SAMPLE_SPAN or rn - rs < MIN_SAMPLE_SPAN:
+        return region(), ""
+    key = "%.4f,%.4f,%.4f,%.4f" % (rw, rs, re_, rn)
+    return ee.Geometry.Rectangle([rw, rs, re_, rn]), key
+
+
+def dated_collection(start, end):
+    """Every pass in the window, each tagged with its calendar day."""
+    return collection(start, end, 100).map(
+        lambda img: img.set("day", img.date().format("YYYY-MM-dd"))
+    )
+
+
+def cloud_over(geom, start, end):
+    """Per-DATE cloud fraction over `geom`, from the app's own cloud mask.
+
+    Not CLOUDY_PIXEL_PERCENTAGE, and not per granule. That metadata figure
+    describes a whole ~110 km granule; this AOI straddles three of them, so a
+    date can read 60% cloudy because of weather inland while the channel is
+    clear, or read clear while the channel is socked in. It also describes a
+    single granule, while every renderer here mosaics the whole day.
+
+    So: mosaic the day, run the same QA60-or-band-test mask the cloud overlay
+    draws, and average it over the box.
+
+    `coverage` rides along because it has to. reduceRegion ignores masked
+    pixels, so a pass clipping one corner of the box would report the cloud
+    fraction of that corner — a sliver of clear sky reads as a perfect day.
+    Callers must require coverage before trusting cloud.
+
+    The mask is pinned to CLOUD_MASK's defaults rather than the caller's
+    tuning. Wiring it to the live sliders would mean every nudge of a cloud
+    threshold invalidates the whole scene listing and re-runs this.
+    """
+    col = dated_collection(start, end)
+    days = ee.List(col.aggregate_array("day")).distinct().sort()
+
+    def per_day(d):
+        day = ee.String(d)
+        sub = col.filter(ee.Filter.eq("day", day))
+        img = sub.mosaic()
+        b = reflectance(img)
+        cloudy = band_cloud(b, CLOUD_MASK).Or(clear_sky(img).Not())
+        seen = img.select(S2_RED).mask().unmask(0).rename("seen")
+        stats = (
+            cloudy.toFloat().rename("cloud").addBands(seen).reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geom,
+                scale=CLOUD_SAMPLE_SCALE,
+                maxPixels=CLOUD_SAMPLE_MAX_PIXELS,
+                bestEffort=True,
+            )
+        )
+        return ee.Feature(None, {
+            "date": day,
+            "aoiCloud": stats.get("cloud"),
+            "coverage": stats.get("seen"),
+            "cloud": sub.aggregate_min("CLOUDY_PIXEL_PERCENTAGE"),
+            "id": ee.List(sub.aggregate_array("system:index")).get(0),
+        })
+
+    rows = [
+        f["properties"]
+        for f in ee.FeatureCollection(days.map(per_day)).getInfo()["features"]
+    ]
+    out = []
+    for r in rows:
+        # A reduction that found nothing drops the key entirely rather than
+        # returning null, so normalise both directions: every row leaves here
+        # with all four keys present and cloud/coverage as percentages.
+        cloud = r.get("aoiCloud")
+        out.append({
+            "date": r.get("date"),
+            "id": r.get("id"),
+            "cloud": r.get("cloud"),
+            "aoiCloud": None if cloud is None else round(100.0 * cloud, 2),
+            "coverage": round(100.0 * (r.get("coverage") or 0.0), 2),
+        })
+    return sorted(out, key=lambda r: r["date"] or "")
+
+
+def cloud_table(start, end, geom, geom_key):
+    """cloud_over(), memoised. One reduceRegion per date is affordable once an
+    hour; it is not affordable per tile, and /layer wants the same answer."""
+    key = "aoicloud|%s|%s|%s" % (start, end, geom_key or "aoi")
+    hit = cache_get(key)
+    if hit is not None:
+        return hit
+    rows = cloud_over(geom, start, end)
+    cache_put(key, rows, SCENES_TTL_SECONDS)
+    return rows
 
 
 def spectral_index(b, index_type):
@@ -430,6 +555,10 @@ def aux_sig(params):
     )
 
 
+def days_between(start_iso, end_iso):
+    return (dt.date.fromisoformat(end_iso) - dt.date.fromisoformat(start_iso)).days
+
+
 def read_dates(args, key_start="start", key_end="end"):
     start = args.get(key_start, "")
     end = args.get(key_end, "")
@@ -470,12 +599,27 @@ def scenes():
         return jsonify({"error": str(err)}), 400
 
     max_cloud = clamp(float(request.args.get("maxCloud", 100)), 0, 100)
-    key = "scenes|%s|%s|%s" % (start, end, max_cloud)
+
+    # Measuring cloud over a box is opt-in: pass `region`. Without it this stays
+    # the metadata-only query it has always been — one cheap round trip — and
+    # every existing caller keeps working unchanged.
+    ensure_ee()
+    geom, geom_key = sample_region(request.args)
+    sampled = bool(geom_key) and days_between(start, end) <= MAX_SAMPLE_DAYS
+
+    key = "scenes|%s|%s|%s|%s" % (start, end, max_cloud, geom_key if sampled else "")
     cached = cache_get(key)
     if cached is not None:
         return jsonify(cached)
 
-    ensure_ee()
+    if sampled:
+        # already one row per date, and already carrying the metadata number
+        # alongside, so the ceiling can be applied to either
+        rows = cloud_table(start, end, geom, geom_key)
+        out = [r for r in rows if (r.get("cloud") or 0) <= max_cloud]
+        cache_put(key, out, SCENES_TTL_SECONDS)
+        return jsonify(out)
+
     col = collection(start, end, max_cloud)
     feats = col.map(
         lambda img: ee.Feature(

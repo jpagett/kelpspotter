@@ -72,6 +72,145 @@ const KelpEngine = (function () {
       .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', maxCloud));
   }
 
+  /*
+   * ---- cloud measured over a box ----
+   * The signed-in twin of cloud_over() in api/main.py. Same mask, same scale,
+   * same per-granule reduction and per-date merge, so a visitor sees the same
+   * numbers whether they are using their own Earth Engine account or the
+   * shared backend. Any change here has to land there too.
+   */
+  const CLOUD_SAMPLE_SCALE = 200;
+  const CLOUD_SAMPLE_MAX_PIXELS = 1e7;
+  const MIN_SAMPLE_SPAN = 0.005;
+  const MAX_SAMPLE_DAYS = 95;
+  /*
+   * Pinned, not the live sliders. Wiring the date filter to tunable cloud
+   * thresholds would mean every nudge of one invalidates the whole scene
+   * listing and re-runs a reduction per granule. Mirrors CLOUD_MASK in
+   * api/main.py.
+   */
+  const CLOUD_SAMPLE_MASK = { cloudVisMin: 0.18, cloudSwirMin: 0.10, cloudWhiteness: 0.55 };
+
+  /*
+   * The caller's box, ordered and clamped to the AOI. There is no quota
+   * argument for clamping here — this is the user's own account — but the two
+   * engines must agree on which water was measured, and the backend clamps.
+   */
+  function sampleGeometry(spec) {
+    if (!spec) return null;
+    const v = String(spec).split(',').map(Number);
+    if (v.length !== 4 || v.some((n) => !isFinite(n))) return null;
+    const aw = cfg.AOI[0], as = cfg.AOI[1], ae = cfg.AOI[2], an = cfg.AOI[3];
+    const lo = (x, a, b) => Math.max(a, Math.min(b, x));
+    const w = lo(Math.min(v[0], v[2]), aw, ae), e = lo(Math.max(v[0], v[2]), aw, ae);
+    const s = lo(Math.min(v[1], v[3]), as, an), n = lo(Math.max(v[1], v[3]), as, an);
+    if (e - w < MIN_SAMPLE_SPAN || n - s < MIN_SAMPLE_SPAN) return null;
+    return ee.Geometry.Rectangle([w, s, e, n]);
+  }
+
+  const daysBetween = (a, b) =>
+    Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+
+  // every pass in the window, tagged with its calendar day
+  function datedCollection(startISO, endISO) {
+    return collection(startISO, endISO, 100)
+      .map((img) => img.set('day', img.date().format('YYYY-MM-dd')));
+  }
+
+  /*
+   * What a composite reduces over. With an explicit day list, exactly those
+   * days — the caller has already had cloud measured over its box and decided
+   * which passes are usable, and re-deciding here would both cost a reduction
+   * per granule on every tile and risk disagreeing with the dates the picker
+   * just showed. Without one, the old metadata ceiling. Mirrors
+   * composite_source() in api/main.py.
+   */
+  function compositeSource(startISO, endISO, maxCloud, dates) {
+    if (!dates || !dates.length) return collection(startISO, endISO, maxCloud);
+    return datedCollection(startISO, endISO)
+      .filter(ee.Filter.inList('day', dates.slice(0, 400)));
+  }
+
+  /*
+   * Per-date cloud fraction over `geom`, from the same QA60-or-band-test mask
+   * the cloud overlay draws.
+   *
+   * Mapped over IMAGES, not over distinct dates. Listing the days and
+   * mosaicking each one re-filters the whole collection once per day inside a
+   * server-side map, which Earth Engine handles badly; one pass over the
+   * images and a merge here is the same answer far quicker.
+   *
+   * `coverage` is not decoration. reduceRegion ignores masked pixels, so a
+   * pass whose swath clips the corner of the box would report that corner's
+   * cloud fraction — and one whose swath misses entirely reports nothing at
+   * all while its granule metadata still says "0% cloud". Those are the dates
+   * this whole feature exists to stop recommending, so every row carries how
+   * much of the box was actually seen.
+   */
+  function sampledScenes(startISO, endISO, geom) {
+    const stats = (img) => {
+      const b = reflectance(img);
+      const cloudy = bandCloud(b, CLOUD_SAMPLE_MASK).or(clearSky(img).not());
+      const seen = img.select(S2_RED).mask().unmask(0).rename('seen');
+      const r = cloudy.toFloat().rename('cloud').addBands(seen).reduceRegion({
+        reducer: ee.Reducer.mean(),
+        geometry: geom,
+        scale: CLOUD_SAMPLE_SCALE,
+        maxPixels: CLOUD_SAMPLE_MAX_PIXELS,
+        bestEffort: true
+      });
+      return ee.Feature(null, {
+        day: img.get('day'),
+        cloud: r.get('cloud'),
+        seen: r.get('seen'),
+        meta: img.get('CLOUDY_PIXEL_PERCENTAGE'),
+        id: img.get('system:index')
+      });
+    };
+
+    return new Promise((resolve, reject) => {
+      ee.FeatureCollection(datedCollection(startISO, endISO).map(stats))
+        .evaluate((fc, err) => {
+          if (err) return reject(err);
+          /*
+           * Merge a date's granules by how much of the box each saw. Their
+           * footprints are near-disjoint over a box this size, so observed
+           * area adds and cloud is the area-weighted mean of the parts —
+           * what mosaic-then-reduce would have measured, without the
+           * per-day refiltering.
+           */
+          const acc = {};
+          (fc.features || []).forEach((f) => {
+            const p = f.properties || {};
+            if (!p.day) return;
+            const seen = p.seen || 0;
+            const a = acc[p.day] || (acc[p.day] = { seen: 0, cloudy: 0, meta: null, id: null });
+            a.seen += seen;
+            a.cloudy += (p.cloud || 0) * seen;
+            if (p.meta !== null && p.meta !== undefined && (a.meta === null || p.meta < a.meta)) {
+              a.meta = p.meta;
+              a.id = p.id;
+            }
+            if (a.id === null) a.id = p.id;
+          });
+          const round2 = (v) => Math.round(v * 100) / 100;
+          const out = Object.keys(acc).sort().map((day) => {
+            const a = acc[day];
+            return {
+              date: day,
+              id: a.id,
+              cloud: a.meta,
+              // null, not zero, when the box was never observed: no pixels
+              // means no opinion, and the caller has to tell those apart
+              aoiCloud: a.seen <= 0 ? null : round2(100 * a.cloudy / a.seen),
+              coverage: round2(100 * Math.min(a.seen, 1))   // granule overlap must not exceed the box
+            };
+          });
+          resolve(out);
+        });
+    });
+  }
+
   // QA60: bit 10 = opaque cloud, bit 11 = cirrus. Stands in for the paper's
   // offline cloud-free compositing step.
   function clearSky(img) {
@@ -231,6 +370,7 @@ const KelpEngine = (function () {
 
   return {
     name: 'earth-engine',
+    supportsCloudSample: true,   // listScenes honours a `region` box
     get available() { return ready; },
     needsLogin: false,
 
@@ -313,7 +453,19 @@ const KelpEngine = (function () {
     },
 
     // Return [{id, date:'YYYY-MM-DD', cloud:Number}] for the scrubber.
-    listScenes(startISO, endISO, maxCloud) {
+    /*
+     * `region` switches this from Sentinel-2's granule-wide
+     * CLOUDY_PIXEL_PERCENTAGE to cloud actually measured over that box, adding
+     * aoiCloud and coverage to every row. Same contract as the shared
+     * backend's /scenes, including the fallbacks: without a usable box, or for
+     * a window too wide to sample in one computation, this returns the plain
+     * metadata listing and the caller must treat aoiCloud as optional.
+     */
+    listScenes(startISO, endISO, maxCloud, region) {
+      const geom = sampleGeometry(region);
+      if (geom && daysBetween(startISO, endISO) <= MAX_SAMPLE_DAYS) {
+        return sampledScenes(startISO, endISO, geom);
+      }
       const col = collection(startISO, endISO, maxCloud);
       const feats = col.map((img) => ee.Feature(null, {
         id: img.get('system:index'),
@@ -356,11 +508,11 @@ const KelpEngine = (function () {
      * is enough to wipe out the detection entirely. The median throws out those
      * outliers, so thin canopy survives.
      */
-    compositeLayer(startISO, endISO, maxCloud, p) {
+    compositeLayer(startISO, endISO, maxCloud, p, dates) {
       // per-scene masking BEFORE the median: with the cloud mask enabled the
       // band test joins QA60, so cloudy observations never enter the composite
       const gated = cloudGated(p);
-      const clear = collection(startISO, endISO, maxCloud)
+      const clear = compositeSource(startISO, endISO, maxCloud, dates)
         .map((img) => {
           const b = reflectance(img);
           let m = clearSky(img);
@@ -384,9 +536,9 @@ const KelpEngine = (function () {
       return tileLayerFromImage(renderTurbidity(b, p, clear), {});
     },
 
-    turbidityCompositeLayer(startISO, endISO, maxCloud, p) {
+    turbidityCompositeLayer(startISO, endISO, maxCloud, p, dates) {
       const gated = cloudGated(p);
-      const clear = collection(startISO, endISO, maxCloud)
+      const clear = compositeSource(startISO, endISO, maxCloud, dates)
         .map((img) => {
           const b = reflectance(img);
           let m = clearSky(img);
@@ -410,8 +562,8 @@ const KelpEngine = (function () {
       return tileLayerFromImage(renderCloud(b, cloud, p), {});
     },
 
-    cloudCompositeLayer(startISO, endISO, maxCloud, p) {
-      const col = collection(startISO, endISO, maxCloud);
+    cloudCompositeLayer(startISO, endISO, maxCloud, p, dates) {
+      const col = compositeSource(startISO, endISO, maxCloud, dates);
       const clearCount = col.map((img) => {
         const b = reflectance(img);
         return clearSky(img).and(bandCloud(b, p).not())

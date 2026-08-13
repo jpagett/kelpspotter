@@ -1235,14 +1235,15 @@
     } else sampleRect.setBounds(b);
   }
   /*
-   * Only the shared backend can measure cloud over a box — the demo engine has
-   * no imagery to measure and the signed-in Earth Engine path does not
-   * implement it. Saying "measured over 69 × 13 km" there would be a promise
-   * the app cannot keep, so the control says so plainly and switches itself
-   * off rather than quietly showing whole-granule numbers under an area label.
+   * Asked of the engine rather than inferred from its name: both the shared
+   * backend and the signed-in Earth Engine path can measure cloud over a box,
+   * the demo engine has no imagery to measure, and a name check would have to
+   * be edited every time that changes. Where it is unsupported the control
+   * says so and switches itself off — labelling whole-granule numbers as an
+   * area measurement would be a promise the app cannot keep.
    */
   function sampleSupported() {
-    return !!(state.engine && state.engine.name === 'api');
+    return !!(state.engine && state.engine.supportsCloudSample);
   }
   function syncSampleUi() {
     const supported = sampleSupported();

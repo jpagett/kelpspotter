@@ -89,6 +89,7 @@ const ApiKelpEngine = (function () {
 
   return {
     name: 'api',
+    supportsCloudSample: true,   // listScenes honours a `region` box
     get available() { return ready; },
     needsLogin: false,
 

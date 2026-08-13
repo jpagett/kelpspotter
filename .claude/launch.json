@@ -4,12 +4,6 @@
     {
       "name": "kelpspotter-static",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8177", "--directory", "C:\\Users\\jpagett\\code\\kelpspotter"],
-      "port": 8177
-    },
-    {
-      "name": "kelpspotter-cors",
-      "runtimeExecutable": "python",
       "runtimeArgs": ["tools/devserve.py", ".", "8000"],
       "port": 8000
     }

@@ -605,10 +605,93 @@
   const sceneIndex = new Map();   // 'YYYY-MM-DD' -> {date, cloud}
   const loadedYears = new Map();  // 'YYYY'       -> true once fetched
 
+  /*
+   * ---- which cloud number the UI believes ----
+   * The sample box, ordered and clamped to the AOI. The backend clamps too —
+   * it has to, since a free geometry would aim the project's quota anywhere —
+   * but a box dragged past the edge should LOOK like the one being measured.
+   */
+  /*
+   * The default sample box: from config when it is there, derived from the AOI
+   * when it is not.
+   *
+   * The fallback is not paranoia. sw.js serves the app shell
+   * stale-while-revalidate, so the first load after a deploy can genuinely pair
+   * a fresh app.js with a cached older config.js — and reading
+   * cfg.DEFAULTS.cloudSample straight through threw there, aborting boot and
+   * dropping the visitor to demo data. A missing preference must never cost
+   * someone their live imagery.
+   */
+  function defaultSampleBox() {
+    const d = (cfg.DEFAULTS || {}).cloudSample;
+    const ok = (v) => typeof v === 'number' && isFinite(v);
+    if (d && ok(d.w) && ok(d.s) && ok(d.e) && ok(d.n)) {
+      return { w: d.w, s: d.s, e: d.e, n: d.n };
+    }
+    const aw = cfg.AOI[0], as = cfg.AOI[1], ae = cfg.AOI[2], an = cfg.AOI[3];
+    return { w: aw + (ae - aw) * 0.18, s: as + (an - as) * 0.32,
+             e: aw + (ae - aw) * 0.86, n: as + (an - as) * 0.80 };
+  }
+
+  function clampSample(box) {
+    if (!box) return null;
+    const aw = cfg.AOI[0], as = cfg.AOI[1], ae = cfg.AOI[2], an = cfg.AOI[3];
+    const lo = (v, a, b) => Math.max(a, Math.min(b, v));
+    const w = lo(Math.min(box.w, box.e), aw, ae), e = lo(Math.max(box.w, box.e), aw, ae);
+    const s = lo(Math.min(box.s, box.n), as, an), n = lo(Math.max(box.s, box.n), as, an);
+    if (e - w < 0.005 || n - s < 0.005) return null;    // reduces over nothing
+    return { w: w, s: s, e: e, n: n };
+  }
+  function sampleRegionParam() {
+    if (!state.params.useAoiCloud) return null;
+    const r = clampSample(state.params.cloudSample);
+    return r ? [r.w, r.s, r.e, r.n].map((v) => v.toFixed(4)).join(',') : null;
+  }
+  // every scene cache is keyed on this too: change the box and the old
+  // listings describe a different question, not a stale answer to this one
+  const sampleSig = () => sampleRegionParam() || 'meta';
+
+  /*
+   * The cloud number every part of the UI should reason about.
+   *
+   * aoiCloud — measured over the sample box with the same mask the cloud
+   * overlay draws — is the honest one, and wins whenever the backend supplied
+   * it. It is absent for the demo engine, for windows too wide to sample, and
+   * when the feature is off, so this falls back to Sentinel-2's granule-wide
+   * figure rather than pretending there is no number at all.
+   *
+   * A pass that barely clipped the box is not clear, it is unobserved: below
+   * minCoverage its aoiCloud describes a corner of the box, so those dates
+   * report as fully clouded rather than as the best day of the year.
+   */
+  function sceneCloud(sc) {
+    if (!sc) return 100;
+    if (cloudIsSampled(sc)) {
+      if ((sc.coverage || 0) < (state.params.minCoverage || 0)) return 100;
+      return sc.aoiCloud;
+    }
+    return sc.cloud;
+  }
+  function cloudIsSampled(sc) {
+    return !!(state.params.useAoiCloud && sc &&
+              sc.aoiCloud !== null && sc.aoiCloud !== undefined);
+  }
+  // "12% cloud" vs "12% cloud over the sample area" — the tooltip should say
+  // which question was answered, since the two can disagree wildly
+  function cloudLabel(sc) {
+    if (!sc) return '';
+    const v = pct(sceneCloud(sc));
+    if (!cloudIsSampled(sc)) return v + '% cloud (whole scene)';
+    if ((sc.coverage || 0) < (state.params.minCoverage || 0)) {
+      return 'only ' + pct(sc.coverage) + '% of the sample area was seen';
+    }
+    return v + '% cloud over the sample area';
+  }
+
   function mergeScenes(list) {
     (list || []).forEach((s) => {
       const cur = sceneIndex.get(s.date);
-      if (!cur || s.cloud < cur.cloud) sceneIndex.set(s.date, s);   // keep the clearest
+      if (!cur || sceneCloud(s) < sceneCloud(cur)) sceneIndex.set(s.date, s);  // keep the clearest
     });
   }
 
@@ -627,6 +710,8 @@
     if (loadedYears.has(key)) return;
     loadedYears.set(key, true);
     try {
+      // metadata only: a year of it is one cheap round trip, where a year of
+      // SAMPLED cloud is far past what one Earth Engine computation will do
       const list = await state.engine.listScenes(ymd(y, 0, 1), ymd(y, 11, 31), 100);
       mergeScenes(list);
       renderCalendar();
@@ -636,11 +721,146 @@
     }
   }
 
-  function clearSceneCache() {
-    rawScenes.clear(); filtScenes.clear();
-    sceneIndex.clear(); loadedYears.clear();
+  /*
+   * Sampled cloud for the month on screen, so browsing the calendar shows the
+   * same kind of number the map is filtered by. One month is ~5s of backend
+   * work — small enough to fire on every month you land on, where the year
+   * above would fail outright. Fire-and-forget, like its metadata sibling.
+   */
+  const sampledMonths = new Map();
+  async function ensureMonthSampled(y, m) {
+    const region = sampleRegionParam();
+    if (!region || !state.engine) return;
+    const key = y + '-' + m + '|' + region;
+    if (sampledMonths.has(key)) return;
+    sampledMonths.set(key, true);
+    try {
+      const last = new Date(y, m + 1, 0).getDate();
+      const list = await state.engine.listScenes(ymd(y, m, 1), ymd(y, m, last), 100, region);
+      if (sampleRegionParam() !== region) return;   // box moved while in flight
+      if (!mergeCloudInto(list)) return;
+      filtScenes.clear();
+      applyCloudCeiling();
+      renderCalendar();
+    } catch (err) {
+      sampledMonths.delete(key);
+      console.warn(err);
+    }
   }
 
+  function clearSceneCache() {
+    rawScenes.clear(); filtScenes.clear();
+    sceneIndex.clear(); loadedYears.clear(); refinedRanges.clear();
+  }
+
+  /*
+   * ---- second pass: cloud measured over the sample box ----
+   * The rows already on screen came from Sentinel-2's granule metadata. This
+   * asks the backend to measure the same dates properly and copies the answer
+   * onto the scene objects already in hand, so there is exactly one object per
+   * date and everything reading it (calendar, ceiling, readout) upgrades at
+   * once. Fire-and-forget on purpose: if it fails the app is left exactly
+   * where it was before this feature existed, which is a working map.
+   */
+  const refinedRanges = new Map();   // 'start|end|region' -> true once merged
+
+  function mergeCloudInto(list) {
+    let touched = 0;
+    (list || []).forEach((row) => {
+      if (row.aoiCloud === null || row.aoiCloud === undefined) return;
+      [sceneIndex.get(row.date)].concat(
+        (state.allScenes || []).filter((s) => s.date === row.date)
+      ).forEach((sc) => {
+        if (!sc) return;
+        sc.aoiCloud = row.aoiCloud;
+        sc.coverage = row.coverage;
+        touched++;
+      });
+    });
+    return touched;
+  }
+
+  /*
+   * Chunked, because one request cannot cover much window.
+   *
+   * Each date costs the backend an Earth Engine reduction per granule, and a
+   * single computation gives out somewhere past three months — measured: one
+   * month 5s, two 14s, three 23s, six fails inside Earth Engine. So a long
+   * range is walked in ~3-month pieces, newest first (that is the end of the
+   * range people are usually looking at), merging as each lands. Sequential on
+   * purpose: these are expensive, the backend rate-limits per IP, and there is
+   * no hurry — the map has been up on metadata since before this started.
+   */
+  const SAMPLE_CHUNK_DAYS = 90;
+  const MAX_SAMPLE_CHUNKS = 8;       // ~2 years of background refinement
+
+  function sampleChunks(start, end) {
+    const out = [];
+    const dayMs = 86400000;
+    let hi = parseISO(end);
+    const lo = parseISO(start);
+    while (hi >= lo && out.length < MAX_SAMPLE_CHUNKS) {
+      const from = new Date(Math.max(lo.getTime(), hi.getTime() - (SAMPLE_CHUNK_DAYS - 1) * dayMs));
+      out.push([isoOf(from), isoOf(hi)]);
+      hi = new Date(from.getTime() - dayMs);
+    }
+    return out;
+  }
+
+  async function refineCloud(start, end) {
+    const region = sampleRegionParam();
+    if (!region || !state.engine) return;
+    const chunks = sampleChunks(start, end);
+    let merged = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const from = chunks[i][0], to = chunks[i][1];
+      const key = from + '|' + to + '|' + region;
+      if (refinedRanges.has(key)) continue;
+      refinedRanges.set(key, true);
+      try {
+        const list = await state.engine.listScenes(from, to, 100, region);
+        // the window or the box may have moved on while this was in flight;
+        // applying a stale answer would quietly describe the wrong water
+        const now = dateRangeISO();
+        if (now[0] !== start || now[1] !== end || sampleRegionParam() !== region) return;
+        if (!mergeCloudInto(list)) continue;
+        merged++;
+        filtScenes.clear();        // the ceiling now means something different
+        applyCloudCeiling();
+        renderCalendar();
+      } catch (err) {
+        refinedRanges.delete(key); // let a later interaction try again
+        console.warn(err);
+      }
+    }
+    if (merged) say('Cloud re-measured over the sample area', 'ok');
+  }
+
+  /*
+   * Moving the box invalidates every sampled number in hand — they describe a
+   * different patch of water, not a stale version of this one. Drop them and
+   * re-measure rather than letting the calendar mix two questions.
+   */
+  function resetSampledCloud() {
+    refinedRanges.clear();
+    sampledMonths.clear();
+    filtScenes.clear();
+    const forget = (sc) => { if (sc) { delete sc.aoiCloud; delete sc.coverage; } };
+    sceneIndex.forEach(forget);
+    (state.allScenes || []).forEach(forget);
+    applyCloudCeiling();
+    renderCalendar();
+    const [rs, re] = dateRangeISO();
+    refineCloud(rs, re);
+  }
+
+  /*
+   * Deliberately the METADATA listing: no sample region, no reductions, one
+   * cheap round trip. Measuring cloud over the box costs an Earth Engine
+   * reduction per granule — seconds, not milliseconds — and blocking first
+   * paint on it would trade a real problem for a worse one. refineCloud()
+   * below upgrades these rows in the background once the map is already up.
+   */
   async function fetchAllScenes(start, end) {
     const key = start + '|' + end;
     if (rawScenes.has(key)) return rawScenes.get(key);
@@ -657,9 +877,9 @@
 
   function scenesAtCeiling(ceiling) {
     const [start, end] = dateRangeISO();
-    const key = start + '|' + end + '|' + ceiling;
+    const key = start + '|' + end + '|' + ceiling + '|' + sampleSig();
     if (filtScenes.has(key)) return filtScenes.get(key);
-    const out = (state.allScenes || []).filter((s) => s.cloud <= ceiling);
+    const out = (state.allScenes || []).filter((s) => sceneCloud(s) <= ceiling);
     filtScenes.set(key, out);
     return out;
   }
@@ -679,6 +899,8 @@
       toast('Could not list scenes — ' + (err && err.message ? err.message : 'check the console.'), true);
     }
     applyCloudCeiling();
+    // the map is up on metadata now; go get the honest numbers
+    refineCloud(start, end);
   }
 
   /*
@@ -762,6 +984,7 @@
     const [y, m, d] = s.split('-').map(Number);
     return new Date(y, m - 1, d);
   };
+  const isoOf = (d) => ymd(d.getFullYear(), d.getMonth(), d.getDate());
 
   function calOpen() { return !$('cal').hasAttribute('hidden'); }
 
@@ -776,7 +999,8 @@
     const y = calMonth.getFullYear(), m = calMonth.getMonth();
     $('cal-month').textContent = MONTHS[m];
     $('cal-year').textContent = y;
-    ensureMonth(y);         // fills in and redraws if this year is new to us
+    ensureMonth(y);              // fills in and redraws if this year is new to us
+    ensureMonthSampled(y, m);    // and re-measures this month's cloud over the box
 
     // Monday-first column offset
     const lead = (new Date(y, m, 1).getDay() + 6) % 7;
@@ -799,20 +1023,20 @@
       if (picking) {
         // any day can be a range edge, pass or no pass
         btn.className = 'cal-day edge' +
-          (date === rs || date === re ? ' sel' : (sc && sc.cloud <= ceiling ? ' has' : ''));
+          (date === rs || date === re ? ' sel' : (sc && sceneCloud(sc) <= ceiling ? ' has' : ''));
         btn.title = 'Set the range ' + calMode + ' to ' + date;
         btn.addEventListener('click', () => setRangeEdge(date));
       } else if (!sc) {
         btn.className = 'cal-day';
         btn.disabled = true;
-      } else if (sc.cloud > ceiling) {
+      } else if (sceneCloud(sc) > ceiling) {
         btn.className = 'cal-day over';
         btn.disabled = true;      // only ceiling-passing dates are clickable
-        btn.title = date + ' · ' + pct(sc.cloud) + '% cloud — above the ceiling';
+        btn.title = date + ' · ' + cloudLabel(sc) + ' — above the ceiling';
       } else {
         usable++;
         btn.className = 'cal-day has' + (date === selected ? ' sel' : '');
-        btn.title = date + ' · ' + pct(sc.cloud) + '% cloud';
+        btn.title = date + ' · ' + cloudLabel(sc);
         btn.addEventListener('click', () => pickDate(date));
       }
       grid.appendChild(btn);
@@ -914,13 +1138,124 @@
       cal.removeAttribute('hidden');
       $('date-big').setAttribute('aria-expanded', 'true');
       renderCalendar();
+      syncSampleUi();          // and draws the sample box on the map
     } else {
       calMode = 'scene';
       cal.setAttribute('hidden', '');
       setYearList(false);
       $('date-big').setAttribute('aria-expanded', 'false');
+      // closing the picker takes its map furniture and any armed draw with it
+      setSampling(false);
+      renderSampleBox();
     }
   }
+
+  /*
+   * ---- the cloud sample box ----
+   * Drawn on the map whenever the calendar is open, so the cloud numbers in it
+   * always have visible provenance: you can see the water they describe. It
+   * sits in Leaflet's default overlay pane, which is above every imagery pane
+   * this app creates, so it is never buried under the kelp mask.
+   */
+  let sampleRect = null, samplePreview = null, sampleAnchor = null, sampling = false;
+
+  function sampleBounds() {
+    const r = clampSample(state.params.cloudSample);
+    return r ? L.latLngBounds([[r.s, r.w], [r.n, r.e]]) : null;
+  }
+  function sampleSizeLabel() {
+    const r = clampSample(state.params.cloudSample);
+    if (!r) return 'whole AOI';
+    const km = (a, b) => L.latLng(a[0], a[1]).distanceTo(L.latLng(b[0], b[1])) / 1000;
+    return Math.round(km([r.s, r.w], [r.s, r.e])) + ' × ' +
+           Math.round(km([r.s, r.w], [r.n, r.w])) + ' km';
+  }
+  function renderSampleBox() {
+    const b = sampleBounds();
+    const want = b && calOpen() && state.params.useAoiCloud;
+    if (!want) {
+      if (sampleRect) { map.removeLayer(sampleRect); sampleRect = null; }
+      return;
+    }
+    if (!sampleRect) {
+      sampleRect = L.rectangle(b, {
+        color: '#5ec6c9', weight: 1, dashArray: '4 3',
+        fillColor: '#5ec6c9', fillOpacity: 0.06, interactive: false
+      }).addTo(map);
+    } else sampleRect.setBounds(b);
+  }
+  function syncSampleUi() {
+    const on = !!state.params.useAoiCloud;
+    $('cal-sample-on').checked = on;
+    $('cal-sample-val').textContent = on ? sampleSizeLabel() : 'whole scene';
+    $('cal-sample-draw').disabled = !on;
+    $('cal-sample-reset').disabled = !on;
+    renderSampleBox();
+  }
+
+  /*
+   * Pointer events rather than Leaflet's mouse events: Leaflet only fires
+   * mousedown/mousemove/mouseup from real mouse input, so a touch drag would
+   * never draw anything. Capture keeps the drag alive if the finger leaves the
+   * map, and dragging is disabled meanwhile so the map does not pan underneath.
+   */
+  function setSampling(on) {
+    if (on === sampling) return;
+    sampling = on;
+    $('cal-sample-draw').setAttribute('aria-pressed', on ? 'true' : 'false');
+    map.getContainer().classList.toggle('sampling', on);
+    if (on) {
+      map.dragging.disable();
+      if (map.boxZoom) map.boxZoom.disable();
+      say('Drag a box on the map to set where cloud is measured — Esc to cancel');
+    } else {
+      map.dragging.enable();
+      if (map.boxZoom) map.boxZoom.enable();
+      sampleAnchor = null;
+      if (samplePreview) { map.removeLayer(samplePreview); samplePreview = null; }
+    }
+  }
+
+  (function bindSampleDrawing() {
+    const el = map.getContainer();
+    const at = (ev) => {
+      const r = el.getBoundingClientRect();
+      return map.containerPointToLatLng(L.point(ev.clientX - r.left, ev.clientY - r.top));
+    };
+    el.addEventListener('pointerdown', (ev) => {
+      if (!sampling || (ev.button !== undefined && ev.button > 0)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      try { el.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
+      sampleAnchor = at(ev);
+      if (samplePreview) map.removeLayer(samplePreview);
+      samplePreview = L.rectangle(L.latLngBounds(sampleAnchor, sampleAnchor), {
+        color: 'var(--kelp)', weight: 1, dashArray: '4 3',
+        fillColor: '#f2b134', fillOpacity: 0.10, interactive: false
+      }).addTo(map);
+      samplePreview.setStyle({ color: '#f2b134' });
+    }, true);
+    el.addEventListener('pointermove', (ev) => {
+      if (!sampling || !sampleAnchor || !samplePreview) return;
+      samplePreview.setBounds(L.latLngBounds(sampleAnchor, at(ev)));
+    }, true);
+    el.addEventListener('pointerup', (ev) => {
+      if (!sampling || !sampleAnchor) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const b = L.latLngBounds(sampleAnchor, at(ev));
+      const box = clampSample({ w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() });
+      setSampling(false);
+      if (!box) {
+        // a click rather than a drag, or a box outside the AOI entirely
+        say('That box was too small to measure — sample area unchanged', 'warn');
+        return;
+      }
+      state.params.cloudSample = box;
+      syncSampleUi();
+      say('Sample area set to ' + sampleSizeLabel() + ' — re-measuring cloud');
+      resetSampledCloud();
+      schedulePersist();
+    }, true);
+  })();
 
   function shiftMonth(delta) {
     calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + delta, 1);
@@ -969,8 +1304,35 @@
     calMode = 'scene';
     renderCalendar();
   });
+  $('cal-sample-draw').addEventListener('click', () => setSampling(!sampling));
+  $('cal-sample-reset').addEventListener('click', () => {
+    setSampling(false);
+    state.params.cloudSample = defaultSampleBox();
+    syncSampleUi();
+    say('Sample area reset to the default channel box');
+    resetSampledCloud();
+    schedulePersist();
+  });
+  $('cal-sample-on').addEventListener('change', (ev) => {
+    setSampling(false);
+    state.params.useAoiCloud = ev.target.checked;
+    syncSampleUi();
+    say(ev.target.checked
+      ? 'Cloud measured over the sample area'
+      : 'Cloud back to the whole-scene figure Sentinel-2 reports');
+    // switching the source changes what the ceiling means, both directions
+    filtScenes.clear();
+    applyCloudCeiling();
+    renderCalendar();
+    if (ev.target.checked) { const r = dateRangeISO(); refineCloud(r[0], r[1]); }
+    schedulePersist();
+  });
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && calOpen()) setCalendar(false);
+    if (ev.key !== 'Escape') return;
+    // an armed draw is the innermost thing Esc should cancel — losing the
+    // whole calendar because you thought better of redrawing would be rude
+    if (sampling) { setSampling(false); say('Sample area unchanged'); return; }
+    if (calOpen()) setCalendar(false);
   });
   /*
    * Capture phase, deliberately. A day button re-renders the grid in its own
@@ -992,7 +1354,10 @@
       $('date-meta').textContent = state.scenes[0].date + ' → ' + state.scenes[state.scenes.length - 1].date;
     } else {
       $('date-big').textContent = sc.date;
-      $('date-meta').textContent = pct(sc.cloud) + '% cloud · ' + (state.idx + 1) + '/' + state.scenes.length;
+      $('date-meta').textContent = pct(sceneCloud(sc)) + '% cloud' +
+        (cloudIsSampled(sc) ? ' (area)' : '') +
+        ' · ' + (state.idx + 1) + '/' + state.scenes.length;
+      $('date-meta').title = cloudLabel(sc);
     }
     $('prev').disabled = state.params.mode === 'composite' || state.idx <= 0;
     $('next').disabled = state.params.mode === 'composite' || state.idx >= state.scenes.length - 1;
@@ -4649,6 +5014,14 @@
     $('mode-composite').setAttribute('aria-pressed', state.params.mode === 'composite');
 
     setCloudCeiling(state.params.maxCloud, true);   // sync both sliders, no refilter yet
+    // a restored box may be from an older build, or absent entirely — and so
+    // may its companions, if a cached config.js predates them
+    if (!clampSample(state.params.cloudSample)) {
+      state.params.cloudSample = defaultSampleBox();
+    }
+    if (state.params.useAoiCloud === undefined) state.params.useAoiCloud = true;
+    if (!(state.params.minCoverage >= 0)) state.params.minCoverage = 60;
+    syncSampleUi();
     setDirty(false);
 
     $('depth-op').value = state.params.depthOpacity;
@@ -4698,6 +5071,13 @@
         updateTurbRamp();
         syncModelControls();   // the Models tabs' cloud/turbidity tuning sliders
         setDockView(state.params.dockView);   // imported dock arrangement
+        // an imported box describes different water; drop the numbers measured
+        // over the old one rather than showing them against the new outline
+        if (!clampSample(state.params.cloudSample)) {
+          state.params.cloudSample = defaultSampleBox();
+        }
+        syncSampleUi();
+        resetSampledCloud();
         setCloudCeiling(state.params.maxCloud, true);
         $('relief').checked = !!state.params.showRelief;
         $('contours').checked = !!state.params.showContours;

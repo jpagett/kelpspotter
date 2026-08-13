@@ -277,6 +277,28 @@ window.KELP_CONFIG = {
     // bottom-right overlay picker and applied as pane z-indexes
     overlayOrder: ['truecolor', 'depth', 'turbidity', 'kelp', 'clouds'],
     mode: 'composite',      // 'single' scene, or 'composite' (median composite over the range)
+    /*
+     * Where cloud cover is measured when picking dates.
+     *
+     * Sentinel-2's own CLOUDY_PIXEL_PERCENTAGE covers a whole ~110km granule,
+     * and this AOI spans three of them — so it routinely calls a date cloudy
+     * because of weather over the mountains while the channel is clear. This
+     * box is the water you actually care about; the backend runs the same
+     * cloud mask the overlay draws and averages it over here instead.
+     *
+     * Defaults to the central channel rather than the whole AOI: the AOI's
+     * corners are open ocean and back-country, and neither should get a vote
+     * on whether a dive day looks clear. Draggable — see the calendar.
+     */
+    cloudSample: { w: -120.35, s: 34.38, e: -119.60, n: 34.50 },
+    useAoiCloud: true,      // false falls back to the granule metadata figure
+    /*
+     * A pass that clips the corner of the sample box would report the cloud
+     * fraction of that corner alone, so a sliver of clear sky could read as a
+     * perfect day. Dates observing less than this much of the box are treated
+     * as unusable rather than as clear.
+     */
+    minCoverage: 60,        // percent of the sample box that must be observed
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'
     sacUnit: 'cuft/min',    // gas planning: 'cuft/min' | 'L/min'

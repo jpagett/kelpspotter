@@ -412,6 +412,22 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal-act.ghost { flex: 0 0 auto; padding: 6px 10px; color: var(--ctl-fg); }
 .cal-act.ghost:hover { color: var(--kelp); }
 
+.cal-sample { margin-top: 10px; }
+.cal-sample .label { font-size: 11px; color: var(--tide); }
+.cal-sample .value { font-family: var(--mono); font-size: 10px; color: var(--ctl-fg); }
+.cal-sample-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.cal-sample-actions .cal-act { flex: 0 0 auto; padding: 5px 8px; }
+.cal-sample-toggle {
+  margin-left: auto; display: flex; align-items: center; gap: 4px; cursor: pointer;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em;
+  color: var(--ctl-fg); white-space: nowrap;
+}
+.cal-sample-toggle input { accent-color: var(--kelp); cursor: pointer; }
+/* armed: the next drag on the map replaces the box */
+#cal-sample-draw[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+/* while armed the map is a drawing surface, not a pannable map */
+.leaflet-container.sampling, .leaflet-container.sampling .leaflet-grab { cursor: crosshair; }
+
 .cal-cloud { margin-top: 10px; }
 .cal-cloud .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
 .cal-cloud .label { font-size: 11px; color: var(--tide); }

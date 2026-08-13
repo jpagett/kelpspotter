@@ -29,6 +29,8 @@ const Session = (function () {
     'showRelief', 'showContours', 'depthStyle', 'depthOpacity', 'trueColorOpacity',
     'turbidityOpacity', 'cloudOpacity', 'turbidityPalette', 'cloudPalette',
     'cloudVisMin', 'cloudSwirMin', 'cloudWhiteness',
+    // where cloud is measured when picking dates, and whether to use it
+    'cloudSample', 'useAoiCloud', 'minCoverage',
     'turbMode', 'turbClarityMin', 'turbClarityMax',
     'turbGlint', 'turbNirFloor', 'turbGlintGain'
   ];

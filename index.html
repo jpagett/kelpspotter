@@ -108,6 +108,26 @@
           <div class="label-row"><span class="label">Cloud ceiling</span><span id="cal-cloud-val" class="value">40%</span></div>
           <input id="cal-cloud" type="range" min="0" max="90" step="5" value="40">
         </div>
+        <!-- Where that ceiling is measured. Sentinel-2's own cloud figure covers
+             a ~110km granule and this AOI spans three of them, so it regularly
+             calls a day cloudy over the mountains while the channel is clear.
+             The box is drawn on the map whenever this calendar is open, so the
+             numbers above always have visible provenance. -->
+        <div class="cal-sample">
+          <div class="label-row">
+            <span class="label">Measured over</span>
+            <span id="cal-sample-val" class="value">—</span>
+          </div>
+          <div class="cal-sample-actions">
+            <button id="cal-sample-draw" class="cal-act ghost" type="button" aria-pressed="false"
+                    title="Drag a box on the map to choose where cloud is measured">Redraw area</button>
+            <button id="cal-sample-reset" class="cal-act ghost" type="button"
+                    title="Back to the default channel box">Reset</button>
+            <label class="cal-sample-toggle" title="Off falls back to Sentinel-2's whole-granule cloud figure">
+              <input id="cal-sample-on" type="checkbox" checked> use area
+            </label>
+          </div>
+        </div>
         <div class="cal-actions">
           <button id="cal-set-start" class="cal-act" aria-pressed="false">
             <span class="cal-act-label">Start</span><span id="cal-start-date" class="cal-act-date">—</span>

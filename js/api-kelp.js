@@ -107,11 +107,20 @@ const ApiKelpEngine = (function () {
     // No sign-in exists for this engine; present for interface parity.
     login() { return Promise.resolve(ready); },
 
-    listScenes(startISO, endISO) {
+    /*
+     * `region` asks the backend to measure cloud over that box with the same
+     * mask the cloud overlay draws, instead of reporting Sentinel-2's
+     * granule-wide CLOUDY_PIXEL_PERCENTAGE. Rows come back with aoiCloud and
+     * coverage alongside the metadata number. Omitting it keeps the old cheap
+     * metadata-only listing, which is also what happens for windows too wide
+     * to sample — so callers must treat aoiCloud as optional, never assumed.
+     */
+    listScenes(startISO, endISO, maxCloud, region) {
       return getJSON('/scenes', {
         start: startISO.slice(0, 10),
         end: endISO.slice(0, 10),
-        maxCloud: 100                      // filtering happens client-side
+        maxCloud: 100,                     // filtering happens client-side
+        region: region || undefined
       });
     },
 

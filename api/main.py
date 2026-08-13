@@ -52,7 +52,16 @@ AOI = [-120.55, 34.30, -119.45, 34.55]
 # /layer: when it was 400, a wide-but-valid range failed at the *scene listing*
 # step and surfaced client-side as a bogus "no passes under N% cloud".
 MAX_RANGE_DAYS = 4500
-MAPID_TTL_SECONDS = 30 * 60   # minted ids are ephemeral; re-mint after this
+# Minted ids are ephemeral, but not as ephemeral as this used to assume.
+# Re-minting hands back a NEW map id, which changes every tile URL, which
+# orphans every tile the browser had cached — so the TTL expiring makes a
+# visitor sitting still on the map pay a full recomputation of the view.
+# Earth Engine serves its tiles with Cache-Control: max-age=3600 and ids
+# minted an hour earlier still answered 200 when tested, so an hour is both
+# supported by that header and the longest window there is direct evidence
+# for. The client caches (20 and 25 minutes) sit well inside it and re-request
+# against a warm server cache, which is a 60ms round trip rather than a mint.
+MAPID_TTL_SECONDS = 60 * 60
 # Every layer this service can render. Mirrors the `mode:` values in
 # js/api-kelp.js — a mode added there and not here is refused by name.
 MODES = ("single", "composite", "truecolor", "turbidity", "turbidityComposite",

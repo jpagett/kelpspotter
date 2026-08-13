@@ -1170,12 +1170,51 @@
    * none. maxZoom stays at 19 so the map still zooms; only the fetching stops.
    */
   const EE_MAX_NATIVE_ZOOM = 14;
+
+  /*
+   * Expired-mint self-heal.
+   *
+   * A minted map id stops answering eventually, and when it does there is
+   * nothing to bring the layer back on its own: the tile URL templates are
+   * held in the caches above, so panning or zooming just asks the dead id
+   * again and every tile 404s. Enough consecutive tile failures from an Earth
+   * Engine layer are read as "the mint died" — every cached URL is dropped and
+   * the visible layers rebuild from a fresh one.
+   *
+   * The threshold and the cooldown are both there because being offline looks
+   * exactly like an expired mint from here, and an offline map must not sit in
+   * a rebuild loop. This is the behaviour js/api-kelp.js's header has always
+   * described; until now nothing implemented it.
+   */
+  let tileFailures = 0, lastRemint = 0;
+  const REMINT_AFTER_FAILURES = 6;
+  const REMINT_COOLDOWN_MS = 60 * 1000;
+  function noteTileFailure() {
+    if (++tileFailures < REMINT_AFTER_FAILURES) return;
+    tileFailures = 0;
+    if (Date.now() - lastRemint < REMINT_COOLDOWN_MS) return;
+    lastRemint = Date.now();
+    layerCache.clear();
+    auxUrlCache.clear();
+    turbBuiltKey = null; cloudBuiltKey = null; trueColorDate = null;
+    say('Tile links expired — re-minting', 'warn');
+    run();
+    if (state.params.trueColorOpacity > 0) ensureTrueColor();
+    if (state.params.turbidityOpacity > 0) ensureTurbidity();
+    if (state.params.cloudOpacity > 0) ensureCloudMask();
+  }
+
   function toLeafletLayer(res, opts) {
     if (typeof res === 'string') {
-      return L.tileLayer(res, Object.assign(
+      const layer = L.tileLayer(res, Object.assign(
         { opacity: state.params.opacity, maxZoom: 19, pane: 'kelpPane',
           maxNativeZoom: EE_MAX_NATIVE_ZOOM, keepBuffer: 4,
           updateWhenIdle: true, updateWhenZooming: false, bounds: AOI_BOUNDS }, opts));
+      // an empty patch of ocean comes back as a valid transparent PNG, so a
+      // tile ERROR really is a failure rather than "nothing here"
+      layer.on('tileerror', noteTileFailure);
+      layer.on('load', () => { tileFailures = 0; });
+      return layer;
     }
     return res; // already a Leaflet layer (demo overlay)
   }

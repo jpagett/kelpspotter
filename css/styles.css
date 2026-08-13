@@ -8,6 +8,22 @@
   --foam:    #e8f4f2;   /* primary text                */
   --tide:    #6fb7bd;   /* secondary text / labels     */
   --tide-dim:#4d868b;
+  /*
+   * Controls, not chrome. A --line hairline measures 1.42:1 against a panel
+   * row and --tide-dim glyphs 2.98:1 on a raised control — so an outlined
+   * button was effectively invisible until you hovered it, which is why the
+   * per-path plot controls kept getting lost. These two are for interactive
+   * things only: buttons, toggles and their outlines. Panel edges, field
+   * borders, hint text and meta keep --line and --tide-dim, so raising button
+   * visibility doesn't also shout every divider in the app.
+   *
+   * Both clear WCAG 2.1's 3:1 for non-text UI (borders 3.4:1 on a row and
+   * 3.1:1 on a raised control; glyphs 4.7:1 and 4.1:1) and both stay below
+   * --tide's 6.3:1 body text, so the type hierarchy is unchanged. Deliberately
+   * still muted — the palette is meant to read low-contrast, just not absent.
+   */
+  --ctl-line: rgba(120,190,196,0.6);
+  --ctl-fg:   #5f9ea5;
   --kelp:    #f2b134;   /* canopy — the signature      */
   --kelp-hot:#ffd166;
   --coral:   #e2725b;   /* alerts, sparingly           */
@@ -89,7 +105,7 @@ body {
 .btn:hover { filter: brightness(1.08); }
 .btn:active { transform: translateY(1px); }
 /* rerun: grey while the map matches the settings, kelp-yellow once it doesn't */
-.btn.run { width: 100%; background: var(--current); color: var(--tide-dim); }
+.btn.run { width: 100%; background: var(--current); color: var(--ctl-fg); }
 .btn.run:disabled { cursor: not-allowed; }
 .btn.run.dirty { background: var(--kelp); color: var(--abyss); cursor: pointer; }
 /* the draw-path button is a mobile affordance; desktop uses the Paths panel */
@@ -97,7 +113,7 @@ body {
 
 /* the sign-in button carries both labels; CSS picks one per breakpoint */
 #connect .lbl-narrow { display: none; }
-.btn.ghost { background: transparent; color: var(--tide); border: 1px solid var(--line); }
+.btn.ghost { background: transparent; color: var(--tide); border: 1px solid var(--ctl-line); }
 .btn.ghost:hover { color: var(--foam); border-color: var(--tide-dim); }
 /* not signed in — make the way out of demo mode obvious */
 .btn.ghost.disconnected { color: var(--kelp); border-color: var(--kelp); }
@@ -117,7 +133,7 @@ body {
 .hdr-menu-list .check:hover { color: var(--foam); }
 .menu-action {
   cursor: pointer; white-space: nowrap; text-align: left;
-  background: none; color: var(--tide); border: 1px solid var(--line);
+  background: none; color: var(--tide); border: 1px solid var(--ctl-line);
   border-radius: 2px; padding: 5px 8px; font-family: var(--sans); font-size: 12px;
 }
 .menu-action:hover { color: var(--foam); border-color: var(--tide-dim); }
@@ -149,7 +165,7 @@ body {
 .ov-icon {
   width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); font-size: 15px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--ctl-line); font-size: 15px; line-height: 1; cursor: pointer;
 }
 .ov-icon:hover { border-color: var(--kelp); }
 .ov-icon[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
@@ -200,7 +216,7 @@ body {
 .zoom-control button {
   width: 32px; height: 32px; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); font-size: 16px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--ctl-line); font-size: 16px; line-height: 1; cursor: pointer;
 }
 .zoom-control button:hover { border-color: var(--kelp); color: var(--kelp); }
 .zoom-control button:first-child { border-radius: 50% 0 0 50%; border-right: none; }
@@ -234,8 +250,8 @@ body {
 .signin-cta:hover { background: var(--kelp); color: var(--abyss); }
 .signin-x {
   flex: none; width: 28px; cursor: pointer;
-  background: none; color: var(--tide-dim);
-  border: none; border-left: 1px solid var(--line);
+  background: none; color: var(--ctl-fg);
+  border: none; border-left: 1px solid var(--ctl-line);
   font-size: 15px; line-height: 1;
 }
 .signin-x:hover { color: var(--kelp); }
@@ -305,7 +321,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .step {
   width: 34px; height: 34px; flex: none; cursor: pointer;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 3px;
+  border: 1px solid var(--ctl-line); border-radius: 3px;
   font-size: 15px; line-height: 1; display: grid; place-items: center;
 }
 .step:hover { border-color: var(--kelp); color: var(--kelp); }
@@ -333,7 +349,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal-year {
   background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--mono); font-size: 12px; color: var(--foam);
-  border-bottom: 1px dotted var(--tide-dim);
+  border-bottom: 1px dotted var(--ctl-fg);
 }
 .cal-year:hover, .cal-year[aria-expanded="true"] { color: var(--kelp); border-bottom-color: var(--kelp); }
 /* year jump — months are useless for moving back years */
@@ -355,7 +371,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal-nav {
   width: 22px; height: 22px; cursor: pointer; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 3px; font-size: 13px; line-height: 1;
+  border: 1px solid var(--ctl-line); border-radius: 3px; font-size: 13px; line-height: 1;
 }
 .cal-nav:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
 .cal-nav:disabled { opacity: 0.25; cursor: not-allowed; }
@@ -385,7 +401,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
   flex: 1; padding: 5px 0; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   background: var(--current); color: var(--tide);
-  border: 1px solid var(--line); border-radius: 3px;
+  border: 1px solid var(--ctl-line); border-radius: 3px;
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
 }
 .cal-act-label { letter-spacing: 0.1em; }
@@ -393,7 +409,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .cal-act:hover { color: var(--foam); border-color: var(--tide-dim); }
 /* armed: the next day clicked sets this end of the range */
 .cal-act[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
-.cal-act.ghost { flex: 0 0 auto; padding: 6px 10px; color: var(--tide-dim); }
+.cal-act.ghost { flex: 0 0 auto; padding: 6px 10px; color: var(--ctl-fg); }
 .cal-act.ghost:hover { color: var(--kelp); }
 
 .cal-cloud { margin-top: 10px; }
@@ -407,7 +423,7 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .seg button {
   flex: 1; padding: 8px 0; cursor: pointer;
   background: transparent; color: var(--tide);
-  border: none; border-right: 1px solid var(--line);
+  border: none; border-right: 1px solid var(--ctl-line);
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -504,7 +520,7 @@ input[type=range]::-moz-range-thumb {
 }
 .legend-swatch {
   width: 74px; height: 16px; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 2px; padding: 0;
+  border: 1px solid var(--ctl-line); border-radius: 2px; padding: 0;
 }
 .legend-swatch:hover { border-color: var(--kelp); }
 .legend-swatch[aria-pressed="true"] { border-color: var(--kelp); box-shadow: 0 0 0 1px var(--kelp); }
@@ -644,7 +660,7 @@ input[type=range]::-moz-range-thumb {
 .pp-tool {
   width: 24px; height: 22px; cursor: pointer; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 3px; font-size: 12px; line-height: 1;
+  border: 1px solid var(--ctl-line); border-radius: 3px; font-size: 12px; line-height: 1;
 }
 .pp-tool:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
 .pp-tool:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -671,14 +687,14 @@ input[type=range]::-moz-range-thumb {
 .pp-meta { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); flex: none; }
 .pp-cog, .pp-caret {
   background: none; border: none; cursor: pointer; padding: 0 2px;
-  color: var(--tide-dim); font-size: 11px; line-height: 1;
+  color: var(--ctl-fg); font-size: 11px; line-height: 1;
 }
 /* outlined, filled a shade lighter than the row so it reads as a toggle
    control rather than an icon-only button like the cog/caret next to it */
 .pp-mirror {
   width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
-  background: var(--current); color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 11px; line-height: 1;
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 11px; line-height: 1;
 }
 .pp-mirror:disabled { opacity: 0.3; cursor: not-allowed; }
 .pp-mirror[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
@@ -694,7 +710,7 @@ input[type=range]::-moz-range-thumb {
 .pp-pencil:hover { color: var(--kelp); }
 .pp-units {
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 2px;
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; padding: 2px 3px; cursor: pointer;
 }
 
@@ -717,12 +733,12 @@ input[type=range]::-moz-range-thumb {
 .pp-menu[hidden] { display: none; }
 .pp-menu input[type=color] {
   width: 26px; height: 20px; padding: 0; cursor: pointer;
-  background: none; border: 1px solid var(--line); border-radius: 2px;
+  background: none; border: 1px solid var(--ctl-line); border-radius: 2px;
 }
 .pp-del {
   width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 12px; line-height: 1;
 }
 .pp-del:hover { color: #e2725b; border-color: #e2725b; }
 .pp-profile { padding: 2px 6px 7px; }
@@ -772,16 +788,16 @@ input[type=range]::-moz-range-thumb {
 }
 .pp-mode-btn {
   height: 20px; padding: 0 8px; cursor: pointer;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; line-height: 1;
 }
 .pp-mode-btn:hover { border-color: var(--kelp); color: var(--kelp); }
 .pp-mode-btn[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
 .pp-gas-toggle {
   height: 20px; padding: 0 8px; cursor: pointer;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; line-height: 1;
 }
 .pp-gas-toggle:hover { border-color: var(--kelp); color: var(--kelp); }
@@ -800,8 +816,8 @@ input[type=range]::-moz-range-thumb {
 /* ---------- leg table (expands under its own profile graph) ---------- */
 .pp-legs-toggle {
   width: 100%; margin-top: 6px; padding: 4px 6px; cursor: pointer; text-align: left;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; line-height: 1.4;
 }
 .pp-legs-toggle:hover:not(:disabled) { border-color: var(--kelp); color: var(--kelp); }
@@ -916,8 +932,8 @@ input[type=range]::-moz-range-thumb {
 .node-coord { display: flex; align-items: center; gap: 5px; }
 .node-coord-del {
   width: 20px; height: 20px; flex: none; cursor: pointer; display: grid; place-items: center;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 12px; line-height: 1;
 }
 .node-coord-del:hover { color: #e2725b; border-color: #e2725b; }
 
@@ -983,7 +999,7 @@ input[type=range]::-moz-range-thumb {
 .cc-marker .cc-menu[hidden] { display: none; }
 .cc-marker .cc-menu input[type=color] {
   width: 26px; height: 20px; padding: 0; cursor: pointer;
-  background: none; border: 1px solid var(--line); border-radius: 2px;
+  background: none; border: 1px solid var(--ctl-line); border-radius: 2px;
 }
 
 /* ---------- activity readout ---------- */
@@ -999,6 +1015,11 @@ input[type=range]::-moz-range-thumb {
 .act-head {
   display: flex; justify-content: flex-start; align-items: center; gap: 6px;
   width: 100%; margin-bottom: 7px; background: none; border: none; padding: 0; cursor: pointer;
+  /* Without this the disclosure caret inherits the button's UA default — black
+     on a dark panel, i.e. invisible. .console-head avoids it by setting a
+     colour for its own label; this one colours .eyebrow instead, so the caret
+     was left behind. The label keeps its dimmer heading colour below. */
+  color: var(--ctl-fg);
 }
 .act-head:hover .eyebrow { color: var(--kelp); }
 .act-head .sect-caret { font-size: 9px; line-height: 1; transition: transform 0.15s; }
@@ -1055,7 +1076,7 @@ input[type=range]::-moz-range-thumb {
 .pp-decl-auto {
   margin-left: 4px; padding: 3px 6px; cursor: pointer;
   background: var(--current); color: var(--tide);
-  border: 1px solid var(--line); border-radius: 2px;
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em;
 }
 .pp-decl-auto:hover { color: var(--kelp); border-color: var(--kelp); }
@@ -1148,7 +1169,7 @@ input[type=range]::-moz-range-thumb {
 }
 .poi-eye, .poi-del {
   background: none; border: none; cursor: pointer; padding: 2px 4px;
-  color: var(--tide-dim); font-size: 12px; line-height: 1;
+  color: var(--ctl-fg); font-size: 12px; line-height: 1;
 }
 .poi-eye:hover { color: var(--kelp); }
 .poi-del:hover { color: #e2725b; }
@@ -1211,8 +1232,8 @@ input[type=range]::-moz-range-thumb {
 .pp-mode-btns { display: flex; gap: 2px; flex: none; }
 .pp-mode-btn {
   padding: 2px 5px; cursor: pointer; border-radius: 2px;
-  background: var(--current); color: var(--tide-dim);
-  border: 1px solid var(--line);
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line);
   font-family: var(--mono); font-size: 8px; letter-spacing: 0.06em;
 }
 .pp-mode-btn[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
@@ -1377,7 +1398,7 @@ input[type=range]::-moz-range-thumb {
 }
 .sm-file { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10px;
   color: var(--tide); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sm-x { background: none; border: none; color: var(--tide-dim); font-size: 18px;
+.sm-x { background: none; border: none; color: var(--ctl-fg); font-size: 18px;
   line-height: 1; cursor: pointer; padding: 0 4px; }
 .sm-x:hover { color: var(--coral); }
 .sm-body { overflow-y: auto; padding: 6px 14px 10px; }
@@ -1389,7 +1410,7 @@ input[type=range]::-moz-range-thumb {
 .sm-sect { border-bottom: 1px solid var(--line); padding: 9px 0; }
 .sm-sect:last-child { border-bottom: none; }
 .sm-sect-head { display: flex; align-items: center; gap: 9px; }
-.sm-caret { background: none; border: none; cursor: pointer; color: var(--tide-dim);
+.sm-caret { background: none; border: none; cursor: pointer; color: var(--ctl-fg);
   font-size: 10px; padding: 2px 3px; }
 .sm-caret:disabled { opacity: 0.3; cursor: default; }
 .sm-caret:hover:not(:disabled) { color: var(--kelp); }
@@ -1398,7 +1419,7 @@ input[type=range]::-moz-range-thumb {
 .sm-allcheck, .sm-mode {
   display: flex; align-items: center; gap: 4px; cursor: pointer;
   font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--tide-dim);
+  text-transform: uppercase; color: var(--ctl-fg);
 }
 .sm-allcheck input, .sm-mode input { accent-color: var(--kelp); cursor: pointer; }
 .sm-mode { color: var(--tide); }
@@ -1469,8 +1490,8 @@ input[type=range]::-moz-range-thumb {
 .pp-global-tools { align-items: center; }
 .pp-opts-toggle {
   margin-left: auto; height: 20px; padding: 0 8px; cursor: pointer;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: 10px; line-height: 1;
 }
 .pp-opts-toggle:hover { border-color: var(--kelp); color: var(--kelp); }
@@ -1491,7 +1512,7 @@ input[type=range]::-moz-range-thumb {
 .pp-cyl-add {
   width: 18px; height: 18px; cursor: pointer; display: grid; place-items: center;
   background: var(--current); color: var(--foam);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 12px; line-height: 1;
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 12px; line-height: 1;
 }
 .pp-cyl-add:hover { border-color: var(--kelp); color: var(--kelp); }
 .pp-cyl-list { display: flex; flex-direction: column; gap: 8px; }
@@ -1508,8 +1529,8 @@ input[type=range]::-moz-range-thumb {
 }
 .pp-cyl-del {
   width: 18px; height: 18px; flex: none; cursor: pointer; display: grid; place-items: center;
-  background: none; color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 11px; line-height: 1;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 11px; line-height: 1;
 }
 .pp-cyl-del:hover { color: #e2725b; border-color: #e2725b; }
 .pp-cyl-reserve { display: flex; align-items: center; gap: 6px; }
@@ -1539,8 +1560,8 @@ input[type=range]::-moz-range-thumb {
 .pp-cyl-preset { position: relative; flex: none; }
 .pp-cyl-preset-btn {
   width: 18px; height: 18px; cursor: pointer; display: grid; place-items: center;
-  background: var(--current); color: var(--tide-dim);
-  border: 1px solid var(--line); border-radius: 2px; font-size: 9px; line-height: 1;
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px; font-size: 9px; line-height: 1;
 }
 .pp-cyl-preset-btn:hover { border-color: var(--kelp); color: var(--kelp); }
 .pp-cyl-preset-list {
@@ -1801,7 +1822,7 @@ input[type=range]::-moz-range-thumb {
   .tab {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 3px; background: none; border: none; cursor: pointer;
-    color: var(--tide-dim); font-family: var(--mono); font-size: 9px;
+    color: var(--ctl-fg); font-family: var(--mono); font-size: 9px;
     letter-spacing: 0.08em; text-transform: uppercase;
     -webkit-tap-highlight-color: transparent;
   }

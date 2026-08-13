@@ -209,7 +209,7 @@ body {
 /* Bottom centre — the space the timeline used to occupy. Persistent: it stays
    until the visitor signs in or dismisses it, so it must not sit over anything. */
 .signin-notice {
-  /* bottom: 74px, not 18px — the zoom/locate/overlay cluster (.corner-br)
+  /* bottom: 74px, not 18px — the zoom/overlay cluster (.corner-br)
      lives in the bottom strip, and with the dock collapsed --dock-w is 0, so
      an 18px-bottom banner slid under those controls and its dismiss button
      swallowed clicks aimed at zoom-in. One control row + margin clears it. */
@@ -1096,6 +1096,10 @@ input[type=range]::-moz-range-thumb {
   body[data-dock="poi"] #pp-opts { display: none; }
   body[data-dock="poi"] .paths-panel,
   body[data-dock="split"] .paths-panel { bottom: var(--dock-divide, 50vh); }
+  /* Split already shows both panes, so the POI tab has nothing to switch to —
+     take it out of the tab bar (and the tab order) rather than leaving a
+     button whose only effect would be to undo the split. */
+  body[data-dock="split"] #dock-poi-tab { display: none; }
   /* collapse still wins over the dock-mode height */
   body[data-dock] .paths-panel.collapsed { bottom: auto; }
   /* a collapsed or view-hidden dock takes its POI pane (and divider) with it */
@@ -1251,7 +1255,7 @@ input[type=range]::-moz-range-thumb {
    * also where an open sheet's grab handle lands, and the tab bar crowds it
    * from below. Detach it from Leaflet's own corner layout (position: fixed,
    * not the inherited absolute-in-corner-box) and pin it top-right instead,
-   * clear of both the tab bar and the bottom-right zoom/locate/overlay
+   * clear of both the tab bar and the bottom-right zoom/overlay
    * cluster. It can still sit under the sign-in banner when that is showing
    * (dismissible, and both are small enough that the overlap reads fine).
    */
@@ -1270,9 +1274,6 @@ input[type=range]::-moz-range-thumb {
   padding: 3px 6px;
 }
 .offline-badge[hidden] { display: none; }
-/* locate: pressed = actively tracking */
-#locate-btn-desk[aria-pressed="true"],
-#locate-btn[aria-pressed="true"] { background: #5ec6c9; color: var(--abyss); border-color: #5ec6c9; }
 
 /* tap depth cursor (mobile) */
 .tap-cursor span {
@@ -1605,7 +1606,7 @@ input[type=range]::-moz-range-thumb {
    * Five overlay icons is too tall a permanent column on a phone, so they
    * collapse behind the group toggle (hidden on desktop) and expand upward
    * from it — the column is bottom-anchored, so growth is toward the map.
-   * The expanded column covers the draw/locate actions' spot; retire those
+   * The expanded column covers the draw action's spot; retire it
    * while it is open, the same way sheets retire the floating controls.
    */
   .overlay-picker {
@@ -1753,7 +1754,7 @@ input[type=range]::-moz-range-thumb {
 
   /*
    * Notifications popped up bottom-centre, where they sat on top of the
-   * bottom-right zoom/locate/overlay cluster on narrow screens. Moved under
+   * bottom-right zoom/overlay cluster on narrow screens. Moved under
    * the header — but true centre still reaches into the scale control's
    * corner on a message long enough to push past ~187px either side of
    * centre, so this is left-aligned with a fixed clearance on the right

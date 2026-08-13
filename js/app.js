@@ -1534,57 +1534,6 @@
   });
 
   /*
-   * ---- geolocation ----
-   * One toggle, two buttons (the mobile action stack and the desktop zoom
-   * stack). On: watchPosition draws a dot with its accuracy circle and pans to
-   * the first fix. Off: everything is removed. Denied: say so once, plainly.
-   */
-  let geoWatch = null, geoDot = null, geoRing = null, geoFirstFix = false;
-  const locateButtons = () => [$('locate-btn'), $('locate-btn-desk')].filter(Boolean);
-  function setLocateUi(on) {
-    locateButtons().forEach((b) => b.setAttribute('aria-pressed', on ? 'true' : 'false'));
-  }
-  function stopLocate() {
-    if (geoWatch !== null) { navigator.geolocation.clearWatch(geoWatch); geoWatch = null; }
-    if (geoDot) { map.removeLayer(geoDot); geoDot = null; }
-    if (geoRing) { map.removeLayer(geoRing); geoRing = null; }
-    setLocateUi(false);
-  }
-  function toggleLocate() {
-    if (geoWatch !== null) { stopLocate(); say('Position tracking off'); return; }
-    if (!('geolocation' in navigator)) { toast('This browser has no geolocation.', true); return; }
-    geoFirstFix = true;
-    setLocateUi(true);
-    say('Locating…');
-    geoWatch = navigator.geolocation.watchPosition((pos) => {
-      const ll = [pos.coords.latitude, pos.coords.longitude];
-      const acc = pos.coords.accuracy || 0;
-      if (!geoDot) {
-        geoRing = L.circle(ll, { radius: acc, weight: 1, color: '#5ec6c9',
-                                 fillColor: '#5ec6c9', fillOpacity: 0.12, interactive: false }).addTo(map);
-        geoDot = L.circleMarker(ll, { radius: 6, weight: 2, color: '#ffffff',
-                                      fillColor: '#5ec6c9', fillOpacity: 1, interactive: false }).addTo(map);
-      } else {
-        geoDot.setLatLng(ll);
-        geoRing.setLatLng(ll).setRadius(acc);
-      }
-      if (geoFirstFix) {
-        geoFirstFix = false;
-        map.setView(ll, Math.max(map.getZoom(), 13));
-        say('Position: ' + ll[0].toFixed(5) + ', ' + ll[1].toFixed(5) +
-            ' (±' + Math.round(acc) + ' m)', 'ok');
-      }
-    }, (err) => {
-      stopLocate();
-      const why = err.code === 1 ? 'permission denied'
-                : err.code === 2 ? 'position unavailable' : 'timed out';
-      say('Location failed — ' + why, 'warn');
-      toast('Could not get your position (' + why + ').', true);
-    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
-  }
-  locateButtons().forEach((b) => b.addEventListener('click', toggleLocate));
-
-  /*
    * ---- offline badge ----
    * On a boat, offline is the normal case, not an error. The badge names the
    * state; the NOAA service worker keeps cached bathymetry working through it.

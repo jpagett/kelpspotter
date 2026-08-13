@@ -53,6 +53,10 @@ AOI = [-120.55, 34.30, -119.45, 34.55]
 # step and surfaced client-side as a bogus "no passes under N% cloud".
 MAX_RANGE_DAYS = 4500
 MAPID_TTL_SECONDS = 30 * 60   # minted ids are ephemeral; re-mint after this
+# Every layer this service can render. Mirrors the `mode:` values in
+# js/api-kelp.js — a mode added there and not here is refused by name.
+MODES = ("single", "composite", "truecolor", "turbidity", "turbidityComposite",
+         "cloud", "cloudComposite")
 SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
 
@@ -495,6 +499,14 @@ def layer():
     mode = request.args.get("mode", "single")
     params = read_params(request.args)
     max_cloud = clamp(float(request.args.get("maxCloud", 40)), 0, 100)
+
+    # Name an unknown mode instead of letting it fall through to the
+    # single-scene branch, which then demands a `date` the caller never sent
+    # and reports the miss as "Invalid isoformat string: ''". That is exactly
+    # what a client running ahead of a not-yet-redeployed backend hits, and the
+    # date complaint sends the reader looking in entirely the wrong place.
+    if mode not in MODES:
+        return jsonify({"error": "unknown mode: %s" % mode}), 400
 
     try:
         if mode in ("composite", "turbidityComposite", "cloudComposite"):

@@ -305,8 +305,9 @@
     <div class="pp-inner">
       <div class="pp-head">
         <!-- Desktop: Paths/POI are tabs of this dock; the split button shows
-             both stacked. Clicking the active tab still collapses the dock
-             (the same tap-active-to-dismiss idiom as the mobile tab bar).
+             both stacked, which retires the POI tab (nothing left to switch
+             to). Clicking the active tab still collapses the dock (the same
+             tap-active-to-dismiss idiom as the mobile tab bar).
              Mobile hides POI/split — POI has its own sheet there. -->
         <div class="dock-tabs">
           <button id="pp-collapse" class="eyebrow dock-tab dock-active" aria-expanded="true"
@@ -479,7 +480,6 @@
     </div>
 
     <div class="zoom-control" aria-label="Zoom">
-      <button id="locate-btn-desk" type="button" title="Show my position" aria-pressed="false" aria-label="Show my position">◎</button>
       <button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </div>
@@ -489,8 +489,6 @@
     <div class="map-actions">
       <button id="map-draw-path" class="ov-icon map-action" type="button"
               aria-pressed="false" title="Draw a path"></button>
-      <button id="locate-btn" class="ov-icon map-action" type="button"
-              aria-pressed="false" title="Show my position">◎</button>
     </div>
 
     <div class="overlay-picker" aria-label="Map overlays">

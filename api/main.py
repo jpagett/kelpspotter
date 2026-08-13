@@ -67,6 +67,8 @@ MAPID_TTL_SECONDS = 60 * 60
 # js/api-kelp.js — a mode added there and not here is refused by name.
 MODES = ("single", "composite", "truecolor", "turbidity", "turbidityComposite",
          "cloud", "cloudComposite")
+# the subset that reduces over a window, and so can take an explicit day list
+COMPOSITE_MODES = ("composite", "turbidityComposite", "cloudComposite")
 SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
 # Cloud sampled over a caller-chosen box (see cloud_over). Far coarser than the
@@ -719,7 +721,7 @@ def layer():
 
     days = explicit_days(request.args)
     try:
-        if mode in ("composite", "turbidityComposite", "cloudComposite"):
+        if mode in COMPOSITE_MODES:
             start, end = read_dates(request.args)
             # the day list identifies the composite as surely as the window
             # does, but is far too long to put in a key verbatim
@@ -818,6 +820,17 @@ def layer():
         # A bare 500 page says nothing, and this service is remote by design, so
         # the reason has to travel back with the response as well as to the log.
         logging.exception("layer failed")
+        # An empty collection surfaces from Earth Engine as a band-pattern
+        # complaint about an image with no bands, which sends the reader
+        # looking at band names. When a day list was supplied, the real
+        # explanation is that none of those days has a pass in this window.
+        # (composite modes only — they are the ones that bind start/end above,
+        # and the only ones a day list applies to)
+        if days and "no bands" in str(err) and mode in COMPOSITE_MODES:
+            return jsonify({
+                "error": "none of the %d selected dates has a pass in %s..%s"
+                         % (len(days), start, end)
+            }), 400
         return jsonify({"error": "%s: %s" % (type(err).__name__, err)}), 500
 
     cache_put(cache_key, payload, MAPID_TTL_SECONDS)

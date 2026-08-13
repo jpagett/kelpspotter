@@ -645,7 +645,9 @@
     return { w: w, s: s, e: e, n: n };
   }
   function sampleRegionParam() {
-    if (!state.params.useAoiCloud) return null;
+    // sampleSupported() gates this too: asking an engine that ignores the
+    // parameter just buys a slower listing with the same numbers in it
+    if (!state.params.useAoiCloud || !sampleSupported()) return null;
     const r = clampSample(state.params.cloudSample);
     return r ? [r.w, r.s, r.e, r.n].map((v) => v.toFixed(4)).join(',') : null;
   }
@@ -1203,10 +1205,23 @@
       }).addTo(map);
     } else sampleRect.setBounds(b);
   }
+  /*
+   * Only the shared backend can measure cloud over a box — the demo engine has
+   * no imagery to measure and the signed-in Earth Engine path does not
+   * implement it. Saying "measured over 69 × 13 km" there would be a promise
+   * the app cannot keep, so the control says so plainly and switches itself
+   * off rather than quietly showing whole-granule numbers under an area label.
+   */
+  function sampleSupported() {
+    return !!(state.engine && state.engine.name === 'api');
+  }
   function syncSampleUi() {
-    const on = !!state.params.useAoiCloud;
+    const supported = sampleSupported();
+    const on = !!state.params.useAoiCloud && supported;
     $('cal-sample-on').checked = on;
-    $('cal-sample-val').textContent = on ? sampleSizeLabel() : 'whole scene';
+    $('cal-sample-on').disabled = !supported;
+    $('cal-sample-val').textContent = !supported ? 'whole scene (needs the shared backend)'
+                                    : on ? sampleSizeLabel() : 'whole scene';
     $('cal-sample-draw').disabled = !on;
     $('cal-sample-reset').disabled = !on;
     renderSampleBox();
@@ -4970,6 +4985,7 @@
     clearSceneCache();   // demo and live scene lists are not interchangeable
     state.scenes = []; state.allScenes = [];
     state.idx = -1;
+    syncSampleUi();      // engines differ on whether they can measure a box
     loadScenes();
   }
 

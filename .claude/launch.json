@@ -10,11 +10,7 @@
     {
       "name": "kelpspotter-cors",
       "runtimeExecutable": "python",
-      "runtimeArgs": [
-        "C:\\Users\\jpagett\\AppData\\Local\\Temp\\claude\\C--Users-jpagett-code-kelpspotter\\40dd9f7f-c8e0-4108-a789-336d57f12157\\scratchpad\\devserve.py",
-        "C:\\Users\\jpagett\\code\\kelpspotter",
-        "8000"
-      ],
+      "runtimeArgs": ["tools/devserve.py", ".", "8000"],
       "port": 8000
     }
   ]

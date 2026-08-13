@@ -349,7 +349,8 @@
   // everything the mint depends on; the mode part mirrors layerCacheKey's
   function auxModePart() {
     if (state.params.mode === 'composite') {
-      return 'c|' + state.range.start + '|' + state.range.end + '|' + state.params.maxCloud;
+      return 'c|' + state.range.start + '|' + state.range.end + '|' +
+             state.params.maxCloud + '|' + compositeDateSig();
     }
     const sc = state.scenes[state.idx];
     return 's|' + (sc ? sc.date : '');
@@ -393,7 +394,8 @@
       } else {
         if (composite) {
           const range = dateRangeISO();
-          res = await state.engine[method](range[0], range[1], state.params.maxCloud, state.params);
+          res = await state.engine[method](
+            range[0], range[1], state.params.maxCloud, state.params, compositeDates());
         } else {
           res = await state.engine[method](state.scenes[state.idx].date, state.params);
         }
@@ -764,14 +766,27 @@
    */
   const refinedRanges = new Map();   // 'start|end|region' -> true once merged
 
+  /*
+   * The same date can be held by two different objects — sceneIndex is filled
+   * per calendar year while allScenes comes from the selected range, and the
+   * two fetches return separate objects. Both have to learn the new number or
+   * the calendar and the timeline would disagree, so this indexes by date once
+   * rather than rescanning allScenes per row.
+   */
   function mergeCloudInto(list) {
+    if (!list || !list.length) return 0;
+    const byDate = new Map();
+    const add = (sc) => {
+      if (!sc) return;
+      const bucket = byDate.get(sc.date);
+      if (bucket) bucket.push(sc); else byDate.set(sc.date, [sc]);
+    };
+    sceneIndex.forEach(add);
+    (state.allScenes || []).forEach(add);
     let touched = 0;
-    (list || []).forEach((row) => {
+    list.forEach((row) => {
       if (row.aoiCloud === null || row.aoiCloud === undefined) return;
-      [sceneIndex.get(row.date)].concat(
-        (state.allScenes || []).filter((s) => s.date === row.date)
-      ).forEach((sc) => {
-        if (!sc) return;
+      (byDate.get(row.date) || []).forEach((sc) => {
         sc.aoiCloud = row.aoiCloud;
         sc.coverage = row.coverage;
         touched++;
@@ -797,12 +812,16 @@
   function sampleChunks(start, end) {
     const out = [];
     const dayMs = 86400000;
-    let hi = parseISO(end);
-    const lo = parseISO(start);
+    // Anchored at midday, not midnight. parseISO builds local midnight, and
+    // stepping 90 days across a daylight-saving boundary from there lands at
+    // 23:00 the day before — which isoOf would then read as the wrong date.
+    const noon = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+    const lo = noon(parseISO(start));
+    let hi = noon(parseISO(end));
     while (hi >= lo && out.length < MAX_SAMPLE_CHUNKS) {
       const from = new Date(Math.max(lo.getTime(), hi.getTime() - (SAMPLE_CHUNK_DAYS - 1) * dayMs));
       out.push([isoOf(from), isoOf(hi)]);
-      hi = new Date(from.getTime() - dayMs);
+      hi = noon(new Date(from.getTime() - dayMs));
     }
     return out;
   }
@@ -1389,8 +1408,10 @@
       let layer;
       if (composite) {
         const [start, end] = dateRangeISO();
-        const res = await cachedLayer('c|' + start + '|' + end + '|' + state.params.maxCloud,
-          () => state.engine.compositeLayer(start, end, state.params.maxCloud, state.params));
+        const days = compositeDates();
+        const res = await cachedLayer(
+          'c|' + start + '|' + end + '|' + state.params.maxCloud + '|' + compositeDateSig(),
+          () => state.engine.compositeLayer(start, end, state.params.maxCloud, state.params, days));
         layer = toLeafletLayer(res);
       } else {
         const date = state.scenes[state.idx].date;
@@ -1460,6 +1481,33 @@
    */
   const layerCache = new Map();          // key -> {url, at}
   const LAYER_TTL = 20 * 60 * 1000;      // under the mint lifetime, with margin
+
+  /*
+   * The days a composite should reduce over: exactly the passes that survived
+   * the ceiling, which is the same set the calendar highlights.
+   *
+   * Only sent once cloud has actually been measured over the sample box.
+   * Before that the list is just the metadata ceiling's opinion, which the
+   * backend can apply itself for free — sending it would be a longer URL for
+   * an identical composite. Once it IS sampled the list is genuinely
+   * different, and narrower, which is where the speed comes from: composite
+   * tile cost tracks scene count hard (76 scenes 2.4s/tile, 141 scenes 9.3s).
+   */
+  function compositeDates() {
+    const list = state.scenes || [];
+    if (!list.length || !list.some(cloudIsSampled)) return null;
+    return list.map((s) => s.date);
+  }
+  // djb2; the day list is far too long to key a cache with verbatim
+  function hashStr(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  function compositeDateSig() {
+    const d = compositeDates();
+    return d ? hashStr(d.join(',')) : '';
+  }
 
   function layerCacheKey(suffix) {
     const P = state.params;

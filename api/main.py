@@ -16,6 +16,7 @@ Credentials, so no key material is committed, built into the image, or shipped
 to the browser.
 """
 import datetime as dt
+import hashlib
 import logging
 import re
 import os
@@ -68,9 +69,9 @@ MODES = ("single", "composite", "truecolor", "turbidity", "turbidityComposite",
          "cloud", "cloudComposite")
 SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
-# Cloud sampled over a caller-chosen box (see cloud_over). 120 m is far coarser
-# than the 10 m source on purpose: this is a "how much of the channel was under
-# cloud" number, not a map, and the reduction runs once per date in the window.
+# Cloud sampled over a caller-chosen box (see cloud_over). Far coarser than the
+# 10 m source on purpose: this is a "how much of the channel was under cloud"
+# number, not a map, and it runs once per granule across the whole window.
 CLOUD_SAMPLE_SCALE = 200
 CLOUD_SAMPLE_MAX_PIXELS = 1e7
 MIN_SAMPLE_SPAN = 0.005       # degrees; below this the box reduces over nothing
@@ -244,6 +245,36 @@ def band_cloud(b, params):
         .And(b.select(S2_SWIR).gte(params["cloudSwirMin"]))
         .And(dev.divide(vis.max(1e-6)).lt(params["cloudWhiteness"]))
     )
+
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A composite built from an explicit day list. Bounded so a hostile or buggy
+# caller cannot post a novel: 400 days is more passes than this AOI sees in
+# three years, and keeps the URL well inside any gateway's limit.
+MAX_EXPLICIT_DATES = 400
+
+
+def explicit_days(args):
+    """The day list a composite was asked to reduce over, or None."""
+    raw = args.get("dates", "")
+    if not raw:
+        return None
+    days = sorted({d for d in raw.split(",") if DATE_RE.match(d)})
+    return days[:MAX_EXPLICIT_DATES] if days else None
+
+
+def composite_source(start, end, max_cloud, days):
+    """The collection a composite reduces over.
+
+    With an explicit day list, exactly those days. The client has already had
+    cloud measured over its sample box and decided which passes are usable, so
+    re-deciding here would cost a reduction per granule on every tile — and
+    could disagree with the dates the date picker just showed, which is worse
+    than slow. Without one, the old CLOUDY_PIXEL_PERCENTAGE ceiling.
+    """
+    if not days:
+        return collection(start, end, max_cloud)
+    return dated_collection(start, end).filter(ee.Filter.inList("day", days))
 
 
 def sample_region(args):
@@ -686,14 +717,18 @@ def layer():
     if mode not in MODES:
         return jsonify({"error": "unknown mode: %s" % mode}), 400
 
+    days = explicit_days(request.args)
     try:
         if mode in ("composite", "turbidityComposite", "cloudComposite"):
             start, end = read_dates(request.args)
-            cache_key = "layer|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+            # the day list identifies the composite as surely as the window
+            # does, but is far too long to put in a key verbatim
+            day_sig = hashlib.sha1(",".join(days).encode()).hexdigest()[:12] if days else ""
+            cache_key = "layer|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
                 mode, start, end, max_cloud, params["indexType"],
                 params["kelpThresh"], params["b11Thresh"], params["palette"],
                 ",".join(params["stops"]), ",".join(params["tstops"]),
-                ",".join(params["cstops"]), aux_sig(params),
+                ",".join(params["cstops"]), aux_sig(params), day_sig,
             )
         elif mode == "truecolor":
             date = request.args.get("date", "")
@@ -730,7 +765,7 @@ def layer():
                     m = m.And(band_cloud(b, params).Not())
                 return b.updateMask(m)
 
-            return collection(start, end, max_cloud).map(prep)
+            return composite_source(start, end, max_cloud, days).map(prep)
 
         def scene_and_clear():
             """The day's mosaic reflectance plus its clear-pixel mask."""
@@ -751,7 +786,7 @@ def layer():
         elif mode == "cloudComposite":
             # a composite's honest cloud mask: pixels with NO clear observation
             # anywhere in the window, tinted by the median brightness
-            col = collection(start, end, max_cloud)
+            col = composite_source(start, end, max_cloud, days)
             clear_count = col.map(
                 lambda img: clear_sky(img)
                 .And(band_cloud(reflectance(img), params).Not())

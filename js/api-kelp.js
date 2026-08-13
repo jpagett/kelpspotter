@@ -61,6 +61,16 @@ const ApiKelpEngine = (function () {
       cloudWhiteness: p.cloudWhiteness
     };
   }
+  /*
+   * The backend caps an explicit day list at 400 and falls back to its cloud
+   * ceiling without one, so an over-long list would be silently truncated into
+   * a composite nobody asked for. Better to send nothing and get the ceiling.
+   */
+  const MAX_DATES = 400;
+  function dateList(dates) {
+    if (!dates || !dates.length || dates.length > MAX_DATES) return undefined;
+    return dates.join(',');
+  }
   function gateArgs(p) {
     const on = (p.cloudOpacity || 0) > 0;
     return on ? Object.assign({ cloudMask: 1 }, cloudArgs(p)) : { cloudMask: 0 };
@@ -133,12 +143,22 @@ const ApiKelpEngine = (function () {
       }, kelpArgs(p), gateArgs(p))).then((r) => r.urlFormat);
     },
 
-    compositeLayer(startISO, endISO, maxCloud, p) {
+    /*
+     * `dates` names exactly which passes the median is built from, replacing
+     * the server's CLOUDY_PIXEL_PERCENTAGE ceiling. The client has already had
+     * cloud measured over its sample box and decided which days are usable, so
+     * this keeps the composite honest — it reduces over the same days the date
+     * picker showed as clear — and it is the whole speed story: composite tile
+     * cost tracks scene count hard (76 scenes 2.4s/tile, 141 scenes 9.3s).
+     * Omitted when the caller has no opinion, which restores the old ceiling.
+     */
+    compositeLayer(startISO, endISO, maxCloud, p, dates) {
       return getJSON('/layer', Object.assign({
         mode: 'composite',
         start: startISO.slice(0, 10),
         end: endISO.slice(0, 10),
         maxCloud: maxCloud,
+        dates: dateList(dates),
         palette: p.kelpPalette,
         stops: (p.paletteStops || []).join(',')
       }, kelpArgs(p), gateArgs(p))).then((r) => r.urlFormat);
@@ -155,12 +175,13 @@ const ApiKelpEngine = (function () {
       }, turbArgs(p))).then((r) => r.urlFormat);
     },
 
-    turbidityCompositeLayer(startISO, endISO, maxCloud, p) {
+    turbidityCompositeLayer(startISO, endISO, maxCloud, p, dates) {
       return getJSON('/layer', Object.assign({
         mode: 'turbidityComposite',
         start: startISO.slice(0, 10),
         end: endISO.slice(0, 10),
-        maxCloud: maxCloud
+        maxCloud: maxCloud,
+        dates: dateList(dates)
       }, turbArgs(p))).then((r) => r.urlFormat);
     },
 
@@ -172,12 +193,13 @@ const ApiKelpEngine = (function () {
       }, cloudArgs(p))).then((r) => r.urlFormat);
     },
 
-    cloudCompositeLayer(startISO, endISO, maxCloud, p) {
+    cloudCompositeLayer(startISO, endISO, maxCloud, p, dates) {
       return getJSON('/layer', Object.assign({
         mode: 'cloudComposite',
         start: startISO.slice(0, 10),
         end: endISO.slice(0, 10),
         maxCloud: maxCloud,
+        dates: dateList(dates),
         cstops: ((cfg.CLOUD_PALETTES || {})[p.cloudPalette] || []).join(',')
       }, cloudArgs(p))).then((r) => r.urlFormat);
     }

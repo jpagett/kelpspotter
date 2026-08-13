@@ -33,10 +33,11 @@
         <button id="view-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false">View <span class="sect-caret">▾</span></button>
         <div id="view-list" class="hdr-menu-list" hidden>
           <label class="check"><input type="checkbox" id="view-console" checked><span class="label">Console</span></label>
-          <label class="check"><input type="checkbox" id="view-paths" checked><span class="label">Paths</span></label>
+          <!-- Points of interest live inside the Paths dock (as a tab), so the
+               Paths toggle governs both -->
+          <label class="check"><input type="checkbox" id="view-paths" checked><span class="label">Paths &amp; POI</span></label>
           <label class="check"><input type="checkbox" id="view-activity" checked><span class="label">Activity</span></label>
           <label class="check"><input type="checkbox" id="view-legend" checked><span class="label">Legend</span></label>
-          <label class="check"><input type="checkbox" id="view-poi" checked><span class="label">Points of interest</span></label>
         </div>
       </div>
       <div class="hdr-menu">
@@ -161,40 +162,136 @@
     </div>
 
     <div class="sect">
-      <button class="eyebrow sect-toggle" data-target="sect-kelp" aria-expanded="false">
-        <span class="sect-caret">▸</span>Kelp model
+      <button class="eyebrow sect-toggle" data-target="sect-model" aria-expanded="false">
+        <span class="sect-caret">▸</span>Models
       </button>
-      <div id="sect-kelp" class="sect-body" hidden>
-      <div class="field">
-        <div class="label-row"><span class="label">Index</span></div>
-        <div class="seg" role="group" aria-label="Index type">
-          <button id="idx-kd" data-index="KD" aria-pressed="true">KD</button>
-          <button id="idx-fai" data-index="FAI" aria-pressed="false">FAI</button>
-          <button id="idx-ndvi" data-index="NDVI" aria-pressed="false">NDVI</button>
+      <div id="sect-model" class="sect-body" hidden>
+      <!-- one model per tab; the Rerun button below is shared, since every
+           tab's detection changes go through the same dirty->Rerun cycle -->
+      <div class="seg model-tabs" role="group" aria-label="Model">
+        <button id="mtab-kelp" data-mtab="kelp" aria-pressed="true">Kelp</button>
+        <button id="mtab-cloud" data-mtab="cloud" aria-pressed="false">Cloud</button>
+        <button id="mtab-turb" data-mtab="turb" aria-pressed="false">Turbidity</button>
+      </div>
+
+      <div id="mpanel-kelp" class="mpanel">
+        <div class="field">
+          <div class="label-row"><span class="label">Index</span></div>
+          <div class="seg" role="group" aria-label="Index type">
+            <button id="idx-kd" data-index="KD" aria-pressed="true">KD</button>
+            <button id="idx-fai" data-index="FAI" aria-pressed="false">FAI</button>
+            <button id="idx-ndvi" data-index="NDVI" aria-pressed="false">NDVI</button>
+          </div>
+          <div id="idx-hint" class="hint">KD (Kelp Difference) = B6 − B4. The paper’s own index, best kappa of the three. Mora-Soto et al. (2020), Remote Sens. 12(4), 694. doi:10.3390/rs12040694</div>
         </div>
-        <div id="idx-hint" class="hint">KD (Kelp Difference) = B6 − B4. The paper’s own index, best kappa of the three. Mora-Soto et al. (2020), Remote Sens. 12(4), 694. doi:10.3390/rs12040694</div>
+        <div class="field">
+          <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.003216</span></div>
+          <input id="kelp" type="range" min="-0.02" max="0.05" step="0.0000001" value="0.003216">
+          <div class="hint">Higher = only the densest canopy counts as kelp. Resets to the published value when you switch index.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">B11 land filter</span><span id="b11-val" class="value">0.028</span></div>
+          <input id="b11" type="range" min="0" max="0.1" step="0.001" value="0.028">
+          <div class="hint">Step 1 of the paper: drop pixels at or above this B11 (1610 nm) reflectance — coast and land vegetation.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
+          <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
+        </div>
+        <div class="field">
+          <button id="kelp-defaults" class="btn ghost kelp-defaults" type="button"
+                  title="Reset index, thresholds and opacity to the published values">Restore defaults</button>
+        </div>
       </div>
-      <div class="field">
-        <div class="label-row"><span class="label">Kelp threshold</span><span id="kelp-val" class="value">0.003216</span></div>
-        <input id="kelp" type="range" min="-0.02" max="0.05" step="0.0000001" value="0.003216">
-        <div class="hint">Higher = only the densest canopy counts as kelp. Resets to the published value when you switch index.</div>
+
+      <div id="mpanel-cloud" class="mpanel" hidden>
+        <div class="field">
+          <label class="check">
+            <input id="cloud-show" type="checkbox">
+            <span class="label">Show cloud mask</span>
+          </label>
+          <div class="hint">While shown, the kelp and turbidity models also exclude cloudy pixels — per scene, before a composite’s median.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Brightness floor</span><span id="cloud-vis-val" class="value">0.180</span></div>
+          <input id="cloud-vis" type="range" min="0.05" max="0.40" step="0.005" value="0.18">
+          <div class="hint">Mean of B2/B3/B4 at or above this is a cloud candidate. Lower catches thinner cloud, and more bright water with it.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">SWIR floor</span><span id="cloud-swir-val" class="value">0.100</span></div>
+          <input id="cloud-swir" type="range" min="0.02" max="0.30" step="0.005" value="0.10">
+          <div class="hint">…and B11 at or above this confirms it. Turbid water and foam stay dark at 1610 nm, which is what separates them from cloud.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Whiteness gate</span><span id="cloud-white-val" class="value">0.55</span></div>
+          <input id="cloud-white" type="range" min="0.10" max="1.20" step="0.05" value="0.55">
+          <div class="hint">Spectral flatness: 0 = perfectly white. Lower = stricter; raise if real cloud is slipping through, lower if sand or algae is being flagged.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Mask opacity</span><span id="cloud-op-val" class="value">0%</span></div>
+          <input id="cloud-op" type="range" min="0" max="1" step="0.05" value="0">
+        </div>
+        <div class="field">
+          <button id="cloud-defaults" class="btn ghost kelp-defaults" type="button"
+                  title="Reset the cloud thresholds to their defaults">Restore defaults</button>
+        </div>
       </div>
-      <div class="field">
-        <div class="label-row"><span class="label">B11 land filter</span><span id="b11-val" class="value">0.028</span></div>
-        <input id="b11" type="range" min="0" max="0.1" step="0.001" value="0.028">
-        <div class="hint">Step 1 of the paper: drop pixels at or above this B11 (1610 nm) reflectance — coast and land vegetation.</div>
+
+      <div id="mpanel-turb" class="mpanel" hidden>
+        <div class="field">
+          <label class="check">
+            <input id="turb-show" type="checkbox">
+            <span class="label">Show turbidity</span>
+          </label>
+          <div class="hint">Water clarity over open water — kelp canopy and land are excluded, and clouds too while the cloud mask is shown.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Clarity bands</span></div>
+          <div class="seg" role="group" aria-label="Clarity band pair">
+            <button id="turb-kd490" data-turbmode="KD490" aria-pressed="true">KD490</button>
+            <button id="turb-blue" data-turbmode="BLUE_RATIO" aria-pressed="false">Blue ratio</button>
+          </div>
+          <div class="hint">KD490 (B2/B3) keeps 10–20 m detail. Blue ratio (B1/B2) is CDOM-sensitive but effectively 60 m.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Turbid floor</span><span id="turb-cmin-val" class="value">−0.05</span></div>
+          <input id="turb-cmin" type="range" min="-0.30" max="0.30" step="0.01" value="-0.05">
+          <div class="hint">Clarity at or below this renders as most turbid. Display stretch only — no pixels are reclassified.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Clear ceiling</span><span id="turb-cmax-val" class="value">0.35</span></div>
+          <input id="turb-cmax" type="range" min="-0.10" max="0.60" step="0.01" value="0.35">
+          <div class="hint">Clarity at or above this renders as clearest.</div>
+        </div>
+        <div class="field">
+          <label class="check">
+            <input id="turb-glint" type="checkbox" checked>
+            <span class="label">Glint correction</span>
+          </label>
+          <div class="hint">Subtract a B8-based sun-glint estimate from the clarity bands. The kelp index needs none — glint cancels in a band difference.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">NIR floor</span><span id="turb-nir-val" class="value">0.012</span></div>
+          <input id="turb-nir" type="range" min="0" max="0.05" step="0.001" value="0.012">
+          <div class="hint">B8 of the darkest clean water in the scene — anything above it is treated as glint.</div>
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Glint gain</span><span id="turb-gain-val" class="value">1.0×</span></div>
+          <input id="turb-gain" type="range" min="0" max="3" step="0.1" value="1">
+        </div>
+        <div class="field">
+          <div class="label-row"><span class="label">Layer opacity</span><span id="turb-op-val" class="value">0%</span></div>
+          <input id="turb-op" type="range" min="0" max="1" step="0.05" value="0">
+        </div>
+        <div class="field">
+          <button id="turb-defaults" class="btn ghost kelp-defaults" type="button"
+                  title="Reset the turbidity model to its defaults">Restore defaults</button>
+        </div>
       </div>
+
       <div class="field">
-        <div class="label-row"><span class="label">Layer opacity</span><span id="op-val" class="value">85%</span></div>
-        <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
-      </div>
-      <div class="field">
-        <button id="run" class="btn run" disabled>Rerun kelp map</button>
+        <button id="run" class="btn run" disabled>Rerun model</button>
         <div id="run-hint" class="hint">Up to date with the current settings.</div>
-      </div>
-      <div class="field">
-        <button id="kelp-defaults" class="btn ghost kelp-defaults" type="button"
-                title="Reset index, thresholds and opacity to the published values">Restore defaults</button>
       </div>
       </div>
     </div>
@@ -207,7 +304,18 @@
          panel instead of scrolling away with a long path list -->
     <div class="pp-inner">
       <div class="pp-head">
-        <button id="pp-collapse" class="eyebrow" aria-expanded="true" title="Collapse this panel">Paths</button>
+        <!-- Desktop: Paths/POI are tabs of this dock; the split button shows
+             both stacked. Clicking the active tab still collapses the dock
+             (the same tap-active-to-dismiss idiom as the mobile tab bar).
+             Mobile hides POI/split — POI has its own sheet there. -->
+        <div class="dock-tabs">
+          <button id="pp-collapse" class="eyebrow dock-tab dock-active" aria-expanded="true"
+                  title="Collapse this panel">Paths</button>
+          <button id="dock-poi-tab" class="eyebrow dock-tab" type="button"
+                  title="Show points of interest">POI</button>
+          <button id="dock-split-btn" class="pp-tool dock-split" type="button" aria-pressed="false"
+                  title="Split the dock: paths above, points below">⬓</button>
+        </div>
         <div class="pp-tools">
           <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
           <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
@@ -293,6 +401,10 @@
     <input id="poi-file" type="file" accept=".kml,.kmz,.gpx,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz,application/gpx+xml" hidden>
     <input id="session-file" type="file" accept=".json,application/json" hidden>
   </aside>
+  <!-- split-mode divider between the docked Paths and POI panes. A body child
+       (not inside .poi-panel) on purpose: the panes carry backdrop-filter,
+       which would trap a fixed-position child inside them. -->
+  <div id="poi-divider" class="poi-divider" aria-hidden="true"></div>
 
   <div class="activity" aria-live="polite">
     <button id="act-toggle" class="act-head" aria-expanded="true" title="Collapse this panel">
@@ -305,28 +417,65 @@
 
   <div class="corner-br">
     <div class="legend">
-      <span class="eyebrow">Kelp</span>
-      <div class="ramp-wrap">
-        <div class="ramp"></div>
-        <div class="ramp-labels"><span>Low</span><span>High</span></div>
-      </div>
-      <!-- hover flyout: pick the kelp colormap and the slice of it in use.
-           Swatch buttons are built by app.js; the range bar is static. -->
-      <div class="legend-menu" aria-label="Kelp colormap">
-        <div id="legend-swatches" class="legend-swatches"></div>
-        <div class="legend-range" title="Drag the handles to use only part of the colormap">
-          <div id="legend-range-bar" class="legend-range-bar">
-            <span id="legend-range-top" class="legend-range-grip top" role="slider"
-                  tabindex="0" aria-label="Colormap upper bound"></span>
-            <span id="legend-range-bottom" class="legend-range-grip bottom" role="slider"
-                  tabindex="0" aria-label="Colormap lower bound"></span>
+      <!-- always-visible summary: the live kelp and depth ramps, stacked -->
+      <div class="legend-summary">
+        <div class="legend-line">
+          <span class="eyebrow">Kelp</span>
+          <div class="ramp-wrap">
+            <div class="ramp"></div>
+            <div class="ramp-labels"><span>Low</span><span>High</span></div>
+          </div>
+        </div>
+        <div class="legend-line">
+          <span class="eyebrow">Depth</span>
+          <div class="ramp-wrap">
+            <div id="depth-ramp" class="ramp"></div>
+            <div class="ramp-labels"><span>Deep</span><span>Shallow</span></div>
+          </div>
+        </div>
+        <!-- only while the turbidity overlay is showing; clouds are a flat
+             tint with nothing to read off a ramp, so no line for them -->
+        <div id="turb-line" class="legend-line" hidden>
+          <span class="eyebrow">Turb</span>
+          <div class="ramp-wrap">
+            <div id="turb-ramp" class="ramp"></div>
+            <div class="ramp-labels"><span>Turbid</span><span>Clear</span></div>
           </div>
         </div>
       </div>
-      <!-- depth relief colormap: only two NOAA-side renderers exist, so this
-           is a plain always-visible pair of swatches, no flyout needed -->
-      <span class="eyebrow">Depth</span>
-      <div id="depth-swatches" class="depth-swatches" aria-label="Depth colormap"></div>
+      <!-- hover flyout: the colormap pickers (kelp, depth, turbidity, clouds),
+           stacked vertically. Swatch buttons are built by app.js; the kelp
+           range bar is static. -->
+      <div class="legend-menu" aria-label="Colormaps">
+        <div class="legend-group">
+          <span class="legend-group-title eyebrow">Kelp</span>
+          <div class="legend-picker">
+            <div id="legend-swatches" class="legend-swatches"></div>
+            <div class="legend-range" title="Drag the handles to use only part of the colormap">
+              <div id="legend-range-bar" class="legend-range-bar">
+                <span id="legend-range-top" class="legend-range-grip top" role="slider"
+                      tabindex="0" aria-label="Colormap upper bound"></span>
+                <span id="legend-range-bottom" class="legend-range-grip bottom" role="slider"
+                      tabindex="0" aria-label="Colormap lower bound"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="legend-group">
+          <span class="legend-group-title eyebrow">Depth</span>
+          <!-- swatches built by app.js; each shows its NOAA base render tinted by
+               that style's CSS filter, so they match the map -->
+          <div id="depth-swatches" class="depth-swatches" aria-label="Depth colormap"></div>
+        </div>
+        <div class="legend-group">
+          <span class="legend-group-title eyebrow">Turbidity</span>
+          <div id="turb-swatches" class="legend-swatches" aria-label="Turbidity colormap"></div>
+        </div>
+        <div class="legend-group">
+          <span class="legend-group-title eyebrow">Clouds</span>
+          <div id="cloud-swatches" class="legend-swatches" aria-label="Cloud mask tint"></div>
+        </div>
+      </div>
     </div>
 
     <div class="zoom-control" aria-label="Zoom">
@@ -363,6 +512,23 @@
           <input id="ov-ruler-slider" type="range" min="0" max="1" step="0.05" value="0.45" aria-label="Depth overlay opacity">
         </div>
       </div>
+      <div class="ov-item" data-overlay="turbidity">
+        <button id="ov-turb" class="ov-icon" draggable="true" type="button" aria-pressed="false" title="Water turbidity overlay">💧</button>
+        <div class="ov-flyout">
+          <input id="ov-turb-slider" type="range" min="0" max="1" step="0.05" value="0" aria-label="Turbidity overlay opacity">
+        </div>
+      </div>
+      <div class="ov-item" data-overlay="clouds">
+        <button id="ov-cloud" class="ov-icon" draggable="true" type="button" aria-pressed="false"
+                title="Cloud mask — while on, kelp and turbidity also exclude cloudy pixels">☁</button>
+        <div class="ov-flyout">
+          <input id="ov-cloud-slider" type="range" min="0" max="1" step="0.05" value="0" aria-label="Cloud mask opacity">
+        </div>
+      </div>
+      <!-- Mobile only: five icons is too tall a permanent column, so they
+           collapse behind this toggle and expand upward. Hidden on desktop. -->
+      <button id="ov-group" class="ov-icon ov-group-toggle" type="button"
+              aria-expanded="false" title="Map overlays">⧉</button>
     </div>
   </div>
 

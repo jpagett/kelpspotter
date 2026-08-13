@@ -18,7 +18,7 @@
  * API (its answers change with the archive), Google auth, fonts (Google's CDN
  * handles those with proper headers).
  */
-const SHELL = 'kelp-shell-v2';
+const SHELL = 'kelp-shell-v5';
 const NOAA = 'kelp-noaa-v1';
 const NOAA_HOSTS = ['gis.ngdc.noaa.gov', 'gis.charttools.noaa.gov'];
 const NOAA_MAX = 400;

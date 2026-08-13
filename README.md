@@ -86,14 +86,15 @@ moves to a small Python cloud function; this web app is the prototype and fallba
 | **Map right-click** | Right-click (long-press on touch) open water: **Add POI here**, **Start path here**, **Copy coordinates**. |
 | **Reverse / duplicate** | In a path's cog menu: ⇋ runs the line from the other end (headings, legs and bounds all remap); ⧉ copies it for a planning variant. |
 | **Undo** | Deleting a path shows a 6-second toast with an Undo button. |
-| **Plot zoom** | Scroll wheel over a profile zooms the depth axis (per path, ×8 max, double-click resets) — shallow structure stays readable when one deep sounding sets the scale. |
+| **Plot zoom & pan** | Scroll wheel over a profile zooms the depth axis (per path, ×8 max), anchored on the depth under the cursor. When zoomed, drag the y-axis gutter to pan up/down the water column; double-click resets both. |
 | **Keys** | `[` `]` step scenes (arrows still work), `n` starts/finishes drawing a path. |
 | **Profile right-click** | Right-click (long-press on touch) the depth plot for actions at that distance: **Add node here**, **Set ceiling start / end**, **Clear ceilings**. A ceiling caps the *planned* depth over a span — the plot draws the capped line solid with the true bottom dotted, hover reads both, and gas is burned at the capped depth. The cap's depth is the y-position of the click. |
 | **Drawing on a contour** | While drawing, a node placed within ~18 px of a custom depth contour snaps onto it, so a transect can follow "the 40 ft line". Shift-clicking an existing node snaps it the same way, with a wider catch. |
 | **Node handles** | Live in their own map pane above the path lines, so grabbing a node always beats the line's insert-a-node hit area. |
-| **Paths** (top right) | **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. Hovering the profile drops a dot on the map at that distance along the path. The panel is resizable from its bottom-right corner. |
-| **Rerun kelp map** | Greyed out while the map matches the settings; turns kelp-yellow once the index, kelp threshold or B11 filter changes. Layer opacity does not count — it restyles the existing layer rather than recomputing it. |
-| **Section headers** | **Depth** and **Kelp model** collapse and expand. |
+| **Paths / POI dock** (right) | Two tabs share the right dock: **Paths** and **POI** (points of interest); the ⬓ button splits the dock to show both, with a draggable seam between them. Clicking the active tab collapses the dock. In Paths: **+** draws a path by clicking the map (Esc or ✓ to finish), **⤓** loads a path spreadsheet, **💾** exports the selected one. Each path expands to a depth-vs-distance profile and has a cog for colour and delete. Hovering the profile drops a dot on the map at that distance along the path. The dock is resizable from its inboard edge. |
+| **Models tabs** | The **Models** section holds one tab per detection model — **Kelp**, **Cloud** and **Turbidity** — each with its own tuning sliders, "show" toggle, opacity and Restore defaults. |
+| **Rerun model** | Greyed out while the map matches the settings; turns kelp-yellow once any model's detection parameters change. Opacities and show/hide do not count — they restyle existing layers rather than recomputing them. Cloud and turbidity changes only mark the map stale while their overlay is showing; hidden overlays pick the new numbers up when enabled. |
+| **Section headers** | **Depth** and **Models** collapse and expand. |
 | **Depth at the cursor** | With either depth layer on, the depth (or land elevation) under the pointer is read out in feet beside the crosshair. |
 | **Index: KD / FAI / NDVI** | Which spectral index defines "kelp" (see below). |
 | **Kelp threshold** | Index value at or above which a pixel counts as canopy. Snaps back to the published value each time you switch index. |
@@ -130,6 +131,30 @@ so the basemap and the depth overlay stay visible underneath.
 
 **This ramp is a display choice, not part of the algorithm.** It never changes which
 pixels are classified as kelp — only how strongly they are shaded.
+
+### Turbidity & cloud-mask overlays
+
+Two more Sentinel-2-derived overlays (💧 and ☁ in the bottom-right picker), adapted
+from a "kelp + water clarity" Sentinel Hub evalscript and recomputed on this app's
+L1C TOA pipeline. Every detection number is tunable live from the console's
+**Models → Cloud / Turbidity** tabs (defaults in `config.js`, server-side mirrors in
+`api/main.py`):
+
+- **Turbidity** — a glint-corrected, KD490-style blue/green difference over open
+  water. Land/foam is dropped by the same B11 test the kelp chain uses, and
+  kelp-classified pixels are excluded (canopy would read as false extreme
+  turbidity). Follows the single/composite mode like the kelp layer.
+- **Cloud mask** — a band test (bright in visible **and** SWIR **and** spectrally
+  flat) OR'd with QA60. In composite mode it shows the pixels with **no clear
+  observation** in the window. There is no cloud-shadow class: SCL is L2A-only and
+  this app loads L1C.
+- **While the cloud mask is on** (opacity above zero), the kelp and turbidity
+  computations also *exclude* cloud-covered pixels — per scene, before the median in
+  composite mode. Toggling it re-mints both layers; toggling back is cache-fast.
+
+Both need live imagery (Earth Engine or the API backend) — demo mode declines them
+plainly, the same as true color. Their colormaps are picked from the legend flyout
+like kelp and depth.
 
 ### Depth overlays
 

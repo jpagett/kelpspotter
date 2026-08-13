@@ -163,6 +163,28 @@
   /* ------------------------------------------- touch substitutes for hover */
 
   /*
+   * The overlay icons are grouped behind one toggle on a phone (see the
+   * .ov-group-toggle CSS): five permanent icons ate too much map. Tapping the
+   * toggle expands the column upward; tapping anywhere else collapses it.
+   */
+  const ovGroup = $('ov-group');
+  const ovPicker = document.querySelector('.overlay-picker');
+  if (ovGroup && ovPicker) {
+    const setGroup = (open) => {
+      ovPicker.classList.toggle('open', open);
+      ovGroup.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    ovGroup.addEventListener('click', () => setGroup(!ovPicker.classList.contains('open')));
+    document.addEventListener('click', (ev) => {
+      if (!mq.matches || !ovPicker.classList.contains('open')) return;
+      if (ev.target.closest && ev.target.closest('.overlay-picker')) return;
+      setGroup(false);
+    });
+    // leaving mobile: desktop shows the full row, the open state means nothing
+    mq.addEventListener('change', () => { if (!mq.matches) setGroup(false); });
+  }
+
+  /*
    * The overlay opacity sliders live in hover flyouts. On touch, first tap opens
    * the flyout, and the button's own aria-pressed toggle still runs — so a tap
    * both toggles the layer and reveals its slider, which is what you want.

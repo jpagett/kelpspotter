@@ -93,19 +93,30 @@ window.KELP_CONFIG = {
       attribution: 'Depth: NOAA NCEI DEM global mosaic'
     },
     /*
-     * The relief service's own GetCapabilities lists exactly two colored
-     * renderers (a third, "None", turns out to be a flat mid-grey — not a
-     * usable colormap, so it is left out). Both are the same hillshade,
-     * recoloured; `swatch` is a 2-stop approximation of each for the legend
-     * picker, sampled from actual tile output rather than guessed, since
-     * NOAA bakes shading and colour together and there is no ramp to read
-     * programmatically.
+     * NOAA's GetCapabilities lists exactly two colored renderers — ColorHillshade
+     * (blue) and ColorHillshade2 (slate); a third, "None", is a flat mid-grey and
+     * useless. To offer more than two depth colormaps without more NOAA layers,
+     * the extra styles reuse one of those two base renders and recolour it with a
+     * CSS `filter` applied to the depth tile images (the same per-image filter
+     * trick the ENC contour pane already uses — see styles.css). `layers` picks
+     * the NOAA render, `filter` is the recolour (empty = the raw NOAA colours),
+     * and `swatch` is a 2-stop approximation of the BASE render, sampled from real
+     * tile output; the picker applies the same `filter` to the swatch so it always
+     * matches the map. Deep end first (dark), shallow end last (bright).
      */
     reliefStyles: {
-      blue:  { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Blue',
-               swatch: ['0c253d', '4f83b2'] },
-      slate: { layers: 'DEM_global_mosaic:ColorHillshade2', label: 'Slate',
-               swatch: ['08233e', '407cad'] }
+      blue:    { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Blue',    filter: '',
+                 swatch: ['0c253d', '4f83b2'] },
+      slate:   { layers: 'DEM_global_mosaic:ColorHillshade2', label: 'Slate',   filter: '',
+                 swatch: ['08233e', '407cad'] },
+      teal:    { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Teal',
+                 filter: 'hue-rotate(-28deg) saturate(1.4)',                 swatch: ['0c253d', '4f83b2'] },
+      viridis: { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Viridis',
+                 filter: 'hue-rotate(-95deg) saturate(1.5) brightness(1.05)', swatch: ['0c253d', '4f83b2'] },
+      amber:   { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Amber',
+                 filter: 'sepia(1) saturate(2.6) hue-rotate(-12deg) brightness(1.08)', swatch: ['0c253d', '4f83b2'] },
+      mono:    { layers: 'DEM_global_mosaic:ColorHillshade',  label: 'Mono',
+                 filter: 'grayscale(1) contrast(1.08) brightness(1.12)',      swatch: ['0c253d', '4f83b2'] }
     },
     /*
      * Charted depth contours from NOAA's ENC (Electronic Navigational Chart)
@@ -150,10 +161,39 @@ window.KELP_CONFIG = {
    * entries server-side (it cannot read this file).
    */
   KELP_PALETTES: {
-    amber:   ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'],   // the original signature look
-    viridis: ['440154', '31688e', '35b779', 'fde725'],
-    inferno: ['1b0c41', '781c6d', 'ed6925', 'fcffa4'],
-    ice:     ['0d3b66', '3fa7d6', '90e0ef', 'caf0f8']
+    // green->orange, from the "kelp + water clarity" evalscript's KELP_STOPS
+    // ([0.13,0.42,0.16] .. [0.98,0.40,0.08] scaled to 8-bit hex) — the default
+    canopy:    ['216b29', '5cb833', 'edd633', 'fa6614'],
+    amber:     ['7a6a1f', 'd9a441', 'f2b134', 'ffd166'],   // the original signature look
+    viridis:   ['440154', '31688e', '35b779', 'fde725'],
+    inferno:   ['1b0c41', '781c6d', 'ed6925', 'fcffa4'],
+    magma:     ['000004', '51127c', 'b73779', 'fcfdbf'],
+    plasma:    ['0d0887', '9c179e', 'ed7953', 'f0f921'],
+    thermal:   ['042333', '7c1d6f', 'e35933', 'e8fa5b'],
+    ice:       ['0d3b66', '3fa7d6', '90e0ef', 'caf0f8'],
+    grayscale: ['111111', '555555', 'aaaaaa', 'f4f4f4']
+  },
+
+  // turbid -> clear, dark to bright; 'clarity' is the evalscript's WATER_STOPS
+  TURBIDITY_PALETTES: {
+    clarity:   ['571f70', '3333ad', '1c7acc', '47d9e6'],
+    abyss:     ['0b1b3d', '23509c', '3f9bc4', '9fe6ee'],
+    sediment:  ['5e3a17', 'a97b33', '58aebf', 'c9eef2'],
+    grayscale: ['1a1a1a', '595959', '9e9e9e', 'e8e8e8']
+  },
+
+  // Cloud-mask display constant (not a detection parameter, so it is not in
+  // DEFAULTS with the tunable thresholds below): the visible brightness where
+  // the cloud tint's ramp saturates.
+  CLOUD_MASK: {
+    visMax: 0.55
+  },
+  // the mask is drawn ramped by cloud brightness (texture, not a flat stamp)
+  CLOUD_PALETTES: {
+    gray:   ['566067', 'ffffff'],
+    storm:  ['232f36', '93aab8'],
+    violet: ['58184a', 'f2a1dd'],
+    sand:   ['4a3d20', 'f2e3b5']
   },
 
   /*
@@ -178,15 +218,64 @@ window.KELP_CONFIG = {
     b11Thresh: 0.028,       // paper step 1: mask out B11 >= 0.028 (coast + land vegetation)
     maxCloud: 40,           // discard scenes cloudier than this (%)
     opacity: 0.85,          // kelp layer opacity
-    kelpPalette: 'amber',   // key into KELP_PALETTES above
+    kelpPalette: 'canopy',  // key into KELP_PALETTES above
     // sub-range of that palette actually used, 0..1 from its dark end to its
     // bright end — the legend's vertical bar drags these
     paletteMin: 0,
     paletteMax: 1,
+    /*
+     * Turbidity and cloud-mask overlays, off by default. cloudOpacity doubles
+     * as the "cloud mask enabled" switch: while it is above zero the kelp and
+     * turbidity computations also EXCLUDE cloud-covered pixels (per scene,
+     * before the median in composite mode) — see the engines.
+     */
+    turbidityOpacity: 0,
+    cloudOpacity: 0,
+    turbidityPalette: 'clarity',  // key into TURBIDITY_PALETTES above
+    cloudPalette: 'gray',         // key into CLOUD_PALETTES above
+    /*
+     * Cloud-mask detection, adapted from the kelp + water clarity Sentinel Hub
+     * evalscript and tuned live from the console's Models → Cloud tab. Clouds
+     * are bright in BOTH the visible and SWIR; turbid water and foam are
+     * bright in visible but stay dark at 1610 nm, which is what separates
+     * them. No SCL (that classification is L2A-only and this app loads L1C);
+     * QA60's opaque/cirrus bits are OR'd in instead, and cloud SHADOW has no
+     * L1C detector — a known gap. Server-side defaults mirrored in api/main.py.
+     */
+    cloudVisMin: 0.18,      // mean(B2,B3,B4) at/above this = candidate
+                            //   (script, L2A: 0.14 — path radiance lifts TOA visible)
+    cloudSwirMin: 0.10,     // AND B11 at/above this = cloud (B11 barely sees atmosphere)
+    cloudWhiteness: 0.55,   // spectral flatness gate, 0 = perfectly white;
+                            //   raise to loosen, lower to tighten
+    /*
+     * Water-clarity ("turbidity") model, same evalscript, tuned from the
+     * Models → Turbidity tab. A normalized blue/green difference over open
+     * water: high = clear, low = turbid. CAVEAT: the evalscript targets L2A
+     * surface reflectance; this app computes on L1C TOA (the kelp thresholds
+     * demand it — see js/ee-kelp.js). Path radiance lifts the TOA blue/green
+     * bands and shifts the ratio, so the display range and NIR floor are
+     * TOA-seeded rather than the script's published L2A numbers.
+     */
+    turbMode: 'KD490',      // 'KD490' (B2/B3, 10-20 m) | 'BLUE_RATIO' (B1/B2, 60 m, CDOM-sensitive)
+    turbClarityMin: -0.05,  // rendered as most turbid   (script, L2A: -0.25)
+    turbClarityMax: 0.35,   // rendered as clearest      (script, L2A:  0.40)
+    // Glint is near-flat spectrally, so it cancels in the kelp KD difference
+    // but not in a ratio — subtract a B8-derived estimate from the clarity
+    // bands first. KD needs no correction.
+    turbGlint: true,
+    turbNirFloor: 0.012,    // B8 of the darkest clean water (script, L2A: 0.004)
+    turbGlintGain: 1.0,
     dockWidth: 360,         // width of the docked paths panel, in px
+    /*
+     * The right dock's arrangement (desktop): 'paths' or 'poi' shows one pane,
+     * 'split' stacks paths above POI. dockSplit is the fraction of the dock's
+     * height the paths pane keeps in split mode; the seam is draggable.
+     */
+    dockView: 'paths',
+    dockSplit: 0.55,
     // stacking order of the map overlays, bottom to top; dragged in the
     // bottom-right overlay picker and applied as pane z-indexes
-    overlayOrder: ['truecolor', 'depth', 'kelp'],
+    overlayOrder: ['truecolor', 'depth', 'turbidity', 'kelp', 'clouds'],
     mode: 'composite',      // 'single' scene, or 'composite' (median composite over the range)
     distUnit: 'mi',         // path profile x-axis: 'ft' | 'mi' | 'm' | 'km'
     depthUnit: 'ft',        // path profile y-axis: 'ft' | 'm'

@@ -67,7 +67,11 @@
   map.createPane('truecolor').style.zIndex = 240;   // an alternative base image, so it sits just under depth
   map.createPane('depth').style.zIndex = 250;
   map.createPane('contour').style.zIndex = 260;
+  map.createPane('turbidity').style.zIndex = 280;   // water clarity, under the kelp
   map.createPane('kelpPane').style.zIndex = 350;
+  map.createPane('cloudmask').style.zIndex = 330;   // masked pixels read over everything below
+  // initial values only — applyOverlayOrder() rewrites all of these from
+  // state.params.overlayOrder as soon as the overlay picker initialises
 
   // ---- helpers ----
   let toastTimer;
@@ -273,6 +277,168 @@
     }
     if (trueColorLayer && trueColorLayer.setOpacity) trueColorLayer.setOpacity(v);
   }
+
+  /*
+   * ---- turbidity & cloud mask ----
+   * Two more scene-derived overlays, modelled on true color above: each keeps
+   * one layer in its own pane and re-mints when its inputs change. Unlike true
+   * color they follow the single/composite mode split the same way the kelp
+   * layer does, so each build is keyed on everything it was derived from and
+   * rebuilt only when that key goes stale.
+   *
+   * The cloud mask is also a computation gate: while it is enabled (opacity
+   * above zero) the kelp and turbidity layers are computed EXCLUDING cloudy
+   * pixels — per scene, before the median in composite mode. Crossing the
+   * on/off boundary therefore re-runs the kelp map; the mint caches carry the
+   * flag, so toggling straight back is a cache hit, not a recompute.
+   */
+  let turbLayer = null, turbBuiltKey = null, turbBuiltAt = 0, turbLoading = false;
+  let cloudLayer = null, cloudBuiltKey = null, cloudBuiltAt = 0, cloudLoading = false;
+  const auxUrlCache = new Map();          // build key -> {url, at}
+  const AUX_URL_TTL_MS = 25 * 60 * 1000;  // under the backend's 30-min map-id life
+
+  const cloudMaskOn = () => (state.params.cloudOpacity || 0) > 0;
+
+  // Tunable-model signatures for the mint cache keys. cloudSig only counts
+  // while the mask is gating (or drawing) — with the mask off, its thresholds
+  // are latent and changing them must not invalidate anything.
+  function cloudSig() {
+    const P = state.params;
+    return [P.cloudVisMin, P.cloudSwirMin, P.cloudWhiteness].join(',');
+  }
+  function turbSig() {
+    const P = state.params;
+    return [P.turbMode, P.turbClarityMin, P.turbClarityMax,
+            P.turbGlint === false ? 0 : 1, P.turbNirFloor, P.turbGlintGain].join(',');
+  }
+
+  // everything the mint depends on; the mode part mirrors layerCacheKey's
+  function auxModePart() {
+    if (state.params.mode === 'composite') {
+      return 'c|' + state.range.start + '|' + state.range.end + '|' + state.params.maxCloud;
+    }
+    const sc = state.scenes[state.idx];
+    return 's|' + (sc ? sc.date : '');
+  }
+  function turbKey() {
+    const P = state.params;
+    // kelp params matter: kelp-classified pixels are excluded from the render
+    return [state.engine.name, 'turb', P.turbidityPalette, turbSig(),
+            cloudMaskOn() ? 'cm:' + cloudSig() : '',
+            P.indexType, P.kelpThresh, P.b11Thresh, auxModePart()].join('|');
+  }
+  function cloudKey() {
+    return [state.engine.name, 'cloud', state.params.cloudPalette, cloudSig(),
+            auxModePart()].join('|');
+  }
+
+  async function ensureAux(kind) {
+    const isTurb = kind === 'turbidity';
+    const label = isTurb ? 'Turbidity' : 'Cloud mask';
+    if (isTurb ? turbLoading : cloudLoading) return;
+    if (!state.engine || !state.scenes.length) return;
+    const composite = state.params.mode === 'composite';
+    if (!composite && !state.scenes[state.idx]) return;
+    const method = isTurb
+      ? (composite ? 'turbidityCompositeLayer' : 'turbidityLayer')
+      : (composite ? 'cloudCompositeLayer' : 'cloudLayer');
+    if (typeof state.engine[method] !== 'function') return;
+    const key = isTurb ? turbKey() : cloudKey();
+    // current AND younger than the mint's lifetime — an old build whose tile
+    // URL has expired must be re-minted even though nothing else changed
+    const fresh = Date.now() - (isTurb ? turbBuiltAt : cloudBuiltAt) < AUX_URL_TTL_MS;
+    if ((isTurb ? turbBuiltKey : cloudBuiltKey) === key && fresh) return;
+
+    if (isTurb) turbLoading = true; else cloudLoading = true;
+    say('Loading ' + label.toLowerCase() + '…');
+    try {
+      const hit = auxUrlCache.get(key);
+      let res;
+      if (hit && Date.now() - hit.at < AUX_URL_TTL_MS) {
+        res = hit.url;
+      } else {
+        if (composite) {
+          const range = dateRangeISO();
+          res = await state.engine[method](range[0], range[1], state.params.maxCloud, state.params);
+        } else {
+          res = await state.engine[method](state.scenes[state.idx].date, state.params);
+        }
+        if (typeof res === 'string') {
+          if (auxUrlCache.size > 60) auxUrlCache.clear();   // crude bound; entries expire anyway
+          auxUrlCache.set(key, { url: res, at: Date.now() });
+        }
+      }
+      // inputs changed mid-mint: drop this result, the change's own trigger
+      // re-invokes (same rule as ensureTrueColor)
+      if ((isTurb ? turbKey() : cloudKey()) !== key) return;
+      const old = isTurb ? turbLayer : cloudLayer;
+      if (old) map.removeLayer(old);
+      const layer = toLeafletLayer(res, {
+        pane: isTurb ? 'turbidity' : 'cloudmask',
+        opacity: isTurb ? state.params.turbidityOpacity : state.params.cloudOpacity
+      });
+      layer.addTo(map);
+      if (isTurb) { turbLayer = layer; turbBuiltKey = key; turbBuiltAt = Date.now(); }
+      else { cloudLayer = layer; cloudBuiltKey = key; cloudBuiltAt = Date.now(); }
+      say(label + ' ready', 'ok');
+    } catch (err) {
+      console.warn(err);
+      say(label + ' unavailable — ' + err.message, 'warn');
+      toast(err.message, true);
+      // zero opacity is enough: the icon's pressed state derives from it, so
+      // it stops reading "active" over a layer that never loaded
+      (isTurb ? setTurbidityOpacity : setCloudOpacity)(0);
+      syncOverlayPicker();
+    } finally {
+      if (isTurb) turbLoading = false; else cloudLoading = false;
+    }
+  }
+  const ensureTurbidity = () => ensureAux('turbidity');
+  const ensureCloudMask = () => ensureAux('clouds');
+
+  function setTurbidityOpacity(v) {
+    state.params.turbidityOpacity = v;
+    map.getPane('turbidity').style.display = v > 0 ? '' : 'none';
+    if (v > 0) ensureTurbidity();
+    if (turbLayer && turbLayer.setOpacity) turbLayer.setOpacity(v);
+    // one opacity, three controls — the corner flyout and the Models tab
+    // mirror each other, same pattern as setDepthOpacity
+    $('turb-op').value = v;
+    $('turb-op-val').textContent = Math.round(v * 100) + '%';
+    // the legend's summary ramp for turbidity only shows while the overlay does
+    $('turb-line').hidden = !(v > 0);
+  }
+
+  let cloudWasOn = false;   // synced to the restored params just below
+  function setCloudOpacity(v) {
+    state.params.cloudOpacity = v;
+    map.getPane('cloudmask').style.display = v > 0 ? '' : 'none';
+    if (v > 0) ensureCloudMask();
+    if (cloudLayer && cloudLayer.setOpacity) cloudLayer.setOpacity(v);
+    $('cloud-op').value = v;
+    $('cloud-op-val').textContent = Math.round(v * 100) + '%';
+    const on = v > 0;
+    if (on !== cloudWasOn) {
+      cloudWasOn = on;
+      /*
+       * The gate flipped: kelp and turbidity must be recomputed with (or
+       * without) the cloud exclusion. run() re-mints the kelp layer and its
+       * tail re-invokes the visible aux overlays; every mint cache key
+       * carries the flag, so flipping back is instant.
+       */
+      if (state.scenes.length) {
+        say('Cloud mask ' + (on ? 'on — recomputing kelp & turbidity without cloud pixels'
+                                : 'off — recomputing kelp & turbidity'));
+        run();
+      }
+    }
+  }
+  // a restored session may re-open these overlays; sync the gate tracker and
+  // pane visibility now — the layers themselves build after the first run()
+  cloudWasOn = cloudMaskOn();
+  map.getPane('turbidity').style.display = state.params.turbidityOpacity > 0 ? '' : 'none';
+  map.getPane('cloudmask').style.display = cloudMaskOn() ? '' : 'none';
+  $('turb-line').hidden = !(state.params.turbidityOpacity > 0);
 
   /*
    * ---- depth at the cursor ----
@@ -855,6 +1021,10 @@
        */
       if (state.params.trueColorOpacity > 0) ensureTrueColor();
       else if (tcUsed) ensureTrueColor(true);
+      // the aux overlays track the same scene/mode/params; rebuild whichever
+      // is showing (their keys dedupe — an unchanged build is a no-op)
+      if (state.params.turbidityOpacity > 0) ensureTurbidity();
+      if (state.params.cloudOpacity > 0) ensureCloudMask();
     } catch (err) {
       console.warn(err);
       say('Kelp computation failed — see console', 'warn');
@@ -879,8 +1049,11 @@
 
   function layerCacheKey(suffix) {
     const P = state.params;
+    // the cloud-mask gate changes which pixels classify, so it (and the cloud
+    // thresholds while it is on) keys the mint
     return [state.engine.name, suffix, P.indexType, P.kelpThresh, P.b11Thresh,
-            P.kelpPalette, P.paletteMin, P.paletteMax].join('|');
+            P.kelpPalette, P.paletteMin, P.paletteMax,
+            cloudMaskOn() ? 'cm:' + cloudSig() : ''].join('|');
   }
   async function cachedLayer(suffix, make) {
     const key = layerCacheKey(suffix);
@@ -1064,6 +1237,146 @@
     if (state.layer && state.layer.setParams) state.layer.setParams(state.params);
     setDirty(true);
     say('Kelp model reset to the published defaults');
+  });
+
+  /*
+   * ---- Models tabs: cloud & turbidity tuning ----
+   * One model per tab, same dirty->Rerun cycle as the kelp controls above.
+   * Detection changes only mark the map stale while their overlay is showing:
+   * a hidden overlay picks the new numbers up automatically the moment it is
+   * enabled, because every mint key carries them — nothing to rerun yet.
+   * "Show" checkboxes and opacity sliders are instant, exactly like the kelp
+   * tab's own opacity slider.
+   */
+  document.querySelectorAll('.model-tabs button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.model-tabs button').forEach((b) => {
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      });
+      ['kelp', 'cloud', 'turb'].forEach((k) => {
+        $('mpanel-' + k).hidden = btn.dataset.mtab !== k;
+      });
+    });
+  });
+
+  const dirtyIfCloudShown = () => { if (cloudMaskOn()) setDirty(true); };
+  const dirtyIfTurbShown = () => { if (state.params.turbidityOpacity > 0) setDirty(true); };
+  const fmt3 = (v) => (+v).toFixed(3);
+  const fmt2 = (v) => (+v).toFixed(2);
+
+  bindSlider('cloud-vis', 'cloud-vis-val', fmt3,
+    (v) => (state.params.cloudVisMin = +v), dirtyIfCloudShown);
+  bindSlider('cloud-swir', 'cloud-swir-val', fmt3,
+    (v) => (state.params.cloudSwirMin = +v), dirtyIfCloudShown);
+  bindSlider('cloud-white', 'cloud-white-val', fmt2,
+    (v) => (state.params.cloudWhiteness = +v), dirtyIfCloudShown);
+
+  // The clarity stretch is a pair — cross-clamped so it can never invert,
+  // same rule as the legend's palette range grips. Clamped values are rounded
+  // back onto the sliders' 0.01 grid, or float noise (0.35 - 0.02 =
+  // 0.32999...) would leave the thumb between steps.
+  const CLARITY_GAP = 0.02;
+  const onGrid = (x) => Math.round(x * 100) / 100;
+  bindSlider('turb-cmin', 'turb-cmin-val', fmt2, (v) => {
+    const val = onGrid(Math.min(+v, state.params.turbClarityMax - CLARITY_GAP));
+    state.params.turbClarityMin = val;
+    if (val !== +v) { $('turb-cmin').value = val; $('turb-cmin-val').textContent = fmt2(val); }
+  }, dirtyIfTurbShown);
+  bindSlider('turb-cmax', 'turb-cmax-val', fmt2, (v) => {
+    const val = onGrid(Math.max(+v, state.params.turbClarityMin + CLARITY_GAP));
+    state.params.turbClarityMax = val;
+    if (val !== +v) { $('turb-cmax').value = val; $('turb-cmax-val').textContent = fmt2(val); }
+  }, dirtyIfTurbShown);
+  bindSlider('turb-nir', 'turb-nir-val', fmt3,
+    (v) => (state.params.turbNirFloor = +v), dirtyIfTurbShown);
+  bindSlider('turb-gain', 'turb-gain-val', (v) => (+v).toFixed(1) + '×',
+    (v) => (state.params.turbGlintGain = +v), dirtyIfTurbShown);
+
+  // glint on/off greys out its two sliders, so the dead controls read as dead
+  function syncGlintEnabled() {
+    const on = state.params.turbGlint !== false;
+    $('turb-nir').disabled = !on;
+    $('turb-gain').disabled = !on;
+  }
+  $('turb-glint').addEventListener('change', (ev) => {
+    state.params.turbGlint = ev.target.checked;
+    syncGlintEnabled();
+    dirtyIfTurbShown();
+  });
+
+  function setTurbMode(mode) {
+    if (mode === state.params.turbMode) return;
+    state.params.turbMode = mode;
+    $('turb-kd490').setAttribute('aria-pressed', mode === 'KD490' ? 'true' : 'false');
+    $('turb-blue').setAttribute('aria-pressed', mode === 'BLUE_RATIO' ? 'true' : 'false');
+    dirtyIfTurbShown();
+  }
+  $('turb-kd490').addEventListener('click', () => setTurbMode('KD490'));
+  $('turb-blue').addEventListener('click', () => setTurbMode('BLUE_RATIO'));
+
+  // "Show" checkboxes are the same switches as the corner ☁/💧 icons —
+  // toggleOverlay owns the flip (and the cloud gate's rerun), the checkbox
+  // state itself is re-synced by syncOverlayPicker
+  $('cloud-show').addEventListener('change', (ev) => {
+    if (ev.target.checked !== cloudMaskOn()) toggleOverlay('clouds');
+  });
+  $('turb-show').addEventListener('change', (ev) => {
+    if (ev.target.checked !== (state.params.turbidityOpacity > 0)) toggleOverlay('turbidity');
+  });
+
+  // in-tab opacity sliders, mirroring the corner flyouts (as the kelp tab does)
+  bindSlider('cloud-op', 'cloud-op-val', (v) => Math.round(v * 100) + '%',
+    (v) => { setCloudOpacity(+v); syncOverlayPicker(); }, () => {});
+  bindSlider('turb-op', 'turb-op-val', (v) => Math.round(v * 100) + '%',
+    (v) => { setTurbidityOpacity(+v); syncOverlayPicker(); }, () => {});
+
+  // one writer for every cloud/turbidity control, so restored sessions,
+  // imports and the defaults buttons all land on the same code path
+  function syncModelControls() {
+    const P = state.params;
+    $('cloud-vis').value = P.cloudVisMin;
+    $('cloud-vis-val').textContent = fmt3(P.cloudVisMin);
+    $('cloud-swir').value = P.cloudSwirMin;
+    $('cloud-swir-val').textContent = fmt3(P.cloudSwirMin);
+    $('cloud-white').value = P.cloudWhiteness;
+    $('cloud-white-val').textContent = fmt2(P.cloudWhiteness);
+    $('cloud-op').value = P.cloudOpacity;
+    $('cloud-op-val').textContent = Math.round(P.cloudOpacity * 100) + '%';
+    $('turb-cmin').value = P.turbClarityMin;
+    $('turb-cmin-val').textContent = fmt2(P.turbClarityMin);
+    $('turb-cmax').value = P.turbClarityMax;
+    $('turb-cmax-val').textContent = fmt2(P.turbClarityMax);
+    $('turb-nir').value = P.turbNirFloor;
+    $('turb-nir-val').textContent = fmt3(P.turbNirFloor);
+    $('turb-gain').value = P.turbGlintGain;
+    $('turb-gain-val').textContent = (+P.turbGlintGain).toFixed(1) + '×';
+    $('turb-glint').checked = P.turbGlint !== false;
+    $('turb-kd490').setAttribute('aria-pressed', P.turbMode !== 'BLUE_RATIO' ? 'true' : 'false');
+    $('turb-blue').setAttribute('aria-pressed', P.turbMode === 'BLUE_RATIO' ? 'true' : 'false');
+    $('turb-op').value = P.turbidityOpacity;
+    $('turb-op-val').textContent = Math.round(P.turbidityOpacity * 100) + '%';
+    syncGlintEnabled();
+  }
+  syncModelControls();
+
+  $('cloud-defaults').addEventListener('click', () => {
+    const d = cfg.DEFAULTS;
+    ['cloudVisMin', 'cloudSwirMin', 'cloudWhiteness'].forEach((k) => {
+      state.params[k] = d[k];
+    });
+    syncModelControls();
+    dirtyIfCloudShown();
+    say('Cloud mask reset to defaults');
+  });
+  $('turb-defaults').addEventListener('click', () => {
+    const d = cfg.DEFAULTS;
+    ['turbMode', 'turbClarityMin', 'turbClarityMax',
+     'turbGlint', 'turbNirFloor', 'turbGlintGain'].forEach((k) => {
+      state.params[k] = d[k];
+    });
+    syncModelControls();
+    dirtyIfTurbShown();
+    say('Turbidity model reset to defaults');
   });
 
   /*
@@ -1329,7 +1642,9 @@
   const OVERLAYS = {
     kelp:      { btn: 'ov-kelp',  slider: 'ov-kelp-slider',  param: 'opacity' },
     truecolor: { btn: 'ov-eye',   slider: 'ov-eye-slider',   param: 'trueColorOpacity' },
-    depth:     { btn: 'ov-ruler', slider: 'ov-ruler-slider', param: 'depthOpacity' }
+    depth:     { btn: 'ov-ruler', slider: 'ov-ruler-slider', param: 'depthOpacity' },
+    turbidity: { btn: 'ov-turb',  slider: 'ov-turb-slider',  param: 'turbidityOpacity' },
+    clouds:    { btn: 'ov-cloud', slider: 'ov-cloud-slider', param: 'cloudOpacity' }
   };
   /*
    * Each overlay is independent. Clicking an icon toggles only that overlay
@@ -1353,7 +1668,9 @@
   const OVERLAY_SETTERS = {
     kelp: setKelpOpacity,
     truecolor: setTrueColorOpacity,
-    depth: setDepthOpacity
+    depth: setDepthOpacity,
+    turbidity: setTurbidityOpacity,
+    clouds: setCloudOpacity
   };
 
   // pressed simply means visible, which is what the icon now communicates
@@ -1365,6 +1682,9 @@
       $(o.slider).value = v;
       if (v > 0) overlayLast[key] = v;
     });
+    // the Models tabs carry "show" checkboxes for the same two toggles
+    $('cloud-show').checked = cloudMaskOn();
+    $('turb-show').checked = state.params.turbidityOpacity > 0;
   }
 
   // the depth overlay is invisible unless its relief layer is actually on
@@ -1375,7 +1695,7 @@
     setDepthLayer('relief', true);
   }
 
-  const OVERLAY_FALLBACK = { kelp: 0.85, truecolor: 0.6, depth: 0.45 };
+  const OVERLAY_FALLBACK = { kelp: 0.85, truecolor: 0.6, depth: 0.45, turbidity: 0.7, clouds: 0.55 };
 
   function toggleOverlay(which) {
     const cur = state.params[OVERLAYS[which].param];
@@ -1405,16 +1725,35 @@
    * reordering is instant and costs nothing. Leftmost item = bottom of the
    * stack, matching the flyouts reading left to right.
    */
-  const OVERLAY_PANES = { kelp: ['kelpPane'], truecolor: ['truecolor'], depth: ['depth', 'contour'] };
+  const OVERLAY_PANES = {
+    kelp: ['kelpPane'], truecolor: ['truecolor'], depth: ['depth', 'contour'],
+    turbidity: ['turbidity'], clouds: ['cloudmask']
+  };
+  /*
+   * Orders saved before turbidity/clouds existed lack them — slot each missing
+   * overlay into its default position (turbidity under kelp, clouds on top)
+   * rather than dumping both on top of the stack.
+   */
+  (function migrateOverlayOrder() {
+    const DEF = cfg.DEFAULTS.overlayOrder || ['truecolor', 'depth', 'turbidity', 'kelp', 'clouds'];
+    const cur = Array.isArray(state.params.overlayOrder)
+      ? state.params.overlayOrder.filter((k) => OVERLAY_PANES[k])
+      : DEF.slice();
+    DEF.forEach((k, i) => {
+      if (cur.indexOf(k) < 0) cur.splice(Math.min(i, cur.length), 0, k);
+    });
+    state.params.overlayOrder = cur;
+  })();
   /*
    * Slots are 20 apart and start at 240, leaving each overlay room for its
    * second pane (depth carries its ENC contours) without any two landing on
-   * the same z-index. The custom-contour pane sits above all of them at 350
-   * (set in contours.js) — hand-drawn reference lines should never be buried
-   * under an opaque true-colour scene — and paths stay on top at 380.
+   * the same z-index. Five slots top out at 240+80+5=325, still under the
+   * custom-contour pane at 350 (set in contours.js) — hand-drawn reference
+   * lines should never be buried under an opaque true-colour scene — and
+   * paths stay on top at 380.
    */
   function applyOverlayOrder() {
-    const order = state.params.overlayOrder || ['truecolor', 'depth', 'kelp'];
+    const order = state.params.overlayOrder || ['truecolor', 'depth', 'turbidity', 'kelp', 'clouds'];
     order.forEach((key, slot) => {
       (OVERLAY_PANES[key] || []).forEach((pane, i) => {
         const el = map.getPane(pane);
@@ -1614,36 +1953,119 @@
 
   /*
    * ---- depth colormap picker ----
-   * Small, always-visible swatches next to the Kelp ones — there is no range
-   * to restrict (NOAA ships each style as one fixed rendering), so this skips
-   * the hover flyout and range bar entirely and just swaps which of the two
-   * relief styles is requested from NOAA.
+   * The same flyout-swatch interface as the kelp picker above. NOAA ships only
+   * two coloured relief renders, so the extra styles reuse one of those and
+   * recolour it with a CSS filter on the depth tiles (config.DEPTH.reliefStyles
+   * carries the filter). There is no range to restrict, so this keeps the swatch
+   * column but not the range bar.
    */
+  const activeDepthStyle = () => {
+    const styles = cfg.DEPTH.reliefStyles || {};
+    return styles[state.params.depthStyle] || styles.blue;
+  };
+  /*
+   * Push the active style's recolour onto the depth pane — inherited by every
+   * relief tile, per .leaflet-depth-pane img in styles.css — and onto the legend's
+   * depth summary ramp, so both track the picker. A function declaration so
+   * applyState (defined earlier in source) can call it.
+   */
+  function applyDepthFilter() {
+    const style = activeDepthStyle();
+    const pane = map.getPane('depth');
+    if (pane) pane.style.setProperty('--depth-filter', style.filter || 'none');
+    const ramp = $('depth-ramp');
+    if (ramp) {
+      ramp.style.background = gradient(style.swatch, 90);
+      ramp.style.filter = style.filter || 'none';
+    }
+  }
   function setDepthStyle(key) {
-    if (!(cfg.DEPTH.reliefStyles || {})[key] || key === state.params.depthStyle) return;
+    const styles = cfg.DEPTH.reliefStyles || {};
+    if (!styles[key] || key === state.params.depthStyle) return;
+    const prevLayers = reliefLayerName();
     state.params.depthStyle = key;
     $('depth-swatches').querySelectorAll('.legend-swatch').forEach((b) => {
       b.setAttribute('aria-pressed', b.dataset.depthStyle === key ? 'true' : 'false');
     });
-    // redraw in place if the relief layer is already built; nothing to do
-    // otherwise — setDepthLayer picks up the new style next time it's built
-    if (DEPTH_LAYERS.relief.layer && DEPTH_LAYERS.relief.layer.setParams) {
-      DEPTH_LAYERS.relief.layer.setParams({ layers: reliefLayerName() });
+    applyDepthFilter();
+    // Only re-mint tiles when the NOAA render actually changed; a filter-only
+    // switch (same base layer) is a pure CSS recolour and needs no refetch.
+    const newLayers = reliefLayerName();
+    if (DEPTH_LAYERS.relief.layer && newLayers !== prevLayers &&
+        DEPTH_LAYERS.relief.layer.setParams) {
+      DEPTH_LAYERS.relief.layer.setParams({ layers: newLayers });
     }
-    say('Depth colormap: ' + cfg.DEPTH.reliefStyles[key].label);
+    say('Depth colormap: ' + styles[key].label);
   }
   Object.keys(cfg.DEPTH.reliefStyles || {}).forEach((key) => {
     const style = cfg.DEPTH.reliefStyles[key];
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'legend-swatch sq';
+    btn.className = 'legend-swatch';
     btn.dataset.depthStyle = key;
     btn.title = style.label;
     btn.setAttribute('aria-pressed', key === state.params.depthStyle ? 'true' : 'false');
-    btn.style.background = gradient(style.swatch, 90);
+    // the filter goes on an inner fill, not the button, so it never tints the
+    // border/box-shadow that marks the selected swatch (grayscale(1) would
+    // otherwise wash the selection ring out to grey on the Mono swatch)
+    const fill = document.createElement('span');
+    fill.className = 'sw-fill';
+    fill.style.background = gradient(style.swatch, 90);
+    fill.style.filter = style.filter || '';
+    btn.appendChild(fill);
     btn.addEventListener('click', () => setDepthStyle(key));
     $('depth-swatches').appendChild(btn);
   });
+  applyDepthFilter();   // seed the pane var + summary ramp for the default style
+
+  /*
+   * ---- turbidity & cloud-mask colormap pickers ----
+   * Same flyout-swatch interface as kelp and depth. A palette here is
+   * display-only, but these layers are minted server-side with the palette
+   * baked in, so a switch re-mints the visible layer (cache-keyed, so
+   * flipping back is instant). No range bar: neither layer has a slice to
+   * restrict the way the kelp ramp does.
+   */
+  function buildSwatchGroup(elId, palettes, paramKey, onPick) {
+    Object.keys(palettes || {}).forEach((key) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'legend-swatch';
+      btn.dataset.palette = key;
+      btn.title = key;
+      btn.setAttribute('aria-pressed', key === state.params[paramKey] ? 'true' : 'false');
+      btn.style.background = gradient(palettes[key], 90);
+      btn.addEventListener('click', () => onPick(key));
+      $(elId).appendChild(btn);
+    });
+  }
+  function syncSwatchGroup(elId, key) {
+    $(elId).querySelectorAll('.legend-swatch').forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.palette === key ? 'true' : 'false');
+    });
+  }
+  function updateTurbRamp() {
+    const stops = (cfg.TURBIDITY_PALETTES || {})[state.params.turbidityPalette];
+    if (stops) $('turb-ramp').style.background = gradient(stops, 90);
+  }
+  function setTurbidityPalette(key) {
+    if (!(cfg.TURBIDITY_PALETTES || {})[key] || key === state.params.turbidityPalette) return;
+    state.params.turbidityPalette = key;
+    syncSwatchGroup('turb-swatches', key);
+    updateTurbRamp();
+    if (state.params.turbidityOpacity > 0) ensureTurbidity();
+    say('Turbidity colormap: ' + key);
+  }
+  function setCloudPalette(key) {
+    if (!(cfg.CLOUD_PALETTES || {})[key] || key === state.params.cloudPalette) return;
+    state.params.cloudPalette = key;
+    syncSwatchGroup('cloud-swatches', key);
+    if (state.params.cloudOpacity > 0) ensureCloudMask();
+    say('Cloud mask tint: ' + key);
+  }
+  buildSwatchGroup('turb-swatches', cfg.TURBIDITY_PALETTES, 'turbidityPalette', setTurbidityPalette);
+  buildSwatchGroup('cloud-swatches', cfg.CLOUD_PALETTES, 'cloudPalette', setCloudPalette);
+  updateTurbRamp();
 
   /*
    * ---- custom contours: draggable depth ruler ----
@@ -2318,14 +2740,21 @@
     /*
      * Wheel over the plot zooms the DEPTH axis: shallow structure — the part a
      * diver actually plans around — is unreadable when one deep sounding sets
-     * the scale. Zoom is per path, capped 8x, double-click resets. Deeper
-     * values clip at the plot edge rather than smearing over the axis labels.
+     * the scale. Zoom is per path, capped 8x, double-click resets, and it
+     * anchors on the depth UNDER THE CURSOR, so the feature being inspected
+     * stays put while the scale changes. depthPan is the depth at the top of
+     * the view (0 until zoomed); drag the axis gutter to slide it. Both are
+     * session state, like the zoom always was. Deeper values clip at the plot
+     * edge rather than smearing over the axis labels.
      */
     p.depthZoom = Math.max(1, Math.min(8, p.depthZoom || 1));
     const maxD = fullMax / p.depthZoom;
+    const plotH = H - PADT - PADB;
+    p.depthPan = Math.max(0, Math.min(fullMax - maxD, p.depthPan || 0));
+    const panD = p.depthPan;
     const maxX = pts[pts.length - 1].distance || 1;
     const x = (d) => PADL + (W - PADL - 4) * (d / maxX);
-    const y = (ft) => PADT + (H - PADT - PADB) * (ft / (maxD || 1));
+    const y = (ft) => PADT + plotH * ((ft - panD) / (maxD || 1));
 
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
@@ -2346,10 +2775,24 @@
       ev.preventDefault();
       const factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
       const next = Math.max(1, Math.min(8, (p.depthZoom || 1) * factor));
-      if (next !== p.depthZoom) { p.depthZoom = next; renderPaths(); }
+      if (next === p.depthZoom) return;
+      // anchor on the cursor: the depth under it before the zoom is put back
+      // under it after, so zooming in walks toward the point being examined
+      const r = svg.getBoundingClientRect();
+      const vy = r.height ? ((ev.clientY - r.top) / r.height) * H : PADT;
+      const frac = Math.max(0, Math.min(1, (vy - PADT) / plotH));
+      // p.depthPan, not the render-time panD: an axis pan may not have
+      // re-rendered yet when the wheel arrives
+      const ftAtCursor = (p.depthPan || 0) + frac * maxD;
+      p.depthZoom = next;
+      const newMaxD = fullMax / next;
+      p.depthPan = Math.max(0, Math.min(fullMax - newMaxD, ftAtCursor - frac * newMaxD));
+      renderPaths();
     }, { passive: false });
     svg.addEventListener('dblclick', () => {
-      if ((p.depthZoom || 1) !== 1) { p.depthZoom = 1; renderPaths(); }
+      if ((p.depthZoom || 1) !== 1 || (p.depthPan || 0) !== 0) {
+        p.depthZoom = 1; p.depthPan = 0; renderPaths();
+      }
     });   // draggable per path (p.plotHeight) — see the resize handle below
     /*
      * No preserveAspectRatio="none" here (unlike before): since W now matches
@@ -2406,7 +2849,7 @@
       const ftFromY = (clientY) => {
         const r = svg.getBoundingClientRect();
         const vy = ((clientY - r.top) / r.height) * H;
-        return Math.max(1, Math.round(((vy - PADT) / (H - PADT - PADB)) * (maxD || 1)));
+        return Math.max(1, Math.round(panD + ((vy - PADT) / plotH) * (maxD || 1)));
       };
       grip.addEventListener('pointerdown', (ev) => {
         if (ev.button !== 0) return;
@@ -2558,12 +3001,15 @@
       flush();
     }
 
-    const axisMaxLabel = fmtDepth(maxD) + (p.depthZoom > 1 ? ' ×' + (Math.round(p.depthZoom * 10) / 10) : '');
-    [[0, '0'], [maxD, axisMaxLabel]].forEach(([v, label], i) => {
+    // pan-aware axis: the top label reads the panned-to depth, not always 0
+    const axisTopLabel = panD > 0 ? fmtDepth(panD) : '0';
+    const axisMaxLabel = fmtDepth(panD + maxD) +
+      (p.depthZoom > 1 ? ' ×' + (Math.round(p.depthZoom * 10) / 10) : '');
+    [[panD, axisTopLabel], [panD + maxD, axisMaxLabel]].forEach(([v, label], i) => {
       const t = document.createElementNS(NS, 'text');
       t.setAttribute('class', 'pp-axis');
       t.setAttribute('x', '2');
-      t.setAttribute('y', (i === 0 ? y(0) + 3 : y(maxD)));
+      t.setAttribute('y', (i === 0 ? y(v) + 3 : y(v)));
       t.textContent = label;
       svg.appendChild(t);
     });
@@ -2741,7 +3187,7 @@
       const vx = ((clientX - r.left) / r.width) * W;
       const vy = ((clientY - r.top) / r.height) * H;
       const dm = Math.max(0, Math.min(maxX, ((vx - PADL) / (W - PADL - 4)) * maxX));
-      const ft = Math.max(0, ((vy - PADT) / (H - PADT - PADB)) * (maxD || 1));
+      const ft = Math.max(0, panD + ((vy - PADT) / plotH) * (maxD || 1));
       let best = pts[0];
       pts.forEach((smp) => { if (Math.abs(smp.distance - dm) < Math.abs(best.distance - dm)) best = smp; });
       return { dist: dm, feet: ft, sample: best };
@@ -2782,6 +3228,53 @@
       svg.addEventListener(t, cancelPlotPress));
     // the OS long-press callout would race our menu
     svg.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+    /*
+     * Depth-axis pan: an invisible strip over the y-axis gutter. When zoomed,
+     * grab it and drag to slide the view up/down the water column. Listeners
+     * go on the DOCUMENT for the drag itself — renderPaths() rebuilds this
+     * svg on every frame of the pan, which would kill a capture-based drag —
+     * and the render is rAF-coalesced so a fast pointer doesn't queue a
+     * rebuild per event.
+     */
+    const gutter = document.createElementNS(NS, 'rect');
+    gutter.setAttribute('x', 0); gutter.setAttribute('y', 0);
+    gutter.setAttribute('width', PADL - 2); gutter.setAttribute('height', H - PADB);
+    gutter.setAttribute('fill', 'transparent');
+    gutter.setAttribute('class', 'pp-ax-pan');
+    if (p.depthZoom > 1) {
+      gutter.style.cursor = 'grab';
+      const gt = document.createElementNS(NS, 'title');
+      gt.textContent = 'Drag to pan the depth axis · double-click resets';
+      gutter.appendChild(gt);
+    }
+    gutter.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0 || (p.depthZoom || 1) <= 1) return;
+      const startY = ev.clientY, startPan = p.depthPan || 0;
+      const r = svg.getBoundingClientRect();
+      // client px -> viewBox px -> feet of depth
+      const pxToFt = (maxD / plotH) * (r.height ? H / r.height : 1);
+      let raf = 0;
+      const onMove = (e) => {
+        // drag down pulls the column down: shallower water scrolls into view
+        const next = Math.max(0, Math.min(fullMax - maxD,
+          startPan - (e.clientY - startY) * pxToFt));
+        if (next === p.depthPan) return;
+        p.depthPan = next;
+        if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderPaths(); });
+        e.preventDefault();
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
+      ev.preventDefault(); ev.stopPropagation();   // not a long-press, not a hover
+    });
+    svg.appendChild(gutter);
     return svg;
   }
 
@@ -3454,6 +3947,46 @@
    */
   const mobileQuery = window.matchMedia('(max-width: 820px)');
   const pathsPanel = $('pp-collapse').closest('.paths-panel');
+
+  /*
+   * ---- dock view: Paths / POI tabs + split ----
+   * The right-hand dock holds two panes — the paths list and the POI list —
+   * shown one at a time (tabs) or stacked (split), all desktop-only: on a
+   * phone POI is its own bottom sheet. body[data-dock] drives the CSS; the
+   * one geometric fact, where the seam sits, is published as --dock-divide
+   * (px up from the viewport bottom) so both panes read the same number.
+   */
+  function syncDockDivide() {
+    const vh = window.innerHeight;
+    const dockTop = pathsPanel.getBoundingClientRect().top;
+    const mode = state.params.dockView || 'paths';
+    let divide = 0;
+    if (mode === 'split') {
+      const frac = Math.max(0.15, Math.min(0.85, state.params.dockSplit || 0.55));
+      state.params.dockSplit = frac;
+      divide = (vh - dockTop) * (1 - frac);
+    } else if (mode === 'poi') {
+      // the paths pane keeps only its header strip (the tab bar)
+      const head = pathsPanel.querySelector('.pp-head');
+      divide = Math.max(0, vh - (head.getBoundingClientRect().bottom + 10));
+    }
+    document.documentElement.style.setProperty('--dock-divide', Math.round(divide) + 'px');
+  }
+  function setDockView(mode) {
+    if (mode !== 'poi' && mode !== 'split') mode = 'paths';
+    state.params.dockView = mode;
+    document.body.dataset.dock = mode;
+    $('pp-collapse').classList.toggle('dock-active', mode !== 'poi');
+    $('dock-poi-tab').classList.toggle('dock-active', mode !== 'paths');
+    $('dock-split-btn').setAttribute('aria-pressed', mode === 'split' ? 'true' : 'false');
+    syncDockDivide();
+  }
+  function uncollapseDock() {
+    pathsPanel.classList.remove('collapsed');
+    $('pp-collapse').setAttribute('aria-expanded', 'true');
+    $('pp-collapse').title = 'Collapse this panel';
+  }
+
   $('pp-collapse').addEventListener('click', () => {
     if (mobileQuery.matches) {
       // strict two-state toggle on mobile: collapsed strip <-> full screen
@@ -3462,6 +3995,12 @@
       pathsPanel.classList.toggle('collapsed', !goingFull);
       $('pp-collapse').setAttribute('aria-expanded', goingFull ? 'true' : 'false');
       $('pp-collapse').title = goingFull ? 'Shrink this panel' : 'Expand this panel';
+    } else if (pathsPanel.classList.contains('collapsed')) {
+      // any tab click on a collapsed dock opens it on that tab
+      uncollapseDock();
+      if (state.params.dockView === 'poi') setDockView('paths');
+    } else if (state.params.dockView === 'poi') {
+      setDockView('paths');       // inactive tab: switch, don't collapse
     } else {
       const collapsed = pathsPanel.classList.toggle('collapsed');
       $('pp-collapse').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
@@ -3469,6 +4008,56 @@
     }
     syncDockWidth();
   });
+  $('dock-poi-tab').addEventListener('click', () => {
+    if (mobileQuery.matches) return;   // hidden there anyway
+    if (pathsPanel.classList.contains('collapsed')) {
+      uncollapseDock();
+      setDockView('poi');
+    } else if (state.params.dockView !== 'poi') {
+      setDockView('poi');
+    } else {
+      // active tab collapses the dock, mirroring the Paths tab
+      pathsPanel.classList.add('collapsed');
+      $('pp-collapse').setAttribute('aria-expanded', 'false');
+      $('pp-collapse').title = 'Expand this panel';
+    }
+    syncDockWidth();
+  });
+  $('dock-split-btn').addEventListener('click', () => {
+    if (mobileQuery.matches) return;
+    if (pathsPanel.classList.contains('collapsed')) uncollapseDock();
+    setDockView(state.params.dockView === 'split' ? 'paths' : 'split');
+    syncDockWidth();
+  });
+
+  // the split seam: drag to rebalance; the fraction persists with the params
+  $('poi-divider').addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    const divider = $('poi-divider');
+    divider.classList.add('dragging');
+    const dockTop = pathsPanel.getBoundingClientRect().top;
+    const onMove = (e) => {
+      const vh = window.innerHeight;
+      // keep both panes usable: paths >= 140px, POI >= 90px
+      const yPos = Math.max(dockTop + 140, Math.min(vh - 90, e.clientY));
+      const divide = vh - yPos;
+      state.params.dockSplit = Math.max(0.15, Math.min(0.85, divide / (vh - dockTop)));
+      document.documentElement.style.setProperty('--dock-divide', Math.round(divide) + 'px');
+      e.preventDefault();
+    };
+    const onUp = () => {
+      divider.classList.remove('dragging');
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      schedulePathsRerender();   // the profile plots track the paths pane height
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    ev.preventDefault();
+  });
+  window.addEventListener('resize', syncDockDivide);
+  setDockView(state.params.dockView);   // restore the saved arrangement
+
   if (mobileQuery.matches) {
     pathsPanel.classList.add('collapsed');
     $('pp-collapse').setAttribute('aria-expanded', 'false');
@@ -3478,12 +4067,13 @@
   });
 
   // ---- View menu: show/hide whole panels, independent of their own collapse state ----
+  // POI has no entry of its own: it is a tab of the paths dock, so the
+  // Paths toggle hides both (the dock CSS ties .poi-panel to the dock).
   const VIEW_TARGETS = {
     'view-console': '.console',
     'view-paths': '.paths-panel',
     'view-activity': '.activity',
-    'view-legend': '.legend',
-    'view-poi': '.poi-panel'
+    'view-legend': '.legend'
   };
   Object.keys(VIEW_TARGETS).forEach((id) => {
     $(id).addEventListener('change', () => {
@@ -4045,6 +4635,15 @@
         setKelpOpacity(state.params.opacity);
         setDepthOpacity(state.params.depthOpacity);
         setTrueColorOpacity(state.params.trueColorOpacity);
+        // may flip the cloud gate, which re-runs the kelp map — correct: the
+        // imported state asked for a differently-masked computation
+        setTurbidityOpacity(state.params.turbidityOpacity);
+        setCloudOpacity(state.params.cloudOpacity);
+        syncSwatchGroup('turb-swatches', state.params.turbidityPalette);
+        syncSwatchGroup('cloud-swatches', state.params.cloudPalette);
+        updateTurbRamp();
+        syncModelControls();   // the Models tabs' cloud/turbidity tuning sliders
+        setDockView(state.params.dockView);   // imported dock arrangement
         setCloudCeiling(state.params.maxCloud, true);
         $('relief').checked = !!state.params.showRelief;
         $('contours').checked = !!state.params.showContours;
@@ -4059,6 +4658,7 @@
         document.querySelectorAll('#depth-swatches .legend-swatch').forEach((b) => {
           b.setAttribute('aria-pressed', b.dataset.depthStyle === state.params.depthStyle ? 'true' : 'false');
         });
+        applyDepthFilter();    // imported depthStyle may be a filter-only recolour
         syncOverlayPicker();
         syncGasBar();          // SAC, speed/time, declination, kick distance
         renderCylinders && renderCylinders();

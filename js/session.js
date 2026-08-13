@@ -25,7 +25,12 @@ const Session = (function () {
   const VIEW_KEYS = [
     'indexType', 'kelpThresh', 'maxCloud', 'opacity', 'kelpPalette',
     'paletteMin', 'paletteMax', 'mode', 'overlayOrder', 'dockWidth',
-    'showRelief', 'showContours', 'depthStyle', 'depthOpacity', 'trueColorOpacity'
+    'dockView', 'dockSplit',
+    'showRelief', 'showContours', 'depthStyle', 'depthOpacity', 'trueColorOpacity',
+    'turbidityOpacity', 'cloudOpacity', 'turbidityPalette', 'cloudPalette',
+    'cloudVisMin', 'cloudSwirMin', 'cloudWhiteness',
+    'turbMode', 'turbClarityMin', 'turbClarityMax',
+    'turbGlint', 'turbNirFloor', 'turbGlintGain'
   ];
   const USER_KEYS = [
     'sac', 'sacUnit', 'speed', 'speedUnit', 'time', 'timeMode', 'showGas',

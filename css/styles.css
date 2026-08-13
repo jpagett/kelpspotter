@@ -22,6 +22,11 @@
      bottom-right controls and the sign-in notice can sit clear of it */
   --dock-w: 360px;
   --activity-h: 134px;   /* reserved at the bottom left, under the console */
+  /* the Leaflet scale bar is pinned to the bottom-left corner on desktop; this
+     is its footprint (two stacked lines), and --bl-bottom is where the bottom
+     of the activity panel sits so it clears the scale rather than covering it */
+  --scale-h: 30px;
+  --bl-bottom: calc(16px + var(--scale-h) + 8px);
 }
 
 * { box-sizing: border-box; }
@@ -156,6 +161,8 @@ body {
   -webkit-mask: url(../kelp-icon.svg) center / contain no-repeat;
   mask: url(../kelp-icon.svg) center / contain no-repeat;
 }
+/* the group toggle is a mobile affordance; desktop shows the full row */
+.ov-group-toggle { display: none; }
 /* dragging an overlay item re-stacks the map layers */
 .ov-item { cursor: grab; }
 .ov-item.ov-dragging { opacity: 0.4; }
@@ -408,6 +415,14 @@ input[type=range]:focus-visible { outline: 2px solid var(--kelp-hot); outline-of
 .seg button:hover { color: var(--foam); }
 .seg button[aria-pressed="true"] { background: var(--kelp); color: var(--abyss); }
 
+/* the Models section: one model per tab, sharing the Rerun button below */
+.model-tabs { margin-bottom: 14px; }
+.mpanel[hidden] { display: none; }
+/* glint off greys its dependent sliders, so the dead controls read as dead */
+.mpanel input[type=range]:disabled { opacity: 0.35; cursor: not-allowed; }
+/* a rule between the active tab's controls and the shared Rerun button */
+#sect-model > .field { border-top: 1px solid var(--line); padding-top: 12px; }
+
 /* sliders */
 .field { margin-top: 14px; }
 .field:first-of-type { margin-top: 0; }
@@ -447,17 +462,26 @@ input[type=range]::-moz-range-thumb {
 .run { width: 100%; padding: 11px; font-size: 12px; margin-top: 4px; }
 .kelp-defaults { width: 100%; padding: 7px; font-size: 11px; }
 
-/* ---------- kelp colorbar ---------- */
+/* ---------- kelp + depth colorbars ---------- */
 .legend {
   position: relative;   /* anchors the colormap flyout */
   display: flex; align-items: center; gap: 8px;
   background: rgba(5,22,28,0.5); border: 1px solid var(--line); border-radius: 4px;
   padding: 6px 10px; backdrop-filter: blur(6px);
 }
-/* colormap picker — same show-instantly / linger-1s pattern as .ov-flyout */
+/* always-visible summary: the two live ramps (kelp, depth) stacked vertically */
+.legend-summary { display: flex; flex-direction: column; gap: 6px; }
+.legend-line { display: flex; align-items: center; gap: 8px; }
+/* [hidden] loses to the flex display above without this (author styles beat
+   the UA sheet's [hidden] rule) — the turbidity line toggles with its overlay */
+.legend-line[hidden] { display: none; }
+/* fixed label column so the kelp and depth ramps line up under each other */
+.legend-line .eyebrow { min-width: 34px; }
+/* colormap picker — same show-instantly / linger-1s pattern as .ov-flyout.
+   Column, so the Kelp and Depth groups stack vertically rather than side by side. */
 .legend-menu {
   position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  display: flex; align-items: stretch; gap: 8px; padding: 7px;
+  display: flex; flex-direction: column; gap: 10px; padding: 9px;
   background: var(--deep); border: 1px solid var(--line); border-radius: 4px;
   box-shadow: 0 8px 20px -8px rgba(0,0,0,0.8);
   opacity: 0; visibility: hidden;
@@ -467,23 +491,27 @@ input[type=range]::-moz-range-thumb {
   opacity: 1; visibility: visible;
   transition: opacity 120ms ease, visibility 0s linear;
 }
-.legend-swatches { display: flex; flex-direction: column; gap: 5px; }
+/* one picker group per colormap; a divider between them reads the stack as two */
+.legend-group { display: flex; flex-direction: column; gap: 6px; }
+.legend-group + .legend-group { border-top: 1px solid var(--line); padding-top: 10px; }
+.legend-group-title { margin: 0; }
+/* kelp group: the swatch column and its range bar sit side by side */
+.legend-picker { display: flex; align-items: stretch; gap: 8px; }
+/* two columns, not one: with four groups stacked (kelp alone has nine
+   palettes) a single column would push the flyout past the top of the map */
+.legend-swatches, .depth-swatches {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 5px;
+}
 .legend-swatch {
-  width: 96px; height: 16px; cursor: pointer;
+  width: 74px; height: 16px; cursor: pointer;
   border: 1px solid var(--line); border-radius: 2px; padding: 0;
 }
 .legend-swatch:hover { border-color: var(--kelp); }
 .legend-swatch[aria-pressed="true"] { border-color: var(--kelp); box-shadow: 0 0 0 1px var(--kelp); }
-
-/*
- * depth colormap: same swatch look, in a row, small enough to sit inline
- * with the eyebrow rather than behind a hover flyout. inline-flex (not
- * flex) on purpose — .legend is a block on the mobile sheet, not a flex
- * row, and a block-level flex container there stretches to the sheet's
- * full width by default; inline-flex sizes to content either way.
- */
-.depth-swatches { display: inline-flex; flex-direction: row; gap: 5px; flex: none; }
-.legend-swatch.sq { width: 20px; height: 16px; }
+/* depth swatches carry their recolour on an inner fill, so the CSS filter never
+   reaches the button's selection border/box-shadow */
+.depth-swatches .legend-swatch { overflow: hidden; }
+.sw-fill { display: block; width: 100%; height: 100%; border-radius: inherit; }
 
 /*
  * Range bar: the live colormap drawn bottom-to-top (dark end at the bottom,
@@ -530,6 +558,16 @@ input[type=range]::-moz-range-thumb {
  */
 .leaflet-contour-pane { opacity: 0.6; }
 .leaflet-contour-pane img { filter: invert(1); }
+
+/*
+ * Depth relief recolour. The extra depth colormaps beyond NOAA's two native
+ * renders are the same tiles run through a CSS filter (see DEPTH.reliefStyles
+ * in config.js). Same per-image rule as the contours above, and for the same
+ * reason: a filter on the PANE rasterizes it into one layer that Leaflet then
+ * transforms every zoom frame, flashing grey rectangles; per-image animates
+ * cleanly. app.js sets --depth-filter on the pane; each tile inherits it.
+ */
+.leaflet-depth-pane img { filter: var(--depth-filter, none); }
 
 /*
  * NOTE: do not put a CSS `filter` on .leaflet-kelp-pane (or any pane holding
@@ -951,7 +989,7 @@ input[type=range]::-moz-range-thumb {
 /* ---------- activity readout ---------- */
 /* sits above the legend (~132px tall at bottom:16) and clear of the scrubber */
 .activity {
-  position: fixed; z-index: 900; left: 14px; bottom: 16px; width: var(--console-w);
+  position: fixed; z-index: 900; left: 14px; bottom: var(--bl-bottom); width: var(--console-w);
   background: rgba(5,22,28,0.82); border: 1px solid var(--line); border-radius: 4px;
   padding: 9px 11px 8px; backdrop-filter: blur(6px);
   cursor: move;
@@ -998,7 +1036,6 @@ input[type=range]::-moz-range-thumb {
    sheet opened from the tab bar, and hiding it would strand the Log tab. */
 @media (max-height: 720px) and (min-width: 821px) {
   .activity { display: none; }
-  .poi-panel { bottom: 16px; }
   .console { max-height: calc(100vh - var(--header-h) - 28px); }
 }
 
@@ -1025,15 +1062,62 @@ input[type=range]::-moz-range-thumb {
 .pp-decl-auto:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ---------- points of interest ---------- */
+/*
+ * Desktop: a pane of the right-hand dock, tabbed with Paths (see .dock-tabs
+ * in the paths panel head) or split under it — body[data-dock] picks the
+ * arrangement and --dock-divide (px up from the viewport bottom, set by JS)
+ * places the seam. Mobile: its own bottom sheet, untouched by any of this —
+ * every dock rule is scoped to desktop widths.
+ */
 .poi-panel {
-  position: fixed; z-index: 900; left: 14px; width: var(--console-w);
-  bottom: calc(16px + var(--activity-h) + 10px);
-  max-height: 30vh; overflow-y: auto;
-  background: rgba(5,22,28,0.86); border: 1px solid var(--line); border-radius: 4px;
-  padding: 9px 11px 10px; backdrop-filter: blur(6px);
+  background: rgba(10,40,48,0.94);
+  border: 0 solid var(--line);
+  padding: 10px 14px;
+  backdrop-filter: blur(8px);
 }
-.poi-panel.view-hidden { display: none; }
 .poi-panel.collapsed #poi-body { display: none; }
+.poi-divider { display: none; }
+@media (min-width: 821px) {
+  .poi-panel {
+    display: none;                 /* shown by the dock modes below */
+    position: fixed; z-index: 900;
+    right: 0; width: var(--dock-w); bottom: 0;
+    top: calc(100vh - var(--dock-divide, 50vh));
+    border-left-width: 1px; border-top-width: 1px;
+    overflow-y: auto;
+  }
+  .poi-panel::-webkit-scrollbar { width: 8px; }
+  .poi-panel::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
+  body[data-dock="poi"] .poi-panel,
+  body[data-dock="split"] .poi-panel { display: block; }
+  /* POI-only: the paths pane shrinks to its header strip — the tab bar stays */
+  body[data-dock="poi"] #pp-body,
+  body[data-dock="poi"] .pp-global-tools,
+  body[data-dock="poi"] #pp-opts { display: none; }
+  body[data-dock="poi"] .paths-panel,
+  body[data-dock="split"] .paths-panel { bottom: var(--dock-divide, 50vh); }
+  /* collapse still wins over the dock-mode height */
+  body[data-dock] .paths-panel.collapsed { bottom: auto; }
+  /* a collapsed or view-hidden dock takes its POI pane (and divider) with it */
+  .paths-panel.collapsed ~ .poi-panel,
+  .paths-panel.view-hidden ~ .poi-panel,
+  .paths-panel.collapsed ~ .poi-divider,
+  .paths-panel.view-hidden ~ .poi-divider { display: none !important; }
+  /* split divider: the seam itself, draggable — same affordance as .pp-edge */
+  body[data-dock="split"] .poi-divider {
+    display: block; position: fixed; z-index: 905;
+    right: 0; width: var(--dock-w);
+    top: calc(100vh - var(--dock-divide, 50vh) - 4px); height: 8px;
+    cursor: ns-resize; touch-action: none;
+  }
+  .poi-divider:hover, .poi-divider.dragging { background: rgba(242,177,52,0.3); }
+}
+
+/* dock tabs (paths panel header) */
+.dock-tabs { display: flex; align-items: center; gap: 12px; }
+.pp-head .dock-tab { padding-bottom: 2px; border-bottom: 1px solid transparent; }
+.pp-head .dock-tab.dock-active { color: var(--foam); border-bottom-color: var(--kelp); }
+.dock-split { font-size: 10px; }
 .poi-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .poi-head .eyebrow {
   background: none; border: none; cursor: pointer; padding: 0;
@@ -1141,11 +1225,25 @@ input[type=range]::-moz-range-thumb {
    ours to time for the long-press menu; grips must own their whole gesture */
 .pp-profile svg { touch-action: pan-y; }
 .bound-grip { touch-action: none; }
+/* the depth-axis pan gutter owns its whole gesture, even on touch */
+.pp-ax-pan { touch-action: none; }
 
 /* Leaflet scale bar, restyled to the instrument look */
 .leaflet-control-scale-line {
   background: rgba(5,22,28,0.72) !important; color: var(--tide) !important;
   border-color: var(--tide-dim) !important; font-family: var(--mono); font-size: 9px;
+}
+/*
+ * Desktop: pin the scale to a known bottom-left spot (left-aligned with the
+ * activity/POI panels) rather than trusting Leaflet's corner margins. The
+ * panels reserve --scale-h above this so they stack on top of it instead of
+ * burying it — --scale-h must stay >= the scale's rendered height (two lines).
+ * The mobile block below detaches it to the top-right corner instead.
+ */
+.leaflet-control-scale {
+  position: fixed !important; z-index: 700;
+  left: 14px !important; bottom: 16px !important;
+  right: auto !important; top: auto !important; margin: 0 !important;
 }
 @media (max-width: 820px) {
   /*
@@ -1497,17 +1595,32 @@ input[type=range]::-moz-range-thumb {
   .zoom-control { display: none; }
   .map-actions {
     display: block; position: fixed; right: 10px; z-index: 800;
-    /* above the (now shorter, lower) overlay picker: 14 offset + 3x34 + 2x6 gaps */
-    bottom: calc(var(--tabbar-h) + var(--safe-b) + 152px);
+    /* above the collapsed overlay picker: 14 offset + the 34px group toggle */
+    bottom: calc(var(--tabbar-h) + var(--safe-b) + 62px);
   }
   .map-action[aria-pressed="true"] {
     background: var(--kelp); color: var(--abyss); border-color: var(--kelp);
   }
+  /*
+   * Five overlay icons is too tall a permanent column on a phone, so they
+   * collapse behind the group toggle (hidden on desktop) and expand upward
+   * from it — the column is bottom-anchored, so growth is toward the map.
+   * The expanded column covers the draw/locate actions' spot; retire those
+   * while it is open, the same way sheets retire the floating controls.
+   */
   .overlay-picker {
     position: fixed; right: 10px; z-index: 800; flex-direction: column;
     gap: 6px;
     bottom: calc(var(--tabbar-h) + var(--safe-b) + 14px);   /* zoom is gone */
   }
+  /* order pins the toggle to the column's bottom whatever the DOM says —
+     app.js's saved-order restore appendChild()s the items after it */
+  .ov-group-toggle { display: grid; order: 99; }
+  .overlay-picker:not(.open) .ov-item { display: none; }
+  .overlay-picker.open .ov-group-toggle {
+    background: var(--kelp); color: var(--abyss); border-color: var(--kelp);
+  }
+  body:has(.overlay-picker.open) .map-actions { opacity: 0; pointer-events: none; }
 
   /* ---- the four panels become bottom sheets ----
      !important throughout: panel dragging writes inline left/top/right/bottom,
@@ -1563,6 +1676,8 @@ input[type=range]::-moz-range-thumb {
 
   /* panel chrome that has no meaning on a sheet */
   .pp-edge, .pp-grip { display: none !important; }
+  /* POI is its own sheet on a phone; the dock tabs are desktop chrome */
+  #dock-poi-tab, #dock-split-btn { display: none !important; }
   .console-head, .act-head, .pp-head { cursor: default; }
 
   /* grab handle, so a sheet reads as a sheet */
@@ -1580,8 +1695,10 @@ input[type=range]::-moz-range-thumb {
     position: static !important; transform: none !important;
     opacity: 1 !important; visibility: visible !important; pointer-events: auto !important;
     margin-top: 12px; width: auto !important;
-    display: flex; justify-content: center; gap: 18px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
   }
+  .legend-group { align-items: center; }
+  .legend-summary { align-items: center; }
   .legend .ramp-wrap { max-width: 320px; margin: 0 auto; }
 
   /* ---- overlay opacity flyouts: tap the icon instead of hovering ---- */

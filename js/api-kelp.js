@@ -39,6 +39,44 @@ const ApiKelpEngine = (function () {
     return res.json();
   }
 
+  /*
+   * Query-param bundles, one per model. The kelp trio (index/thresholds) rides
+   * with turbidity too: the server excludes kelp-classified pixels from the
+   * clarity render, so it needs the same numbers the kelp layer was drawn
+   * with, or the two would disagree about where the canopy ends.
+   */
+  function kelpArgs(p) {
+    return {
+      index: p.indexType,
+      kelpThresh: p.kelpThresh,
+      b11Thresh: p.b11Thresh
+    };
+  }
+  // cloud thresholds travel whenever they can matter: on the cloud layer
+  // itself, and on kelp/turbidity while the mask is gating them
+  function cloudArgs(p) {
+    return {
+      cloudVisMin: p.cloudVisMin,
+      cloudSwirMin: p.cloudSwirMin,
+      cloudWhiteness: p.cloudWhiteness
+    };
+  }
+  function gateArgs(p) {
+    const on = (p.cloudOpacity || 0) > 0;
+    return on ? Object.assign({ cloudMask: 1 }, cloudArgs(p)) : { cloudMask: 0 };
+  }
+  function turbArgs(p) {
+    return Object.assign({
+      turbMode: p.turbMode,
+      turbClarityMin: p.turbClarityMin,
+      turbClarityMax: p.turbClarityMax,
+      turbGlint: p.turbGlint === false ? 0 : 1,
+      turbNirFloor: p.turbNirFloor,
+      turbGlintGain: p.turbGlintGain,
+      tstops: ((cfg.TURBIDITY_PALETTES || {})[p.turbidityPalette] || []).join(',')
+    }, kelpArgs(p), gateArgs(p));
+  }
+
   return {
     name: 'api',
     get available() { return ready; },
@@ -78,33 +116,61 @@ const ApiKelpEngine = (function () {
     },
 
     singleSceneLayer(dateISO, p) {
-      return getJSON('/layer', {
+      return getJSON('/layer', Object.assign({
         mode: 'single',
         date: dateISO,
-        index: p.indexType,
-        kelpThresh: p.kelpThresh,
-        b11Thresh: p.b11Thresh,
         palette: p.kelpPalette,
         stops: (p.paletteStops || []).join(',')
-      }).then((r) => r.urlFormat);
+      }, kelpArgs(p), gateArgs(p))).then((r) => r.urlFormat);
     },
 
     compositeLayer(startISO, endISO, maxCloud, p) {
-      return getJSON('/layer', {
+      return getJSON('/layer', Object.assign({
         mode: 'composite',
         start: startISO.slice(0, 10),
         end: endISO.slice(0, 10),
         maxCloud: maxCloud,
-        index: p.indexType,
-        kelpThresh: p.kelpThresh,
-        b11Thresh: p.b11Thresh,
         palette: p.kelpPalette,
         stops: (p.paletteStops || []).join(',')
-      }).then((r) => r.urlFormat);
+      }, kelpArgs(p), gateArgs(p))).then((r) => r.urlFormat);
     },
 
     trueColorLayer(dateISO) {
       return getJSON('/layer', { mode: 'truecolor', date: dateISO }).then((r) => r.urlFormat);
+    },
+
+    turbidityLayer(dateISO, p) {
+      return getJSON('/layer', Object.assign({
+        mode: 'turbidity',
+        date: dateISO
+      }, turbArgs(p))).then((r) => r.urlFormat);
+    },
+
+    turbidityCompositeLayer(startISO, endISO, maxCloud, p) {
+      return getJSON('/layer', Object.assign({
+        mode: 'turbidityComposite',
+        start: startISO.slice(0, 10),
+        end: endISO.slice(0, 10),
+        maxCloud: maxCloud
+      }, turbArgs(p))).then((r) => r.urlFormat);
+    },
+
+    cloudLayer(dateISO, p) {
+      return getJSON('/layer', Object.assign({
+        mode: 'cloud',
+        date: dateISO,
+        cstops: ((cfg.CLOUD_PALETTES || {})[p.cloudPalette] || []).join(',')
+      }, cloudArgs(p))).then((r) => r.urlFormat);
+    },
+
+    cloudCompositeLayer(startISO, endISO, maxCloud, p) {
+      return getJSON('/layer', Object.assign({
+        mode: 'cloudComposite',
+        start: startISO.slice(0, 10),
+        end: endISO.slice(0, 10),
+        maxCloud: maxCloud,
+        cstops: ((cfg.CLOUD_PALETTES || {})[p.cloudPalette] || []).join(',')
+      }, cloudArgs(p))).then((r) => r.urlFormat);
     }
   };
 })();

@@ -207,8 +207,23 @@ const DemoEngine = (function () {
     },
     // Demo mode has no real Sentinel-2 pixels to composite — nothing honest to
     // show here, so the caller is told plainly rather than being handed a fake.
+    // The same goes for the band-derived turbidity and cloud-mask layers: the
+    // synthetic kelp exists to demo the CONTROLS, but fabricating water clarity
+    // or cloud cover would be pure fiction with nothing to teach.
     trueColorLayer(dateISO) {
       return Promise.reject(new Error('True color needs a live Earth Engine or API connection — demo mode has no real imagery.'));
+    },
+    turbidityLayer() {
+      return Promise.reject(new Error('Turbidity needs a live Earth Engine or API connection — demo mode has no real imagery.'));
+    },
+    turbidityCompositeLayer() {
+      return Promise.reject(new Error('Turbidity needs a live Earth Engine or API connection — demo mode has no real imagery.'));
+    },
+    cloudLayer() {
+      return Promise.reject(new Error('The cloud mask needs a live Earth Engine or API connection — demo mode has no real imagery.'));
+    },
+    cloudCompositeLayer() {
+      return Promise.reject(new Error('The cloud mask needs a live Earth Engine or API connection — demo mode has no real imagery.'));
     }
   };
 })();

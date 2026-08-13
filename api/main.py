@@ -57,17 +57,40 @@ SCENES_TTL_SECONDS = 60 * 60
 RATE_LIMIT_PER_MIN = 60       # per client IP, best effort (see README)
 
 S2_RED, S2_RE6, S2_NIR, S2_SWIR = "B4", "B6", "B8", "B11"
+S2_AERO, S2_BLUE, S2_GREEN = "B1", "B2", "B3"        # turbidity + cloud mask
 L_RED, L_NIR, L_SWIR = 0.665, 0.833, 1.612          # µm, as in the paper's code
 DEM_ID = "USGS/SRTMGL1_003"
 # Mirrors KELP_PALETTES in js/config.js — any change there must land here too.
 KELP_PALETTES = {
-    "amber":   ["7a6a1f", "d9a441", "f2b134", "ffd166"],
-    "viridis": ["440154", "31688e", "35b779", "fde725"],
-    "inferno": ["1b0c41", "781c6d", "ed6925", "fcffa4"],
-    "ice":     ["0d3b66", "3fa7d6", "90e0ef", "caf0f8"],
+    "canopy":    ["216b29", "5cb833", "edd633", "fa6614"],
+    "amber":     ["7a6a1f", "d9a441", "f2b134", "ffd166"],
+    "viridis":   ["440154", "31688e", "35b779", "fde725"],
+    "inferno":   ["1b0c41", "781c6d", "ed6925", "fcffa4"],
+    "magma":     ["000004", "51127c", "b73779", "fcfdbf"],
+    "plasma":    ["0d0887", "9c179e", "ed7953", "f0f921"],
+    "thermal":   ["042333", "7c1d6f", "e35933", "e8fa5b"],
+    "ice":       ["0d3b66", "3fa7d6", "90e0ef", "caf0f8"],
+    "grayscale": ["111111", "555555", "aaaaaa", "f4f4f4"],
 }
 KELP_PALETTE = KELP_PALETTES["amber"]
 HEX6 = re.compile(r"[0-9a-fA-F]{6}")
+
+# Defaults for the tunable turbidity / cloud-mask params, mirroring DEFAULTS
+# in js/config.js — used when a (stale) client omits them. CLOUD_VIS_MAX is a
+# display constant (where the cloud tint's brightness ramp saturates), not a
+# detection parameter, so it is not client-tunable.
+TURBIDITY = {
+    "turbMode": "KD490",       # 'KD490' (B2/B3) | 'BLUE_RATIO' (B1/B2, 60 m)
+    "turbClarityMin": -0.05,   # rendered as most turbid
+    "turbClarityMax": 0.35,    # rendered as clearest
+    "turbGlint": True,
+    "turbNirFloor": 0.012,
+    "turbGlintGain": 1.0,
+}
+CLOUD_MASK = {"cloudVisMin": 0.18, "cloudSwirMin": 0.10, "cloudWhiteness": 0.55}
+CLOUD_VIS_MAX = 0.55
+TURBIDITY_PALETTE = ["571f70", "3333ad", "1c7acc", "47d9e6"]
+CLOUD_PALETTE = ["566067", "ffffff"]
 
 # Bounds mirror the slider ranges in js/config.js. Values outside these are
 # clamped rather than rejected, so a stale client still gets a usable map.
@@ -172,8 +195,29 @@ def clear_sky(img):
 
 
 def reflectance(img):
-    """TOA DN -> reflectance, the paper's 1e-4 rescale."""
-    return img.select([S2_RED, S2_RE6, S2_NIR, S2_SWIR]).divide(10000)
+    """TOA DN -> reflectance, the paper's 1e-4 rescale. B1-B3 ride along for
+    the turbidity and cloud-mask layers; everything downstream selects by name."""
+    return img.select(
+        [S2_AERO, S2_BLUE, S2_GREEN, S2_RED, S2_RE6, S2_NIR, S2_SWIR]
+    ).divide(10000)
+
+
+def band_cloud(b, params):
+    """Band-based cloud test, mirroring js/ee-kelp.js: bright in the visible
+    AND in SWIR, AND spectrally flat. Turbid water/foam stay dark at 1610 nm;
+    sand and algae are bright but coloured — both fail a gate. Thresholds are
+    client-tunable (the console's Models -> Cloud tab)."""
+    vis = b.select(S2_BLUE).add(b.select(S2_GREEN)).add(b.select(S2_RED)).divide(3)
+    dev = (
+        b.select(S2_BLUE).subtract(vis).abs()
+        .add(b.select(S2_GREEN).subtract(vis).abs())
+        .add(b.select(S2_RED).subtract(vis).abs())
+    )
+    return (
+        vis.gte(params["cloudVisMin"])
+        .And(b.select(S2_SWIR).gte(params["cloudSwirMin"]))
+        .And(dev.divide(vis.max(1e-6)).lt(params["cloudWhiteness"]))
+    )
 
 
 def spectral_index(b, index_type):
@@ -231,6 +275,49 @@ def render_truecolor(img):
     return img.select(["B4", "B3", "B2"]).visualize(min=0, max=2500, gamma=1.3)
 
 
+def clarity_value(b, params):
+    """Normalized blue/green difference, glint-corrected. High = clear water.
+    Mirrors clarityValue in js/ee-kelp.js; knobs are client-tunable."""
+    b1, b2, b3 = b.select(S2_AERO), b.select(S2_BLUE), b.select(S2_GREEN)
+    if params["turbGlint"]:
+        glint = (
+            b.select(S2_NIR).subtract(params["turbNirFloor"]).max(0)
+            .multiply(params["turbGlintGain"])
+        )
+        b1 = b1.subtract(glint).max(0)
+        b2 = b2.subtract(glint).max(0)
+        b3 = b3.subtract(glint).max(0)
+    if params["turbMode"] == "BLUE_RATIO":
+        return b1.subtract(b2).divide(b1.add(b2).add(1e-6))
+    return b2.subtract(b3).divide(b2.add(b3).add(1e-6))   # KD490-style
+
+
+def render_turbidity(b, params, clear=None):
+    """Water only (same B11 test as the kelp chain, plus the sea-level DEM),
+    kelp-classified pixels excluded, clouds excluded when `clear` is given."""
+    water = b.select(S2_SWIR).lte(params["b11Thresh"]).And(ee.Image(DEM_ID).eq(0))
+    kelp, _ = classify(b, params)
+    mask = water.And(kelp.Not())
+    if clear is not None:
+        mask = mask.And(clear)
+    palette = params.get("tstops") or TURBIDITY_PALETTE
+    visual = clarity_value(b, params).visualize(
+        min=params["turbClarityMin"], max=params["turbClarityMax"], palette=palette
+    )
+    return visual.updateMask(mask)
+
+
+def render_cloud(b, cloud, params):
+    """Cloud pixels tinted by their visible brightness — texture, not a flat
+    stamp. Faint QA60-only detections clamp to the palette's dark end."""
+    palette = params.get("cstops") or CLOUD_PALETTE
+    vis = b.select(S2_BLUE).add(b.select(S2_GREEN)).add(b.select(S2_RED)).divide(3)
+    visual = vis.visualize(
+        min=params["cloudVisMin"], max=CLOUD_VIS_MAX, palette=palette
+    )
+    return visual.updateMask(cloud)
+
+
 def tile_url(image):
     """Mint a tile template, tolerating both getMapId return shapes.
 
@@ -277,13 +364,57 @@ def read_params(args):
     # the legend's selected range). Only accept well-formed 6-digit hex so a
     # crafted query cannot inject arbitrary strings into the EE call.
     stops = [s for s in args.get("stops", "").split(",") if HEX6.fullmatch(s)]
+    # turbidity / cloud-mask palettes, validated the same way
+    tstops = [s for s in args.get("tstops", "").split(",") if HEX6.fullmatch(s)]
+    cstops = [s for s in args.get("cstops", "").split(",") if HEX6.fullmatch(s)]
+
+    # Tunable model numbers: clamped, never rejected, defaulting to the
+    # config.js mirrors so a stale client still gets a usable map.
+    def fnum(name, default, lo, hi):
+        try:
+            return clamp(float(args.get(name, default)), lo, hi)
+        except (TypeError, ValueError):
+            return default
+
+    t = TURBIDITY
+    clarity_min = fnum("turbClarityMin", t["turbClarityMin"], -1.0, 1.0)
+    clarity_max = fnum("turbClarityMax", t["turbClarityMax"], -1.0, 1.0)
+    if clarity_max <= clarity_min:          # a degenerate stretch renders nothing
+        clarity_max = clarity_min + 0.01
     return {
         "indexType": index_type,
         "kelpThresh": clamp(kelp_thresh, limits["min"], limits["max"]),
         "b11Thresh": clamp(b11_thresh, 0.0, 0.1),
         "palette": palette,
         "stops": stops[:16] if len(stops) >= 2 else [],
+        "tstops": tstops[:16] if len(tstops) >= 2 else [],
+        "cstops": cstops[:16] if len(cstops) >= 2 else [],
+        # while the cloud-mask overlay is on, kelp and turbidity computations
+        # exclude cloud-covered pixels (per scene, before a composite's median)
+        "cloudMask": args.get("cloudMask") == "1",
+        "cloudVisMin": fnum("cloudVisMin", CLOUD_MASK["cloudVisMin"], 0.0, 1.0),
+        "cloudSwirMin": fnum("cloudSwirMin", CLOUD_MASK["cloudSwirMin"], 0.0, 1.0),
+        "cloudWhiteness": fnum("cloudWhiteness", CLOUD_MASK["cloudWhiteness"], 0.0, 2.0),
+        "turbMode": "BLUE_RATIO" if args.get("turbMode") == "BLUE_RATIO" else "KD490",
+        "turbClarityMin": clarity_min,
+        "turbClarityMax": clarity_max,
+        "turbGlint": args.get("turbGlint", "1") != "0",
+        "turbNirFloor": fnum("turbNirFloor", t["turbNirFloor"], 0.0, 0.2),
+        "turbGlintGain": fnum("turbGlintGain", t["turbGlintGain"], 0.0, 5.0),
     }
+
+
+def aux_sig(params):
+    """Cache-key fragment for the tunable turbidity/cloud numbers — without it
+    two clients with different thresholds would share a minted layer."""
+    return "|".join(
+        str(params[k])
+        for k in (
+            "cloudMask", "cloudVisMin", "cloudSwirMin", "cloudWhiteness",
+            "turbMode", "turbClarityMin", "turbClarityMax",
+            "turbGlint", "turbNirFloor", "turbGlintGain",
+        )
+    )
 
 
 def read_dates(args, key_start="start", key_end="end"):
@@ -366,23 +497,26 @@ def layer():
     max_cloud = clamp(float(request.args.get("maxCloud", 40)), 0, 100)
 
     try:
-        if mode == "composite":
+        if mode in ("composite", "turbidityComposite", "cloudComposite"):
             start, end = read_dates(request.args)
-            cache_key = "layer|composite|%s|%s|%s|%s|%s|%s|%s|%s" % (
-                start, end, max_cloud, params["indexType"],
+            cache_key = "layer|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+                mode, start, end, max_cloud, params["indexType"],
                 params["kelpThresh"], params["b11Thresh"], params["palette"],
-                ",".join(params["stops"]),
+                ",".join(params["stops"]), ",".join(params["tstops"]),
+                ",".join(params["cstops"]), aux_sig(params),
             )
         elif mode == "truecolor":
             date = request.args.get("date", "")
             dt.date.fromisoformat(date)          # validate
             cache_key = "layer|truecolor|%s" % date
-        else:
+        else:                                    # single-scene kelp/turbidity/cloud
             date = request.args.get("date", "")
             dt.date.fromisoformat(date)          # validate
-            cache_key = "layer|single|%s|%s|%s|%s|%s|%s" % (
-                date, params["indexType"], params["kelpThresh"],
+            cache_key = "layer|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+                mode, date, params["indexType"], params["kelpThresh"],
                 params["b11Thresh"], params["palette"], ",".join(params["stops"]),
+                ",".join(params["tstops"]), ",".join(params["cstops"]),
+                aux_sig(params),
             )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
@@ -393,31 +527,68 @@ def layer():
 
     try:
         ensure_ee()
+
+        def masked_collection():
+            """Per-scene cloud masking BEFORE the median: QA60 always, the
+            band test joining in while the cloud-mask overlay is enabled."""
+            gate = params["cloudMask"]
+
+            def prep(img):
+                b = reflectance(img)
+                m = clear_sky(img)
+                if gate:
+                    m = m.And(band_cloud(b, params).Not())
+                return b.updateMask(m)
+
+            return collection(start, end, max_cloud).map(prep)
+
+        def scene_and_clear():
+            """The day's mosaic reflectance plus its clear-pixel mask."""
+            day = ee.Date(date)
+            img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
+            b = reflectance(img)
+            clear = clear_sky(img)
+            if params["cloudMask"]:
+                clear = clear.And(band_cloud(b, params).Not())
+            return img, b, clear
+
         if mode == "composite":
             # median, not mean — see the note in js/ee-kelp.js compositeLayer
-            clear = collection(start, end, max_cloud).map(
-                lambda img: reflectance(img).updateMask(clear_sky(img))
-            )
-            kelp, idx = classify(clear.median(), params, None)
-            payload = {
-                "urlFormat": tile_url(render(kelp, idx, params)),
-                "expiresIn": MAPID_TTL_SECONDS,
-            }
+            kelp, idx = classify(masked_collection().median(), params, None)
+            image = render(kelp, idx, params)
+        elif mode == "turbidityComposite":
+            image = render_turbidity(masked_collection().median(), params, None)
+        elif mode == "cloudComposite":
+            # a composite's honest cloud mask: pixels with NO clear observation
+            # anywhere in the window, tinted by the median brightness
+            col = collection(start, end, max_cloud)
+            clear_count = col.map(
+                lambda img: clear_sky(img)
+                .And(band_cloud(reflectance(img), params).Not())
+                .toInt().unmask(0).rename("clear")
+            ).sum()
+            never = clear_count.eq(0).clip(region())
+            image = render_cloud(col.map(reflectance).median(), never, params)
         elif mode == "truecolor":
             day = ee.Date(date)
             img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
-            payload = {
-                "urlFormat": tile_url(render_truecolor(img)),
-                "expiresIn": MAPID_TTL_SECONDS,
-            }
+            image = render_truecolor(img)
+        elif mode == "turbidity":
+            _, b, clear = scene_and_clear()
+            image = render_turbidity(b, params, clear)
+        elif mode == "cloud":
+            img, b, _ = scene_and_clear()
+            cloud = band_cloud(b, params).Or(clear_sky(img).Not())
+            image = render_cloud(b, cloud, params)
         else:
-            day = ee.Date(date)
-            img = ee.Image(collection(date, day.advance(1, "day"), 100).mosaic())
-            kelp, idx = classify(reflectance(img), params, clear_sky(img))
-            payload = {
-                "urlFormat": tile_url(render(kelp, idx, params)),
-                "expiresIn": MAPID_TTL_SECONDS,
-            }
+            _, b, clear = scene_and_clear()
+            kelp, idx = classify(b, params, clear)
+            image = render(kelp, idx, params)
+
+        payload = {
+            "urlFormat": tile_url(image),
+            "expiresIn": MAPID_TTL_SECONDS,
+        }
     except Exception as err:                    # noqa: BLE001 — reported, not hidden
         # A bare 500 page says nothing, and this service is remote by design, so
         # the reason has to travel back with the response as well as to the log.

@@ -44,6 +44,8 @@
  */
 const KelpEngine = (function () {
   const S2_RED = 'B4', S2_RE6 = 'B6', S2_NIR = 'B8', S2_SWIR = 'B11';
+  // extra bands for the turbidity and cloud-mask layers
+  const S2_AERO = 'B1', S2_BLUE = 'B2', S2_GREEN = 'B3';
 
   // Band centres in µm exactly as written in the authors' FAI expression.
   const L_RED = 0.665, L_NIR = 0.833, L_SWIR = 1.612;
@@ -77,10 +79,34 @@ const KelpEngine = (function () {
     return qa.bitwiseAnd(1 << 10).eq(0).and(qa.bitwiseAnd(1 << 11).eq(0));
   }
 
-  // TOA DN -> reflectance, the paper's 1e-4 rescale.
+  // TOA DN -> reflectance, the paper's 1e-4 rescale. B1-B3 ride along for the
+  // turbidity and cloud-mask layers; everything downstream selects by name.
   function reflectance(img) {
-    return img.select([S2_RED, S2_RE6, S2_NIR, S2_SWIR]).divide(10000);
+    return img.select([S2_AERO, S2_BLUE, S2_GREEN, S2_RED, S2_RE6, S2_NIR, S2_SWIR])
+      .divide(10000);
   }
+
+  /*
+   * Band-based cloud test: bright in the visible AND in SWIR, AND spectrally
+   * flat. Turbid water and foam are bright in visible but dark at 1610 nm;
+   * sand and algae are bright but coloured — both fail a gate. Thresholds are
+   * live params (Models → Cloud tab in the console). QA60 is OR'd in by the
+   * callers that build the visible mask, so metadata clouds the band test
+   * misses (thin cirrus) are still counted.
+   */
+  function bandCloud(b, p) {
+    const vis = b.select(S2_BLUE).add(b.select(S2_GREEN)).add(b.select(S2_RED)).divide(3);
+    const dev = b.select(S2_BLUE).subtract(vis).abs()
+      .add(b.select(S2_GREEN).subtract(vis).abs())
+      .add(b.select(S2_RED).subtract(vis).abs());
+    return vis.gte(p.cloudVisMin === undefined ? 0.18 : p.cloudVisMin)
+      .and(b.select(S2_SWIR).gte(p.cloudSwirMin === undefined ? 0.10 : p.cloudSwirMin))
+      .and(dev.divide(vis.max(1e-6)).lt(p.cloudWhiteness === undefined ? 0.55 : p.cloudWhiteness));
+  }
+
+  // The cloud-mask overlay doubles as a computation gate: while it is enabled
+  // (opacity above zero) kelp and turbidity exclude cloud-covered pixels.
+  const cloudGated = (p) => (p.cloudOpacity || 0) > 0;
 
   function index(b, indexType) {
     const red = b.select(S2_RED), re6 = b.select(S2_RE6),
@@ -144,6 +170,54 @@ const KelpEngine = (function () {
 
     return res.index.visualize({ min: lo, max: hi, palette: paletteFor(p) })
       .updateMask(alpha);
+  }
+
+  /*
+   * Water clarity: a normalized blue/green difference, glint-corrected, over
+   * water only — land/foam out via the same B11 test the kelp chain uses,
+   * kelp-classified pixels out (canopy reads as false extreme turbidity),
+   * clouds out when `clear` is supplied. High = clear water. All knobs are
+   * live params (Models → Turbidity tab in the console).
+   */
+  function clarityValue(b, p) {
+    let b1 = b.select(S2_AERO), b2 = b.select(S2_BLUE), b3 = b.select(S2_GREEN);
+    if (p.turbGlint !== false) {
+      const glint = b.select(S2_NIR)
+        .subtract(p.turbNirFloor === undefined ? 0.012 : p.turbNirFloor)
+        .max(0).multiply(p.turbGlintGain === undefined ? 1 : p.turbGlintGain);
+      b1 = b1.subtract(glint).max(0);
+      b2 = b2.subtract(glint).max(0);
+      b3 = b3.subtract(glint).max(0);
+    }
+    if (p.turbMode === 'BLUE_RATIO') return b1.subtract(b2).divide(b1.add(b2).add(1e-6));
+    return b2.subtract(b3).divide(b2.add(b3).add(1e-6));   // KD490-style, 10-20 m
+  }
+
+  function renderTurbidity(b, p, clear) {
+    const water = b.select(S2_SWIR).lte(p.b11Thresh).and(ee.Image(DEM_ID).eq(0));
+    let mask = water.and(classify(b, p, null).kelp.not());
+    if (clear) mask = mask.and(clear);
+    const palette = (cfg.TURBIDITY_PALETTES || {})[p.turbidityPalette] ||
+                    ['571f70', '3333ad', '1c7acc', '47d9e6'];
+    return clarityValue(b, p).visualize({
+      min: p.turbClarityMin === undefined ? -0.05 : p.turbClarityMin,
+      max: p.turbClarityMax === undefined ? 0.35 : p.turbClarityMax,
+      palette: palette
+    }).updateMask(mask);
+  }
+
+  // Cloud pixels tinted by their visible brightness, so the mask keeps cloud
+  // texture instead of stamping a flat block. Faint QA60-only detections sit
+  // below visMin and clamp to the palette's dark end.
+  function renderCloud(b, cloud, p) {
+    const cm = cfg.CLOUD_MASK || {};
+    const palette = (cfg.CLOUD_PALETTES || {})[p.cloudPalette] || ['566067', 'ffffff'];
+    const vis = b.select(S2_BLUE).add(b.select(S2_GREEN)).add(b.select(S2_RED)).divide(3);
+    return vis.visualize({
+      min: p.cloudVisMin === undefined ? 0.18 : p.cloudVisMin,
+      max: cm.visMax || 0.55,
+      palette: palette
+    }).updateMask(cloud);
   }
 
   function tileLayerFromImage(image, vis) {
@@ -265,7 +339,10 @@ const KelpEngine = (function () {
       const start = dateISO;
       const end = ee.Date(dateISO).advance(1, 'day');
       const img = ee.Image(collection(start, end, 100).mosaic());
-      const res = classify(reflectance(img), p, clearSky(img));
+      const b = reflectance(img);
+      let clear = clearSky(img);
+      if (cloudGated(p)) clear = clear.and(bandCloud(b, p).not());
+      const res = classify(b, p, clear);
       return tileLayerFromImage(renderKelp(res, p), {});
     },
 
@@ -280,9 +357,72 @@ const KelpEngine = (function () {
      * outliers, so thin canopy survives.
      */
     compositeLayer(startISO, endISO, maxCloud, p) {
+      // per-scene masking BEFORE the median: with the cloud mask enabled the
+      // band test joins QA60, so cloudy observations never enter the composite
+      const gated = cloudGated(p);
       const clear = collection(startISO, endISO, maxCloud)
-        .map((img) => reflectance(img).updateMask(clearSky(img)));
+        .map((img) => {
+          const b = reflectance(img);
+          let m = clearSky(img);
+          if (gated) m = m.and(bandCloud(b, p).not());
+          return b.updateMask(m);
+        });
       return tileLayerFromImage(renderKelp(classify(clear.median(), p, null), p), {});
+    },
+
+    /*
+     * Water-clarity overlay, following the same single/composite split as the
+     * kelp layer. QA60 clouds are always excluded (same rule as kelp); the
+     * band-based test joins in only while the cloud-mask overlay is enabled.
+     */
+    turbidityLayer(dateISO, p) {
+      const end = ee.Date(dateISO).advance(1, 'day');
+      const img = ee.Image(collection(dateISO, end, 100).mosaic());
+      const b = reflectance(img);
+      let clear = clearSky(img);
+      if (cloudGated(p)) clear = clear.and(bandCloud(b, p).not());
+      return tileLayerFromImage(renderTurbidity(b, p, clear), {});
+    },
+
+    turbidityCompositeLayer(startISO, endISO, maxCloud, p) {
+      const gated = cloudGated(p);
+      const clear = collection(startISO, endISO, maxCloud)
+        .map((img) => {
+          const b = reflectance(img);
+          let m = clearSky(img);
+          if (gated) m = m.and(bandCloud(b, p).not());
+          return b.updateMask(m);
+        });
+      return tileLayerFromImage(renderTurbidity(clear.median(), p, null), {});
+    },
+
+    /*
+     * Cloud-mask overlay. Single scene: that pass's clouds — the band test
+     * OR QA60's opaque/cirrus bits. Composite: the pixels with NO clear
+     * observation anywhere in the window (what "cloud" honestly means for a
+     * median composite), tinted by the median brightness.
+     */
+    cloudLayer(dateISO, p) {
+      const end = ee.Date(dateISO).advance(1, 'day');
+      const img = ee.Image(collection(dateISO, end, 100).mosaic());
+      const b = reflectance(img);
+      const cloud = bandCloud(b, p).or(clearSky(img).not());
+      return tileLayerFromImage(renderCloud(b, cloud, p), {});
+    },
+
+    cloudCompositeLayer(startISO, endISO, maxCloud, p) {
+      const col = collection(startISO, endISO, maxCloud);
+      const clearCount = col.map((img) => {
+        const b = reflectance(img);
+        return clearSky(img).and(bandCloud(b, p).not())
+          .toInt().unmask(0).rename('clear');
+      }).sum();
+      // clip: outside the collection's footprints "zero clear observations"
+      // is vacuously true; without it the whole world outside the swaths
+      // would paint as cloud
+      const never = clearCount.eq(0).clip(region());
+      const med = col.map(reflectance).median();
+      return tileLayerFromImage(renderCloud(med, never, p), {});
     },
 
     /*

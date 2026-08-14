@@ -3838,6 +3838,98 @@
       ev.preventDefault(); ev.stopPropagation();   // not a long-press, not a hover
     });
     svg.appendChild(gutter);
+
+    /*
+     * Dragging on the plot body itself. Two gestures, told apart by where the
+     * press lands:
+     *
+     *   - starting ON the drawn seabed and dragging up sets an offset over
+     *     that leg — the direct twin of the menu's start/end pair, for when
+     *     you can see the stretch you want to fly over and just want to lift
+     *     off it. The live band is pushed straight onto the path and re-render
+     *     is the preview, so what you drag is exactly what you get.
+     *   - starting anywhere else pans the depth axis, which until now needed
+     *     the thin gutter strip over the y-axis. Only when zoomed: at 1x the
+     *     whole column is already on screen and there is nothing to pan to.
+     *
+     * The touch long-press menu shares this element and starts its timer first,
+     * but it cancels itself past 10px of movement — so a real drag never also
+     * opens a menu, while a tap still does.
+     */
+    const legSpanAt = (dist) => {
+      const cum = Paths.nodeDistances(p);
+      for (let i = 0; i < cum.length - 1; i++) {
+        if (dist >= cum[i] && dist <= cum[i + 1]) return [cum[i], cum[i + 1]];
+      }
+      return [0, maxX];
+    };
+    const dragEnd = (onMove, onUp) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+    };
+    const NEAR_PX = 14;   // viewBox px: the curve is 1px wide and fingers are not
+    svg.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      const at = plotPoint(ev.clientX, ev.clientY);
+      if (!at) return;
+      const r = svg.getBoundingClientRect();
+      if (!r.height) return;
+      const vy = ((ev.clientY - r.top) / r.height) * H;
+      const pxToFt = (maxD / plotH) * (H / r.height);
+      const onSeabed = Math.abs(vy - y(effFt(at.sample))) < NEAR_PX;
+
+      if (onSeabed) {
+        const span = legSpanAt(at.dist);
+        const bottomFt = -at.sample.feet;
+        if (!p.offsets) p.offsets = [];
+        const band = { start: span[0], end: span[1], feet: 0 };
+        p.offsets.push(band);
+        let raf = 0;
+        const onMove = (e) => {
+          const lifted = (ev.clientY - e.clientY) * pxToFt;      // up is positive
+          band.feet = Math.max(0, Math.min(bottomFt, Math.round(lifted)));
+          if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderPaths(); });
+          e.preventDefault();
+        };
+        const onUp = () => {
+          dragEnd(onMove, onUp);
+          const i = p.offsets.indexOf(band);
+          if (band.feet <= 0) {
+            // a press without a drag: leave the path exactly as it was
+            if (i >= 0) p.offsets.splice(i, 1);
+          } else {
+            say('Offset: ' + fmtDepth(band.feet) + ' off the bottom from ' +
+                fmtDist(band.start) + ' to ' + fmtDist(band.end), 'ok');
+            persistNow();
+          }
+          renderPaths();
+        };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        document.addEventListener('pointercancel', onUp);
+        ev.preventDefault();
+        return;
+      }
+
+      if ((p.depthZoom || 1) <= 1) return;
+      const startY = ev.clientY, startPan = p.depthPan || 0;
+      let raf = 0;
+      const onMove = (e) => {
+        const next = Math.max(0, Math.min(fullMax - maxD,
+          startPan - (e.clientY - startY) * pxToFt));
+        if (next === p.depthPan) return;
+        p.depthPan = next;
+        if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderPaths(); });
+        e.preventDefault();
+      };
+      const onUp = () => dragEnd(onMove, onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
+      ev.preventDefault();
+    });
+
     return svg;
   }
 
@@ -3938,52 +4030,52 @@
     const pendingOffsetHere = pendingOffset && pendingOffset.pathId === p.id;
 
     /*
+     * One row per bound, two buttons on it: start and end.
+     *
+     * They used to be four separate full-width entries, which read as four
+     * unrelated commands and buried the pairing — "Set floor end (no start
+     * yet)" only makes sense next to the thing that starts it. Side by side,
+     * the shape of the gesture is visible: pick a start, right-click again,
+     * pick the end.
+     */
+    const pairRow = (label, startText, startFn, startOff, endText, endFn, endOff, hint) => {
+      const row = document.createElement('div');
+      row.className = 'plot-menu-pair';
+      const lab = document.createElement('span');
+      lab.className = 'plot-menu-pair-label';
+      lab.textContent = label;
+      if (hint) lab.title = hint;
+      row.appendChild(lab);
+      const mk = (text, fn, off) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        b.disabled = !!off;
+        if (hint) b.title = hint;
+        b.addEventListener('click', () => { closePlotMenu(); fn(); });
+        row.appendChild(b);
+      };
+      mk(startText, startFn, startOff);
+      mk(endText, endFn, endOff);
+      menu.appendChild(row);
+    };
+
+    /*
      * An offset is a CLEARANCE, so it is read as the gap between the seabed
      * here and where you clicked — click 10 ft above the bottom and you get
-     * "fly 10 ft off it", the same "its value is where you clicked" idiom the
-     * floor and ceiling items use. Profile samples carry elevation, so the
-     * bottom in positive feet is -sample.feet.
+     * "fly 10 ft off it". Profile samples carry elevation, so the bottom in
+     * positive feet is -sample.feet.
      */
     const bottomHere = -at.sample.feet;
     const clearHere = Math.max(0, Math.round(bottomHere - at.feet));
-    item(clearHere > 0
-          ? 'Set offset start — ' + fmtDepth(clearHere) + ' off the bottom'
-          : 'Set offset start (click above the seabed)',
-      () => {
-        pendingOffset = { pathId: p.id, dist: at.dist, feet: clearHere };
-        say('Offset started at ' + fmtDist(at.dist) + ', ' + fmtDepth(clearHere) +
-            ' off the bottom — right-click the plot again to set the end');
-      }, clearHere <= 0,
-      'Swim a fixed height above the seabed; the height is how far above the ' +
-      'bottom you clicked. Ceilings and floors still override it.');
 
-    item(pendingOffsetHere
-          ? 'Set offset end — ' + fmtDepth(pendingOffset.feet) + ' off the bottom'
-          : 'Set offset end (no start yet)',
-      () => {
-        if (!pendingOffsetHere) return;
-        if (Paths.addOffset(p.id, pendingOffset.dist, at.dist, pendingOffset.feet)) {
-          say('Offset: ' + fmtDepth(pendingOffset.feet) + ' off the bottom from ' +
-              fmtDist(Math.min(pendingOffset.dist, at.dist)) + ' to ' +
-              fmtDist(Math.max(pendingOffset.dist, at.dist)), 'ok');
-          pendingOffset = null;
-          renderPaths();
-          persistNow();
-        } else {
-          toast('Could not set that offset — zero-length span?', true);
-        }
-      }, !pendingOffsetHere,
-      'Close the offset here, using the clearance from the start click');
-
-    item('Set floor start — max ' + fmtDepth(at.feet), () => {
-      pendingFloor = { pathId: p.id, dist: at.dist, feet: at.feet };
-      say('Floor started at ' + fmtDist(at.dist) + ', max ' + fmtDepth(at.feet) +
-          ' — right-click the plot again to set the end');
-    }, false, 'Deepest allowed over a span; its depth is where you clicked');
-
-    item(pendingFloorHere
-          ? 'Set floor end — max ' + fmtDepth(pendingFloor.feet)
-          : 'Set floor end (no start yet)',
+    pairRow('Floor  max ' + fmtDepth(at.feet),
+      'start', () => {
+        pendingFloor = { pathId: p.id, dist: at.dist, feet: at.feet };
+        say('Floor started at ' + fmtDist(at.dist) + ', max ' + fmtDepth(at.feet) +
+            ' — right-click the plot again to set the end');
+      }, false,
+      pendingFloorHere ? 'end · max ' + fmtDepth(pendingFloor.feet) : 'end',
       () => {
         if (!pendingFloorHere) return;
         if (Paths.addFloor(p.id, pendingFloor.dist, at.dist, pendingFloor.feet)) {
@@ -3997,17 +4089,15 @@
           toast('Could not set that floor — zero-length span?', true);
         }
       }, !pendingFloorHere,
-      'Close the floor here, using the depth from the start click');
+      'Deepest allowed over a span. Its depth is where you click the start.');
 
-    item('Set ceiling start — min ' + fmtDepth(at.feet), () => {
-      pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
-      say('Ceiling started at ' + fmtDist(at.dist) + ', min ' + fmtDepth(at.feet) +
-          ' — right-click the plot again to set the end');
-    }, false, 'Shallowest allowed over a span — stay deeper than this');
-
-    item(pendingHere
-          ? 'Set ceiling end — min ' + fmtDepth(pendingCeil.feet)
-          : 'Set ceiling end (no start yet)',
+    pairRow('Ceiling  min ' + fmtDepth(at.feet),
+      'start', () => {
+        pendingCeil = { pathId: p.id, dist: at.dist, feet: at.feet };
+        say('Ceiling started at ' + fmtDist(at.dist) + ', min ' + fmtDepth(at.feet) +
+            ' — right-click the plot again to set the end');
+      }, false,
+      pendingHere ? 'end · min ' + fmtDepth(pendingCeil.feet) : 'end',
       () => {
         if (!pendingHere) return;
         if (Paths.addCeiling(p.id, pendingCeil.dist, at.dist, pendingCeil.feet)) {
@@ -4019,7 +4109,31 @@
           persistNow();
         }
       }, !pendingHere,
-      'Close the ceiling here, using the depth from the start click');
+      'Shallowest allowed over a span — stay deeper than this.');
+
+    pairRow(clearHere > 0 ? 'Offset  ' + fmtDepth(clearHere) + ' off the bottom'
+                          : 'Offset  (click above the seabed)',
+      'start', () => {
+        pendingOffset = { pathId: p.id, dist: at.dist, feet: clearHere };
+        say('Offset started at ' + fmtDist(at.dist) + ', ' + fmtDepth(clearHere) +
+            ' off the bottom — right-click the plot again to set the end');
+      }, clearHere <= 0,
+      pendingOffsetHere ? 'end · ' + fmtDepth(pendingOffset.feet) : 'end',
+      () => {
+        if (!pendingOffsetHere) return;
+        if (Paths.addOffset(p.id, pendingOffset.dist, at.dist, pendingOffset.feet)) {
+          say('Offset: ' + fmtDepth(pendingOffset.feet) + ' off the bottom from ' +
+              fmtDist(Math.min(pendingOffset.dist, at.dist)) + ' to ' +
+              fmtDist(Math.max(pendingOffset.dist, at.dist)), 'ok');
+          pendingOffset = null;
+          renderPaths();
+          persistNow();
+        } else {
+          toast('Could not set that offset — zero-length span?', true);
+        }
+      }, !pendingOffsetHere,
+      'Swim a fixed height above the seabed. Ceilings and floors still override it. ' +
+      'You can also drag up off the seabed on the plot.');
 
     if ((p.ceilings || []).length) {
       item('Clear ceilings (' + p.ceilings.length + ')', () => {
@@ -4375,10 +4489,22 @@
       unitsRow.appendChild(unitCell('sac', su));
       unitsRow.appendChild(unitCell('speed', pu));
       menu.appendChild(unitsRow);
-      cog.addEventListener('click', () => {
+      const toggleMenu = (open) => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
-        menu.hidden = !menu.hidden;
+        menu.hidden = (open === undefined) ? !menu.hidden : !open;
         cog.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+      };
+      cog.addEventListener('click', () => toggleMenu());
+      /*
+       * Right-click anywhere on the title bar opens the same menu. The row is
+       * the path's header, and a right-click on a header asking "what can I do
+       * with this" is the expectation everywhere else — reaching for the small
+       * Settings button was the only way to answer it.
+       */
+      row.addEventListener('contextmenu', (ev) => {
+        if (ev.target.closest('.pp-name-input, input, select')) return;
+        ev.preventDefault(); ev.stopPropagation();
+        toggleMenu(true);
       });
 
       caret.classList.add('pp-caret-big');   // primary affordance: open the plot

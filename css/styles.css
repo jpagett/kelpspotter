@@ -1226,6 +1226,25 @@ input[type=range]::-moz-range-thumb {
 .poi-zoom:hover { color: var(--kelp); border-color: var(--kelp); }
 .poi-share { margin-left: 0; }
 
+/* plot menu: a bound's start and end sit on one row, under its own label */
+.plot-menu-pair {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 4px; padding: 2px 0;
+}
+.plot-menu-pair-label {
+  font-family: var(--mono); font-size: calc(9px * var(--fs-ui, 1));
+  letter-spacing: 0.06em; color: var(--tide-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plot-menu-pair button {
+  min-width: 46px; padding: 4px 7px; cursor: pointer;
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
+  font-family: var(--mono); font-size: calc(10px * var(--fs-ui, 1));
+}
+.plot-menu-pair button:hover:not(:disabled) { color: var(--kelp); border-color: var(--kelp); }
+.plot-menu-pair button:disabled { opacity: 0.35; cursor: not-allowed; }
+
 /* per-path settings: a labelled dropdown, not a row of glyphs */
 .pp-menu-btn {
   display: flex; align-items: center; gap: 3px; cursor: pointer;

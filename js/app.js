@@ -5198,7 +5198,10 @@
     DemSampler.init(cfg);
     CustomContours.init(cfg, L, map, say);
     Paths.init(cfg, L, map, say, toast, renderPaths);
-    POI.init(cfg, L, map, say, toast);
+    // POI edits had no route to storage of their own: renaming, hiding or
+    // deleting a point survived only if some unrelated change happened to
+    // trigger a write before the tab closed
+    POI.init(cfg, L, map, say, toast, schedulePersist);
 
     /*
      * Session: export/import plus POI persistence. applyState is the single

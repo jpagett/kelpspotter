@@ -40,15 +40,18 @@ const POI = (function () {
   const SYMBOL_KEYS = Object.keys(SYMBOLS);
 
   let cfg = null, L = null, map = null, say = null, toast = null;
+  // set by init: tells the host something worth saving happened
+  let changed = function () {};
   let items = [];          // {id,name,desc,lat,lng,symbol,visible,marker}
   let shapes = [];         // non-point geometry, drawn but not listed
   let nextId = 1;
   let filterText = '';     // live text of the panel's filter box
 
-  function init(config, leaflet, leafletMap, logger, toaster) {
+  function init(config, leaflet, leafletMap, logger, toaster, onChanged) {
     cfg = config; L = leaflet; map = leafletMap;
     say = logger || function () {};
     toast = toaster || function () {};
+    changed = onChanged || function () {};
     map.createPane(PANE).style.zIndex = 640;   // above kelp, below the UI
     wireUi();
     render();
@@ -338,14 +341,76 @@ const POI = (function () {
     if (rec.marker) rec.marker.openPopup();
   }
 
+  /*
+   * Positions here are read by the path editor's parser, so one typed into a
+   * point and one typed into a path node behave identically — decimal, DDM,
+   * DMS, and the first pair out of a maps URL. The fallback is only for a page
+   * that somehow loaded without paths.js.
+   */
+  function readCoords(text) {
+    if (window.Paths && typeof Paths.parseCoords === 'function') return Paths.parseCoords(text);
+    const m = String(text).match(/(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+    return (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) ? { lat: lat, lng: lng } : null;
+  }
+
+  function refreshMarker(rec) {
+    if (!rec.marker) return;
+    rec.marker.setPopupContent('<b>' + escapeHtml(rec.name) + '</b>' +
+      (rec.desc ? '<br>' + escapeHtml(rec.desc).slice(0, 300) : ''));
+    if (rec.marker.options) rec.marker.options.title = rec.name;
+  }
+
+  function moveTo(rec, lat, lng) {
+    rec.lat = lat; rec.lng = lng;
+    // the charted depth described where it used to be
+    delete rec.depthFt;
+    if (rec.marker) rec.marker.setLatLng([lat, lng]);
+    refreshMarker(rec);
+    map.setView([lat, lng], Math.max(map.getZoom(), 14));
+    say(rec.name + ' moved to ' + lat.toFixed(5) + ', ' + lng.toFixed(5));
+    changed();
+    scheduleAnnotate();          // re-read the charted depth at the new spot
+    render();
+  }
+
+  /*
+   * A new point in the middle of what you are looking at, opened with its name
+   * selected. Placing it at the map centre rather than asking for a position
+   * first means the common case — "here, roughly" — is one click, and the
+   * position field in the detail is there for when it needs to be exact.
+   */
+  function addHere() {
+    const c = map.getCenter();
+    const rec = { id: nextId++, name: 'New point', lat: c.lat, lng: c.lng,
+                  symbol: 'marker', desc: '', visible: true, source: 'manual',
+                  open: true, renaming: true };
+    rec.marker = addMarker(rec);
+    items.push(rec);
+    // an active filter would hide the thing that was just created
+    filterText = '';
+    const search = document.getElementById('poi-search');
+    if (search) search.value = '';
+    say('Point added at the map centre — name it, or paste a position');
+    changed();
+    scheduleAnnotate();
+    render();
+    const el = document.querySelector('#poi-list [data-poi="' + rec.id + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    return rec;
+  }
+
   function setSymbol(rec, key) {
     rec.symbol = key;
     if (rec.marker) rec.marker.setIcon(iconFor(key));
+    changed();
     render();
   }
 
   function setVisible(rec, on) {
     rec.visible = on;
+    changed();
     if (!rec.marker) return;
     if (on) rec.marker.addTo(map); else map.removeLayer(rec.marker);
     render();
@@ -354,6 +419,7 @@ const POI = (function () {
   function remove(rec) {
     if (rec.marker) map.removeLayer(rec.marker);
     items = items.filter((i) => i !== rec);
+    changed();
     render();
   }
 
@@ -392,10 +458,13 @@ const POI = (function () {
     note.textContent = (filterText
       ? shown.length + ' of ' + items.length + ' point' + (items.length === 1 ? '' : 's')
       : items.length + ' point' + (items.length === 1 ? '' : 's')) +
-      ' · tap one to jump to it';
+      ' · tap one to open it';
     shown.forEach((rec) => {
+      const item = document.createElement('div');
+      item.className = 'poi-item' + (rec.visible ? '' : ' off') + (rec.open ? ' open' : '');
+      item.dataset.poi = rec.id;
       const row = document.createElement('div');
-      row.className = 'poi-item' + (rec.visible ? '' : ' off');
+      row.className = 'poi-row';
 
       const pin = document.createElement('button');
       pin.className = 'poi-sym'; pin.type = 'button';
@@ -420,20 +489,52 @@ const POI = (function () {
       }
       name.title = rec.name + (rec.desc ? ' — ' + rec.desc.slice(0, 120) : '');
 
+      /*
+       * Rename in place, not in a window.prompt. A browser dialog blocks the
+       * page, cannot show the point it is renaming, and on a phone covers the
+       * map entirely — so the name becomes an input in the row it belongs to,
+       * committing on blur or Enter and abandoning on Escape, the same idiom
+       * the path rows use.
+       */
+      const startRename = () => {
+        if (row.querySelector('.poi-name-input')) return;
+        const input = document.createElement('input');
+        input.className = 'poi-name-input'; input.type = 'text'; input.value = rec.name;
+        input.setAttribute('aria-label', 'Point name');
+        let done = false;
+        const commit = (save) => {
+          if (done) return;
+          done = true;
+          const clean = input.value.trim();
+          if (save && clean && clean !== rec.name) {
+            rec.name = clean;
+            refreshMarker(rec);
+            say('Renamed to ' + rec.name);
+            changed();
+          }
+          render();
+        };
+        input.addEventListener('blur', () => commit(true));
+        input.addEventListener('keydown', (ev) => {
+          ev.stopPropagation();
+          if (ev.key === 'Enter') commit(true);
+          else if (ev.key === 'Escape') commit(false);
+        });
+        input.addEventListener('click', (ev) => ev.stopPropagation());
+        row.replaceChild(input, name);
+        input.focus(); input.select();
+      };
+
+      name.addEventListener('dblclick', (ev) => { ev.stopPropagation(); startRename(); });
+
       const pen = document.createElement('button');
       pen.className = 'poi-eye'; pen.type = 'button'; pen.textContent = '✎';
-      pen.title = 'Rename this point';
+      pen.title = 'Rename this point and edit its position';
       pen.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        const next = window.prompt('Rename point', rec.name);
-        if (next === null || !next.trim()) return;
-        rec.name = next.trim();
-        if (rec.marker) {
-          rec.marker.setPopupContent('<b>' + escapeHtml(rec.name) + '</b>' +
-            (rec.desc ? '<br>' + escapeHtml(rec.desc).slice(0, 300) : ''));
-        }
-        render();
-        say('Renamed to ' + rec.name);
+        // the position field lives in the detail, so editing opens it
+        if (!rec.open) { rec.open = true; rec.renaming = true; render(); return; }
+        startRename();
       });
 
       const eye = document.createElement('button');
@@ -447,11 +548,118 @@ const POI = (function () {
       del.title = 'Remove this point';
       del.addEventListener('click', (ev) => { ev.stopPropagation(); remove(rec); });
 
-      row.addEventListener('click', () => flyTo(rec));
+      /*
+       * Opening a point rather than flying to it. Jumping the map on every
+       * stray tap made the list hostile to browse — you could not read a name
+       * without being taken somewhere — so the row opens its detail and the
+       * detail carries an explicit Zoom to.
+       */
+      row.addEventListener('click', () => { rec.open = !rec.open; render(); });
       row.appendChild(pin); row.appendChild(name); row.appendChild(pen);
       row.appendChild(eye); row.appendChild(del);
-      box.appendChild(row);
+      item.appendChild(row);
+
+      if (rec.open) item.appendChild(detailFor(rec));
+      box.appendChild(item);
+
+      // a rename asked for while the row was still closed, deferred until the
+      // detail existed so both appear in one paint
+      if (rec.renaming) { rec.renaming = false; startRename(); }
     });
+  }
+
+  /*
+   * The opened body of a point: where it is, what it is, and a way to go
+   * there. Every field commits on blur or Enter and re-renders only then —
+   * committing per keystroke would rebuild the list under the cursor and throw
+   * focus away mid-word.
+   */
+  function detailFor(rec) {
+    const wrap = document.createElement('div');
+    wrap.className = 'poi-detail';
+    // clicks inside the detail must not reach the row's open/close toggle
+    wrap.addEventListener('click', (ev) => ev.stopPropagation());
+
+    const field = (labelText, el) => {
+      const l = document.createElement('label');
+      l.className = 'poi-field';
+      const s = document.createElement('span');
+      s.className = 'poi-field-label';
+      s.textContent = labelText;
+      l.appendChild(s); l.appendChild(el);
+      wrap.appendChild(l);
+      return l;
+    };
+
+    /*
+     * Position is editable here, and parsed by the same reader the path node
+     * editor uses — decimal, DDM and DMS all work, so a position copied out of
+     * a chart or a text message goes straight in.
+     */
+    const coord = document.createElement('input');
+    coord.type = 'text';
+    coord.className = 'poi-coord';
+    coord.value = rec.lat.toFixed(6) + ', ' + rec.lng.toFixed(6);
+    coord.setAttribute('aria-label', 'Position of ' + rec.name);
+    coord.title = 'Edit or paste a position — decimal, DDM and DMS all work';
+    const applyCoord = () => {
+      const got = readCoords(coord.value);
+      if (!got) {
+        toast('Could not read those coordinates.', true);
+        coord.value = rec.lat.toFixed(6) + ', ' + rec.lng.toFixed(6);
+        return;
+      }
+      if (got.lat === rec.lat && got.lng === rec.lng) return;
+      moveTo(rec, got.lat, got.lng);
+    };
+    coord.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') { ev.preventDefault(); applyCoord(); }
+      else if (ev.key === 'Escape') { coord.value = rec.lat.toFixed(6) + ', ' + rec.lng.toFixed(6); coord.blur(); }
+    });
+    // a pasted position that already parses applies immediately, matching the
+    // path node editor — no Enter needed
+    coord.addEventListener('paste', () => {
+      setTimeout(() => { if (readCoords(coord.value)) applyCoord(); }, 0);
+    });
+    coord.addEventListener('blur', applyCoord);
+    field('Position', coord);
+
+    const desc = document.createElement('textarea');
+    desc.className = 'poi-desc';
+    desc.rows = 2;
+    desc.value = rec.desc || '';
+    desc.placeholder = 'Notes — entry, hazards, what is down there…';
+    desc.setAttribute('aria-label', 'Notes for ' + rec.name);
+    desc.addEventListener('keydown', (ev) => ev.stopPropagation());
+    desc.addEventListener('blur', () => {
+      const next = desc.value.trim();
+      if (next === (rec.desc || '')) return;
+      rec.desc = next;
+      refreshMarker(rec);
+      changed();
+      render();
+    });
+    field('Notes', desc);
+
+    const foot = document.createElement('div');
+    foot.className = 'poi-detail-foot';
+    if (typeof rec.depthFt === 'number' && rec.depthFt > 0) {
+      const d = document.createElement('span');
+      d.className = 'poi-detail-depth';
+      d.textContent = rec.depthFt + ' ft charted';
+      d.title = 'Charted depth under this point (NOAA DEM)';
+      foot.appendChild(d);
+    }
+    const zoom = document.createElement('button');
+    zoom.type = 'button';
+    zoom.className = 'poi-zoom';
+    zoom.textContent = 'Zoom to';
+    zoom.title = 'Centre the map on this point';
+    zoom.addEventListener('click', () => flyTo(rec));
+    foot.appendChild(zoom);
+    wrap.appendChild(foot);
+    return wrap;
   }
 
   function wireUi() {
@@ -475,6 +683,8 @@ const POI = (function () {
     });
     const fit = document.getElementById('poi-fit');
     if (fit) fit.addEventListener('click', fitAll);
+    const add = document.getElementById('poi-new');
+    if (add) add.addEventListener('click', addHere);
   }
 
   /*
@@ -538,6 +748,7 @@ const POI = (function () {
     importFile: importFile,
     clearAll: clearAll,
     fitAll: fitAll,
+    addHere: addHere,
     parseKml: parseKml,          // exported for testing
     parseGpx: parseGpx,
     get list() { return items; },

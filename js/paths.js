@@ -333,6 +333,14 @@ const Paths = (function () {
       redraw(p);
       refreshProfile(p);
       onChange();
+      /*
+       * Follow the node. A pasted position is usually somewhere else entirely
+       * — that is the point of pasting one — so leaving the map where it was
+       * showed a path with one end vanished off-screen and no clue which way.
+       * Zoom in only if we are further out than 14; a closer view is a
+       * deliberate one and pulling back out of it would be rude.
+       */
+      map.setView([got.lat, got.lng], Math.max(map.getZoom(), 14));
       say('Node ' + (i + 1) + ' moved to ' + got.lat.toFixed(5) + ', ' + got.lng.toFixed(5));
     };
     input.addEventListener('keydown', (ev) => {

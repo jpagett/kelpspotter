@@ -1168,12 +1168,47 @@ input[type=range]::-moz-range-thumb {
 .poi-head .eyebrow:hover { color: var(--kelp); }
 .poi-tools { display: flex; gap: 4px; }
 .poi-list { display: flex; flex-direction: column; gap: 4px; }
+/* .poi-item is the whole card; .poi-row is the one-line summary inside it,
+   and .poi-detail unfolds beneath when the point is open */
 .poi-item {
-  display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer;
   border: 1px solid var(--line); border-radius: 3px; background: rgba(111,183,189,0.05);
 }
 .poi-item:hover { border-color: var(--kelp); }
 .poi-item.off { opacity: 0.45; }
+.poi-item.open { border-color: var(--kelp); background: rgba(242,177,52,0.08); }
+.poi-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer;
+}
+.poi-name-input {
+  flex: 1; min-width: 0; font-size: 12px; font-family: inherit;
+  color: var(--foam); background: rgba(111,183,189,0.08);
+  border: 1px solid var(--kelp); border-radius: 2px; padding: 1px 3px;
+}
+.poi-detail {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 2px 6px 7px; cursor: default;
+}
+.poi-field { display: flex; flex-direction: column; gap: 2px; }
+.poi-field-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--tide-dim);
+}
+.poi-coord, .poi-desc {
+  width: 100%; font-family: var(--mono); font-size: 10px;
+  color: var(--foam); background: rgba(5,22,28,0.5);
+  border: 1px solid var(--ctl-line); border-radius: 2px; padding: 4px 5px;
+}
+.poi-desc { font-family: var(--sans); font-size: 11px; resize: vertical; min-height: 34px; }
+.poi-coord:focus, .poi-desc:focus { outline: none; border-color: var(--kelp); }
+.poi-detail-foot { display: flex; align-items: center; gap: 8px; }
+.poi-detail-depth { font-family: var(--mono); font-size: 10px; color: var(--tide-dim); }
+.poi-zoom {
+  margin-left: auto; padding: 4px 10px; cursor: pointer;
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+}
+.poi-zoom:hover { color: var(--kelp); border-color: var(--kelp); }
 .poi-sym {
   width: 22px; height: 22px; flex: none; cursor: pointer;
   display: grid; place-items: center; border: none; border-radius: 50%;

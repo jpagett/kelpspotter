@@ -1148,7 +1148,30 @@ const Paths = (function () {
     } else if (p.preMirrorNodes) {
       p.nodes = p.preMirrorNodes;
       p.preMirrorNodes = null;
-      say(p.name + ' mirror removed — back to ' + p.nodes.length + ' nodes');
+      /*
+       * Bounds set on the return leg have nowhere to live once it is gone.
+       * Mirroring doubles the path, so a ceiling, floor or offset drawn in the
+       * second half spans distances past the end of the un-mirrored line —
+       * and a bound sitting entirely off the plot cannot be seen, grabbed or
+       * deleted. It just quietly followed the path around forever, and came
+       * back the moment the mirror did. Clip what overlaps the shorter line
+       * and drop what does not.
+       */
+      const total = lengthOf(p);
+      let dropped = 0;
+      ['ceilings', 'floors', 'offsets'].forEach((k) => {
+        if (!Array.isArray(p[k])) return;
+        p[k] = p[k].filter((b) => {
+          b.start = Math.max(0, Math.min(b.start, total));
+          b.end = Math.max(0, Math.min(b.end, total));
+          if (b.end - b.start >= 1) return true;      // still covers ground
+          dropped++;
+          return false;
+        });
+      });
+      say(p.name + ' mirror removed — back to ' + p.nodes.length + ' nodes' +
+          (dropped ? ', ' + dropped + ' bound' + (dropped === 1 ? '' : 's') +
+                     ' dropped with the return leg' : ''));
     }
     p.mirrored = on;
     p.profile = null;

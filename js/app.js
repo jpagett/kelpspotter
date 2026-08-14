@@ -3997,7 +3997,8 @@
       body.className = 'plot-popout-body';
       popoutEl.appendChild(head); popoutEl.appendChild(body);
       document.body.appendChild(popoutEl);
-      makeDraggable(popoutEl, 'button, input, select, textarea, a, svg');
+      // drag by the header only, so the resize corner stays the browser's
+      makeDraggable(popoutEl, 'button, input, select, textarea, a, svg', head);
       popoutEl._title = title;
       popoutEl._body = body;
     }
@@ -4779,7 +4780,14 @@
    * panel's initPanelChrome above, minus the corner resize (their content
    * sizes itself; only their position needs to move).
    */
-  function makeDraggable(panel, interactiveSelector) {
+  /*
+   * `handle` limits where a drag can START. It defaults to the whole panel,
+   * which is right for the sheets — but this handler preventDefaults its
+   * pointerdown, and the browser's own `resize: both` corner is part of the
+   * element rather than a child, so on a resizable box "drag from anywhere"
+   * eats the resize gesture entirely. Give such a box a header to drag by.
+   */
+  function makeDraggable(panel, interactiveSelector, handle) {
     let drag = null;
     function unpin() {
       const r = panel.getBoundingClientRect();
@@ -4802,7 +4810,7 @@
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
     }
-    panel.addEventListener('pointerdown', (ev) => {
+    (handle || panel).addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       // On a phone these panels are bottom sheets, not floating boxes. Dragging
       // would write inline left/top that overrides the sheet layout.

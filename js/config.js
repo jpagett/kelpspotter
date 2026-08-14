@@ -271,7 +271,9 @@ window.KELP_CONFIG = {
      * 'split' stacks paths above POI. dockSplit is the fraction of the dock's
      * height the paths pane keeps in split mode; the seam is draggable.
      */
-    dockView: 'paths',
+    // each pane of the right-hand dock can be minimised to its header
+    pathsMin: false,
+    poiMin: false,
     dockSplit: 0.55,
     // stacking order of the map overlays, bottom to top; dragged in the
     // bottom-right overlay picker and applied as pane z-indexes
@@ -321,7 +323,6 @@ window.KELP_CONFIG = {
     speed: 0.5,             // mi/hr — used when timeMode is 'speed'
     time: 30,               // minutes — used when timeMode is 'time'
     timeMode: 'speed',      // 'speed' | 'time'
-    showGas: true,
     kickDistance: 0,        // metres per kick cycle; 0 = omit kicks from the leg table
     kickUnit: 'ft',         // how that number is typed/shown: 'm' | 'ft'
     /*

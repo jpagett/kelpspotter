@@ -1119,7 +1119,8 @@ input[type=range]::-moz-range-thumb {
 /* ---------- points of interest ---------- */
 /*
  * Desktop: a pane of the right-hand dock, tabbed with Paths (see .dock-tabs
- * in the paths panel head) or split under it — body[data-dock] picks the
+ * in the paths panel head) and permanently stacked under it — body's
+ * data-paths-min / data-poi-min say which pane is minimised, and the
  * arrangement and --dock-divide (px up from the viewport bottom, set by JS)
  * places the seam. Mobile: its own bottom sheet, untouched by any of this —
  * every dock rule is scoped to desktop widths.
@@ -1143,40 +1144,36 @@ input[type=range]::-moz-range-thumb {
   }
   .poi-panel::-webkit-scrollbar { width: 8px; }
   .poi-panel::-webkit-scrollbar-thumb { background: var(--current); border-radius: 4px; }
-  body[data-dock="poi"] .poi-panel,
-  body[data-dock="split"] .poi-panel { display: block; }
-  /* POI-only: the paths pane shrinks to its header strip — the tab bar stays */
-  body[data-dock="poi"] #pp-body,
-  body[data-dock="poi"] .pp-global-tools,
-  body[data-dock="poi"] #pp-opts { display: none; }
-  body[data-dock="poi"] .paths-panel,
-  body[data-dock="split"] .paths-panel { bottom: var(--dock-divide, 50vh); }
-  /* Split already shows both panes, so the POI tab has nothing to switch to —
-     take it out of the tab bar (and the tab order) rather than leaving a
-     button whose only effect would be to undo the split. */
-  body[data-dock="split"] #dock-poi-tab { display: none; }
-  /* collapse still wins over the dock-mode height */
-  body[data-dock] .paths-panel.collapsed { bottom: auto; }
-  /* a collapsed or view-hidden dock takes its POI pane (and divider) with it */
+  /* both panes, always — the seam between them is the only thing that moves */
+  .poi-panel { display: block; }
+  .paths-panel { bottom: var(--dock-divide, 50vh); }
+  /* a minimised pane keeps its header strip and nothing else */
+  body[data-paths-min="1"] #pp-body,
+  body[data-paths-min="1"] .pp-global-tools,
+  body[data-paths-min="1"] #pp-opts { display: none; }
+  body[data-poi-min="1"] #poi-body { display: none; }
+  /* collapse (mobile's whole-panel hide) still wins over the split height */
+  .paths-panel.collapsed { bottom: auto; }
+  /* a collapsed or view-hidden dock takes its POI pane (and seam) with it */
   .paths-panel.collapsed ~ .poi-panel,
   .paths-panel.view-hidden ~ .poi-panel,
   .paths-panel.collapsed ~ .poi-divider,
   .paths-panel.view-hidden ~ .poi-divider { display: none !important; }
-  /* split divider: the seam itself, draggable — same affordance as .pp-edge */
-  body[data-dock="split"] .poi-divider {
+  /* the seam itself, draggable — same affordance as .pp-edge */
+  .poi-divider {
     display: block; position: fixed; z-index: 905;
     right: 0; width: var(--dock-w);
     top: calc(100vh - var(--dock-divide, 50vh) - 4px); height: 8px;
     cursor: ns-resize; touch-action: none;
   }
+  /* nothing to drag when one side is already minimised */
+  body[data-paths-min="1"] .poi-divider,
+  body[data-poi-min="1"] .poi-divider { display: none; }
   .poi-divider:hover, .poi-divider.dragging { background: rgba(242,177,52,0.3); }
 }
 
-/* dock tabs (paths panel header) */
+/* dock headers (each minimises its own pane) */
 .dock-tabs { display: flex; align-items: center; gap: 12px; }
-.pp-head .dock-tab { padding-bottom: 2px; border-bottom: 1px solid transparent; }
-.pp-head .dock-tab.dock-active { color: var(--foam); border-bottom-color: var(--kelp); }
-.dock-split { font-size: calc(10px * var(--fs-ui, 1)); }
 .poi-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .poi-head .eyebrow {
   background: none; border: none; cursor: pointer; padding: 0;
@@ -1228,6 +1225,67 @@ input[type=range]::-moz-range-thumb {
 }
 .poi-zoom:hover { color: var(--kelp); border-color: var(--kelp); }
 .poi-share { margin-left: 0; }
+
+/* per-path settings: a labelled dropdown, not a row of glyphs */
+.pp-menu-btn {
+  display: flex; align-items: center; gap: 3px; cursor: pointer;
+  height: 20px; padding: 0 6px;
+  background: var(--current); color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
+  font-family: var(--mono); font-size: calc(9px * var(--fs-ui, 1));
+  letter-spacing: 0.08em; text-transform: uppercase; line-height: 1;
+}
+.pp-menu-btn:hover { color: var(--kelp); border-color: var(--kelp); }
+.pp-menu-btn[aria-expanded="true"] { background: var(--kelp); color: var(--abyss); border-color: var(--kelp); }
+.pp-menu-btn .sect-caret { font-size: calc(8px * var(--fs-ui, 1)); }
+.pp-menu-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  cursor: pointer; text-align: left;
+  background: none; border: none; border-radius: 2px;
+  padding: 5px 6px; color: var(--tide);
+  font-family: var(--sans); font-size: calc(12px * var(--fs-ui, 1));
+}
+.pp-menu-item:hover:not(:disabled) { background: rgba(111,183,189,0.10); color: var(--foam); }
+.pp-menu-item:disabled { opacity: 0.35; cursor: not-allowed; }
+.pp-menu-item.danger:hover { color: var(--coral); }
+.pp-menu-item[aria-pressed="true"] { color: var(--foam); }
+/* a fixed gutter so labels line up whether or not they carry a tick */
+.pp-menu-tick {
+  flex: none; width: 12px; text-align: center;
+  color: var(--kelp); font-size: calc(11px * var(--fs-ui, 1));
+}
+.pp-menu-color input[type=color] {
+  margin-left: auto; width: 26px; height: 16px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--ctl-line); border-radius: 2px;
+}
+.pp-menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
+/* a depth profile popped into its own resizable window */
+.plot-popout {
+  position: fixed; z-index: 1200; left: 80px; top: 120px;
+  width: min(70vw, 720px); height: min(60vh, 420px);
+  min-width: 260px; min-height: 160px;
+  display: flex; flex-direction: column;
+  resize: both; overflow: hidden;
+  background: linear-gradient(180deg, rgba(10,40,48,0.98), rgba(8,32,39,0.98));
+  border: 1px solid var(--ctl-line); border-radius: 4px;
+  box-shadow: 0 24px 60px -20px rgba(0,0,0,0.85);
+}
+.plot-popout[hidden] { display: none; }
+.plot-popout-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; cursor: move;
+  border-bottom: 1px solid var(--line);
+}
+.plot-popout-title {
+  font-family: var(--mono); font-size: calc(10px * var(--fs-ui, 1));
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--tide);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* the plot measures whatever box it lands in, so this is what sizes it */
+.plot-popout-body { flex: 1; min-height: 0; padding: 8px 10px 10px; overflow: auto; }
+.plot-popout-body .pp-profile { padding: 0; }
+.plot-popout-body .pp-profile svg { height: auto; }
 
 /* text-size sliders in the settings menu */
 .menu-slider { padding: 4px 2px 6px; }
@@ -1807,7 +1865,6 @@ input[type=range]::-moz-range-thumb {
   /* panel chrome that has no meaning on a sheet */
   .pp-edge, .pp-grip { display: none !important; }
   /* POI is its own sheet on a phone; the dock tabs are desktop chrome */
-  #dock-poi-tab, #dock-split-btn { display: none !important; }
   .console-head, .act-head, .pp-head { cursor: default; }
 
   /* grab handle, so a sheet reads as a sheet */

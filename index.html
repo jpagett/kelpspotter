@@ -343,18 +343,13 @@
          panel instead of scrolling away with a long path list -->
     <div class="pp-inner">
       <div class="pp-head">
-        <!-- Desktop: Paths/POI are tabs of this dock; the split button shows
-             both stacked, which retires the POI tab (nothing left to switch
-             to). Clicking the active tab still collapses the dock (the same
-             tap-active-to-dismiss idiom as the mobile tab bar).
-             Mobile hides POI/split — POI has its own sheet there. -->
+        <!-- Desktop: paths above, points below, always. Clicking this header
+             minimises the paths list to this strip; the POI header does the
+             same for its own. Mobile ignores all of it — POI is its own sheet
+             there and this is just a collapse toggle. -->
         <div class="dock-tabs">
           <button id="pp-collapse" class="eyebrow dock-tab dock-active" aria-expanded="true"
                   title="Collapse this panel">Paths</button>
-          <button id="dock-poi-tab" class="eyebrow dock-tab" type="button"
-                  title="Show points of interest">POI</button>
-          <button id="dock-split-btn" class="pp-tool dock-split" type="button" aria-pressed="false"
-                  title="Split the dock: paths above, points below">⬓</button>
         </div>
         <div class="pp-tools">
           <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
@@ -364,8 +359,6 @@
       </div>
       <!-- always-visible strip: the gas toggle plus the options disclosure -->
       <div id="pp-global-tools" class="pp-global-tools">
-        <button id="pp-gas-btn" class="pp-gas-toggle" type="button" aria-pressed="false"
-                title="Plan cylinder gas across every path">Gas planner</button>
         <button id="pp-opts-toggle" class="pp-opts-toggle" type="button" aria-expanded="false"
                 title="Diver and cylinder settings"><span class="sect-caret">&#9656;</span> Path options</button>
       </div>

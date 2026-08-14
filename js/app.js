@@ -2905,7 +2905,7 @@
   function legData(p) {
     const legs = Paths.legsOf(p.id);
     const cum = Paths.nodeDistances(p);
-    const gp = state.params.showGas ? gasProfile(p) : null;
+    const gp = p.showGas ? gasProfile(p) : null;
     const used = {};                      // cylinder id -> cuft drawn so far
     p.legGas = p.legGas || {};
     return legs.map((lg, i) => {
@@ -2958,7 +2958,7 @@
    * and return it with the nearest profile sample's position.
    */
   function reserveCrossing(p, rows) {
-    const gp = state.params.showGas ? gasProfile(p) : null;
+    const gp = p.showGas ? gasProfile(p) : null;
     if (!gp) return null;
     const cum = Paths.nodeDistances(p);
     const used = {};
@@ -3017,7 +3017,7 @@
         return mx + ' (' + av + ')';
       }
     });
-    if (state.params.showGas) {
+    if (p.showGas) {
       // what is LEFT at the end of the leg, volume and gauge pressure together
       const pl = pressU().label;
       cols.push({
@@ -3156,7 +3156,7 @@
     host.appendChild(scroller);
 
     // per-cylinder verdict: what each source is asked for against what it has
-    if (state.params.showGas && cylinders().length) {
+    if (p.showGas && cylinders().length) {
       const drawnBy = {};
       rows.forEach((r) => { if (r.cyl && r.drawn !== null) drawnBy[r.cylId] = r.drawn; });
       const sum = document.createElement('div');
@@ -3187,7 +3187,7 @@
     const bits = ['Headings are MAGNETIC — true bearings corrected by the ' + state.params.declination + '° E declination set in Path options, so they can be steered directly on a compass.'];
     if (!p.profile) bits.push('Depths are blank until the profile finishes reading.');
     if (state.params.kickDistance <= 0) bits.push('Set a kick distance in Path options to add a kick-cycle column.');
-    if (!state.params.showGas) bits.push('Turn Gas on to budget cylinders across the legs.');
+    if (!p.showGas) bits.push('Turn gas tracking on in this path’s menu to budget cylinders across its legs.');
     note.textContent = bits.join(' ');
     host.appendChild(note);
   }
@@ -3548,7 +3548,7 @@
     dist.textContent = fmtDist(maxX);
     svg.appendChild(dist);
 
-    if (state.params.showGas) {
+    if (p.showGas) {
       const gp = gasProfile(p);
       if (gp && gp.total > 0) {
         const yG = (cuft) => PADT + (H - PADT - PADB) * (cuft / gp.total);
@@ -3616,9 +3616,44 @@
           wt.setAttribute('y', H - PADB - 3);
           wt.textContent = '⚠ reserve';
           const wtTitle = document.createElementNS(NS, 'title');
-          wtTitle.textContent = rp.cylName + ' falls to its declared reserve at ' + fmtDist(rp.dist);
+          wtTitle.textContent = rp.cylName + ' falls to its declared reserve at ' + fmtDist(rp.dist) +
+                                ' — right-click to add a node here';
           wt.appendChild(wtTitle);
           svg.appendChild(wt);
+
+          /*
+           * Right-click the line itself to drop a node at the crossing. This is
+           * the gesture the plot already answers everywhere else, and it is
+           * where the eye is: seeing where the gas runs out and wanting a
+           * cylinder switch there is one thought, so it should be one action
+           * rather than a hunt through the leg table for the same button.
+           *
+           * The hit target is a wide transparent line over the visible one —
+           * a 1px dashed stroke is far too thin to aim at, especially on a
+           * phone where the same handler runs off a long press.
+           */
+          const hit = document.createElementNS(NS, 'line');
+          hit.setAttribute('x1', x(rp.dist).toFixed(1)); hit.setAttribute('x2', x(rp.dist).toFixed(1));
+          hit.setAttribute('y1', PADT); hit.setAttribute('y2', H - PADB);
+          hit.setAttribute('stroke', 'transparent');
+          hit.setAttribute('stroke-width', '10');
+          hit.style.cursor = 'context-menu';
+          const addNodeAtReserve = (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            Paths.insertAt(p.id, rp.latlng);
+            say('Node added where ' + rp.cylName + ' hits reserve — give the next leg a fresh cylinder', 'ok');
+            renderPaths();
+            persistNow();
+          };
+          hit.addEventListener('contextmenu', addNodeAtReserve);
+          let press = null;
+          hit.addEventListener('pointerdown', (ev) => {
+            if (ev.pointerType === 'mouse') return;
+            press = setTimeout(() => { press = null; addNodeAtReserve(ev); }, 450);
+          });
+          ['pointerup', 'pointercancel', 'pointerleave', 'pointermove'].forEach((t) =>
+            hit.addEventListener(t, () => { if (press) { clearTimeout(press); press = null; } }));
+          svg.appendChild(hit);
         }
       }
     }
@@ -3812,6 +3847,55 @@
    * waiting for its end, per path — kept OUTSIDE the path object so an
    * abandoned half-gesture never persists or exports.
    */
+  /*
+   * ---- popped-out profile ----
+   * One floating window, reused. The plot is rendered INTO it by renderPaths
+   * rather than copied there, so there is still exactly one renderer and one
+   * SVG per path — a copy would drift the moment a bound moved, and every
+   * hover, drag and right-click on the plot would have to be wired twice.
+   *
+   * Sized by the browser's own resize handle (CSS `resize: both`) and dragged
+   * by its header. The profile measures whatever container it lands in, so it
+   * fills the window at whatever size it is left at.
+   */
+  let popoutEl = null;
+  function popoutBody(p) {
+    if (!popoutEl) {
+      popoutEl = document.createElement('div');
+      popoutEl.className = 'plot-popout';
+      const head = document.createElement('div');
+      head.className = 'plot-popout-head';
+      const title = document.createElement('span');
+      title.className = 'plot-popout-title';
+      const close = document.createElement('button');
+      close.type = 'button'; close.className = 'sm-x';
+      close.textContent = '×';
+      close.title = 'Put the graph back in the panel';
+      close.setAttribute('aria-label', 'Close the graph window');
+      close.addEventListener('click', () => {
+        Paths.list.forEach((o) => { o.popped = false; });
+        renderPaths();
+      });
+      head.appendChild(title); head.appendChild(close);
+      const body = document.createElement('div');
+      body.className = 'plot-popout-body';
+      popoutEl.appendChild(head); popoutEl.appendChild(body);
+      document.body.appendChild(popoutEl);
+      makeDraggable(popoutEl, 'button, input, select, textarea, a, svg');
+      popoutEl._title = title;
+      popoutEl._body = body;
+    }
+    popoutEl.hidden = false;
+    popoutEl._title.textContent = p.name;
+    popoutEl._body.textContent = '';
+    return popoutEl._body;
+  }
+  // called at the end of every render: with nothing popped, the window goes away
+  function syncPopout() {
+    if (!popoutEl) return;
+    if (!Paths.list.some((p) => p.popped)) popoutEl.hidden = true;
+  }
+
   let pendingCeil = null;   // {pathId, dist, feet}
   let pendingFloor = null;  // same shape, for the mirror gesture
   let pendingOffset = null; // {pathId, dist, feet} — feet is a CLEARANCE, not a depth
@@ -4142,19 +4226,6 @@
       caret.title = p.expanded ? 'Collapse' : 'Show depth profile';
       caret.addEventListener('click', () => Paths.toggleExpand(p.id));
 
-      const mirror = document.createElement('button');
-      mirror.className = 'pp-mirror'; mirror.type = 'button'; mirror.textContent = '⇄';
-      mirror.title = p.mirrored ? 'Remove the out-and-back mirror' : 'Mirror this path back to its start';
-      mirror.disabled = !p.mirrored && p.nodes.length < 2;
-      mirror.setAttribute('aria-pressed', p.mirrored ? 'true' : 'false');
-      mirror.addEventListener('click', () => Paths.setMirrored(p.id, !p.mirrored));
-
-      const nodesBtn = document.createElement('button');
-      nodesBtn.className = 'pp-mirror'; nodesBtn.type = 'button'; nodesBtn.textContent = '👁';
-      nodesBtn.title = p.showNodes ? 'Hide node markers on the plot' : 'Show node markers on the plot';
-      nodesBtn.setAttribute('aria-pressed', p.showNodes ? 'true' : 'false');
-      nodesBtn.addEventListener('click', () => Paths.toggleShowNodes(p.id));
-
       // re-enter draw mode on THIS path — click the map to append nodes
       // after the last one, same click-to-extend flow as a brand new path
       const drawingThis = Paths.drawingId === p.id;
@@ -4165,35 +4236,114 @@
       extendBtn.setAttribute('aria-pressed', drawingThis ? 'true' : 'false');
       extendBtn.addEventListener('click', () => Paths.resumeDrawing(p.id));
 
+      /*
+       * Pop the profile into its own resizable window. Deliberately on the row
+       * and not inside the menu: it is the one control you reach for while
+       * looking at the graph, and burying it under a dropdown would mean
+       * opening a menu to get a better view of the thing the menu covers.
+       */
+      const popBtn = document.createElement('button');
+      popBtn.className = 'pp-mirror'; popBtn.type = 'button';
+      popBtn.textContent = '⤢';
+      popBtn.title = p.popped ? 'Put the graph back in the panel'
+                              : 'Open this depth profile in a resizable window';
+      popBtn.setAttribute('aria-pressed', p.popped ? 'true' : 'false');
+      popBtn.addEventListener('click', () => {
+        Paths.list.forEach((o) => { if (o !== p) o.popped = false; });   // one at a time
+        p.popped = !p.popped;
+        if (p.popped) p.expanded = true;
+        renderPaths();
+      });
+
+      /*
+       * A labelled dropdown rather than a row of glyphs. ⇄ and 👁 next to ⚙ and
+       * ⧉ told you nothing about what they did, and there is no room on the row
+       * for words — so the words go in the menu and the row keeps only what you
+       * reach for mid-task.
+       */
       const cog = document.createElement('button');
-      cog.className = 'pp-cog'; cog.type = 'button'; cog.textContent = '⚙'; cog.title = 'Settings';
+      cog.className = 'pp-menu-btn'; cog.type = 'button';
+      cog.setAttribute('aria-haspopup', 'true');
+      cog.setAttribute('aria-expanded', 'false');
+      cog.title = 'Path settings';
+      const cogLabel = document.createElement('span');
+      cogLabel.textContent = 'Settings';
+      const cogCaret = document.createElement('span');
+      cogCaret.className = 'sect-caret';
+      cogCaret.textContent = '▾';
+      cog.appendChild(cogLabel); cog.appendChild(cogCaret);
 
       const menu = document.createElement('div');
       menu.className = 'pp-menu'; menu.hidden = true;
+
+      // a labelled row that reads as on or off at a glance
+      const menuToggle = (label, on, fn, hint, disabled) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pp-menu-item pp-menu-toggle';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.disabled = !!disabled;
+        if (hint) b.title = hint;
+        const tick = document.createElement('span');
+        tick.className = 'pp-menu-tick';
+        tick.textContent = on ? '✓' : '';
+        const txt = document.createElement('span');
+        txt.textContent = label;
+        b.appendChild(tick); b.appendChild(txt);
+        b.addEventListener('click', fn);
+        menu.appendChild(b);
+        return b;
+      };
+      const menuItem = (label, fn, hint, danger) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pp-menu-item' + (danger ? ' danger' : '');
+        if (hint) b.title = hint;
+        const tick = document.createElement('span');
+        tick.className = 'pp-menu-tick';
+        const txt = document.createElement('span');
+        txt.textContent = label;
+        b.appendChild(tick); b.appendChild(txt);
+        b.addEventListener('click', fn);
+        menu.appendChild(b);
+        return b;
+      };
+
+      const colorRow = document.createElement('label');
+      colorRow.className = 'pp-menu-item pp-menu-color';
+      const colorTick = document.createElement('span');
+      colorTick.className = 'pp-menu-tick';
+      const colorTxt = document.createElement('span');
+      colorTxt.textContent = 'Path colour';
       const color = document.createElement('input');
-      color.type = 'color'; color.value = p.color; color.title = 'Path colour';
+      color.type = 'color'; color.value = p.color;
       color.addEventListener('change', () => { Paths.setColor(p.id, color.value); });
-      const rev = document.createElement('button');
-      rev.className = 'pp-del'; rev.type = 'button'; rev.textContent = '⇋';
-      rev.title = 'Reverse direction — run the line from the other end';
-      rev.addEventListener('click', () => Paths.reverse(p.id));
+      colorRow.appendChild(colorTick); colorRow.appendChild(colorTxt); colorRow.appendChild(color);
+      menu.appendChild(colorRow);
 
-      const dup = document.createElement('button');
-      dup.className = 'pp-del'; dup.type = 'button'; dup.textContent = '⧉';
-      dup.title = 'Duplicate — plan a variant without touching this one';
-      dup.addEventListener('click', () => Paths.duplicate(p.id));
+      menuToggle('Show node markers', p.showNodes,
+        () => Paths.toggleShowNodes(p.id), 'Mark each drawn node on the depth profile');
+      menuToggle('Mirror out and back', p.mirrored,
+        () => Paths.setMirrored(p.id, !p.mirrored),
+        'Append the path reversed, so the plan returns to its start',
+        !p.mirrored && p.nodes.length < 2);
+      menuToggle('Track gas on this path', p.showGas,
+        () => Paths.toggleShowGas(p.id),
+        'Budget cylinders across this path’s legs, using the diver settings below');
 
-      // the whole path — nodes, ceilings, floors and offsets — as one code
-      const share = document.createElement('button');
-      share.className = 'pp-del'; share.type = 'button'; share.textContent = '⇪';
-      share.title = 'Copy a share code for this path — bounds included';
-      share.addEventListener('click', () => {
-        Session.copyText(Session.shareCode('path', p), p.name);
-      });
+      const sep = document.createElement('div');
+      sep.className = 'pp-menu-sep';
+      menu.appendChild(sep);
 
-      const del = document.createElement('button');
-      del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
-      del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
+      menuItem('Reverse direction', () => Paths.reverse(p.id),
+        'Run the line from the other end — headings, legs and bounds all follow');
+      menuItem('Duplicate path', () => Paths.duplicate(p.id),
+        'Plan a variant without touching this one');
+      menuItem('Copy share code', () => Session.copyText(Session.shareCode('path', p), p.name),
+        'Copy this path — nodes and bounds — for someone else to paste');
+      menuItem('Delete path', () => { Paths.remove(p.id); say(p.name + ' deleted'); },
+        'Remove this path', true);
+
       const unitCell = (labelText, sel) => {
         const cell = document.createElement('label');
         cell.className = 'pp-unit-cell';
@@ -4224,19 +4374,16 @@
       unitsRow.appendChild(unitCell('depth', zu));
       unitsRow.appendChild(unitCell('sac', su));
       unitsRow.appendChild(unitCell('speed', pu));
-      const actionsRow = document.createElement('div');
-      actionsRow.className = 'pp-menu-actions';
-      actionsRow.appendChild(color); actionsRow.appendChild(rev);
-      actionsRow.appendChild(dup); actionsRow.appendChild(share); actionsRow.appendChild(del);
-      menu.appendChild(unitsRow); menu.appendChild(actionsRow);
+      menu.appendChild(unitsRow);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = !menu.hidden;
+        cog.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
       });
 
       caret.classList.add('pp-caret-big');   // primary affordance: open the plot
       row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
-      row.appendChild(mirror); row.appendChild(nodesBtn); row.appendChild(extendBtn);
+      row.appendChild(extendBtn); row.appendChild(popBtn);
       row.appendChild(cog); row.appendChild(caret);
       item.appendChild(row); item.appendChild(menu);
 
@@ -4244,7 +4391,9 @@
       if (p.expanded) {
         wrap = document.createElement('div');
         wrap.className = 'pp-profile';
-        item.appendChild(wrap);
+        // a popped-out plot is rendered into its own window instead of the row
+        if (p.popped) popoutBody(p).appendChild(wrap);
+        else item.appendChild(wrap);
       }
       box.appendChild(item);
 
@@ -4295,7 +4444,7 @@
         speedSpan.textContent = speedMiHr > 0
           ? (+speedU().fromBase(speedMiHr).toFixed(speedU().dp)) + ' ' + speedU().label : '—';
         readout.appendChild(speedSpan);
-        if (state.params.showGas) {
+        if (p.showGas) {
           const gp = gasProfile(p);
           readout.appendChild(document.createTextNode(' · ' + (gp ? gp.total.toFixed(1) + ' cuft' : '—')));
         }
@@ -4390,6 +4539,7 @@
         }
       }
     });
+    syncPopout();
   }
 
   /*
@@ -4552,35 +4702,46 @@
    * one geometric fact, where the seam sits, is published as --dock-divide
    * (px up from the viewport bottom) so both panes read the same number.
    */
+  /*
+   * The two panes are ALWAYS stacked. They used to be tabs with a split toggle,
+   * which meant the common case — glance at a point while planning a path —
+   * cost a mode switch, and the toggle itself had to be explained. Now each
+   * header minimises its own pane to a strip, so both are reachable at once and
+   * either can be got out of the way without hiding the other.
+   */
+  function headStrip(el) {
+    return el ? Math.round(el.getBoundingClientRect().height) + 12 : 34;
+  }
   function syncDockDivide() {
     const vh = window.innerHeight;
     const dockTop = pathsPanel.getBoundingClientRect().top;
-    const mode = state.params.dockView || 'paths';
-    let divide = 0;
-    if (mode === 'split') {
+    const pathsMin = !!state.params.pathsMin;
+    const poiMin = !!state.params.poiMin;
+    let divide;
+    if (poiMin) {
+      // POI keeps its header only; paths take everything above it
+      divide = headStrip(document.querySelector('.poi-head'));
+    } else if (pathsMin) {
+      // the mirror image: paths keep their header, POI takes the rest
+      divide = Math.max(0, vh - dockTop - headStrip(pathsPanel.querySelector('.pp-head')));
+    } else {
       const frac = Math.max(0.15, Math.min(0.85, state.params.dockSplit || 0.55));
       state.params.dockSplit = frac;
       divide = (vh - dockTop) * (1 - frac);
-    } else if (mode === 'poi') {
-      // the paths pane keeps only its header strip (the tab bar)
-      const head = pathsPanel.querySelector('.pp-head');
-      divide = Math.max(0, vh - (head.getBoundingClientRect().bottom + 10));
     }
     document.documentElement.style.setProperty('--dock-divide', Math.round(divide) + 'px');
   }
-  function setDockView(mode) {
-    if (mode !== 'poi' && mode !== 'split') mode = 'paths';
-    state.params.dockView = mode;
-    document.body.dataset.dock = mode;
-    $('pp-collapse').classList.toggle('dock-active', mode !== 'poi');
-    $('dock-poi-tab').classList.toggle('dock-active', mode !== 'paths');
-    $('dock-split-btn').setAttribute('aria-pressed', mode === 'split' ? 'true' : 'false');
+  function syncDock() {
+    document.body.dataset.pathsMin = state.params.pathsMin ? '1' : '0';
+    document.body.dataset.poiMin = state.params.poiMin ? '1' : '0';
+    const pc = $('pp-collapse'), qc = $('poi-collapse');
+    pc.setAttribute('aria-expanded', state.params.pathsMin ? 'false' : 'true');
+    pc.title = state.params.pathsMin ? 'Expand the paths list' : 'Minimise the paths list';
+    if (qc) {
+      qc.setAttribute('aria-expanded', state.params.poiMin ? 'false' : 'true');
+      qc.title = state.params.poiMin ? 'Expand the points list' : 'Minimise the points list';
+    }
     syncDockDivide();
-  }
-  function uncollapseDock() {
-    pathsPanel.classList.remove('collapsed');
-    $('pp-collapse').setAttribute('aria-expanded', 'true');
-    $('pp-collapse').title = 'Collapse this panel';
   }
 
   $('pp-collapse').addEventListener('click', () => {
@@ -4591,40 +4752,26 @@
       pathsPanel.classList.toggle('collapsed', !goingFull);
       $('pp-collapse').setAttribute('aria-expanded', goingFull ? 'true' : 'false');
       $('pp-collapse').title = goingFull ? 'Shrink this panel' : 'Expand this panel';
-    } else if (pathsPanel.classList.contains('collapsed')) {
-      // any tab click on a collapsed dock opens it on that tab
-      uncollapseDock();
-      if (state.params.dockView === 'poi') setDockView('paths');
-    } else if (state.params.dockView === 'poi') {
-      setDockView('paths');       // inactive tab: switch, don't collapse
     } else {
-      const collapsed = pathsPanel.classList.toggle('collapsed');
-      $('pp-collapse').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-      $('pp-collapse').title = collapsed ? 'Expand this panel' : 'Collapse this panel';
+      state.params.pathsMin = !state.params.pathsMin;
+      // both minimised leaves two header strips and a lot of nothing; opening
+      // one always gives the other the room it needs
+      if (state.params.pathsMin && state.params.poiMin) state.params.poiMin = false;
+      syncDock();
+      schedulePersist();
     }
     syncDockWidth();
   });
-  $('dock-poi-tab').addEventListener('click', () => {
-    if (mobileQuery.matches) return;   // hidden there anyway
-    if (pathsPanel.classList.contains('collapsed')) {
-      uncollapseDock();
-      setDockView('poi');
-    } else if (state.params.dockView !== 'poi') {
-      setDockView('poi');
-    } else {
-      // active tab collapses the dock, mirroring the Paths tab
-      pathsPanel.classList.add('collapsed');
-      $('pp-collapse').setAttribute('aria-expanded', 'false');
-      $('pp-collapse').title = 'Expand this panel';
-    }
-    syncDockWidth();
-  });
-  $('dock-split-btn').addEventListener('click', () => {
-    if (mobileQuery.matches) return;
-    if (pathsPanel.classList.contains('collapsed')) uncollapseDock();
-    setDockView(state.params.dockView === 'split' ? 'paths' : 'split');
-    syncDockWidth();
-  });
+  if ($('poi-collapse')) {
+    $('poi-collapse').addEventListener('click', () => {
+      if (mobileQuery.matches) return;   // POI is its own sheet on a phone
+      state.params.poiMin = !state.params.poiMin;
+      if (state.params.poiMin && state.params.pathsMin) state.params.pathsMin = false;
+      syncDock();
+      schedulePersist();
+      syncDockWidth();
+    });
+  }
 
   // the split seam: drag to rebalance; the fraction persists with the params
   $('poi-divider').addEventListener('pointerdown', (ev) => {
@@ -4652,7 +4799,7 @@
     ev.preventDefault();
   });
   window.addEventListener('resize', syncDockDivide);
-  setDockView(state.params.dockView);   // restore the saved arrangement
+  syncDock();          // restore which panes were minimised
 
   if (mobileQuery.matches) {
     pathsPanel.classList.add('collapsed');
@@ -4714,7 +4861,6 @@
    * length turns these into its own numbers.
    */
   function syncGasBar() {
-    $('pp-sac-field').classList.toggle('pp-field-hidden', !state.params.showGas);
     $('pp-sac-input').value = +sacU().fromBase(state.params.sac).toFixed(sacU().dp);
     $('pp-sac-unit').textContent = sacU().label;
 
@@ -4728,8 +4874,6 @@
       ? 'Target time for each path (speed is derived from this and each path\'s length)'
       : 'Swim speed, assumed constant (time is derived from this and each path\'s length)';
     $('pp-mode-unit').textContent = isTime ? 'min' : speedU().label;
-
-    $('pp-gas-btn').setAttribute('aria-pressed', state.params.showGas ? 'true' : 'false');
 
     // kick distance is stored in metres; the input shows it in the chosen unit
     $('pp-decl-input').value = state.params.declination;
@@ -4761,14 +4905,6 @@
       if (state.params.timeMode === 'time') state.params.time = v;
       else state.params.speed = speedU().toBase(v);
     }
-    syncGasBar();
-    renderPaths();
-  });
-  $('pp-gas-btn').addEventListener('click', () => {
-    state.params.showGas = !state.params.showGas;
-    // enabling the planner opens the options it plans with; disabling leaves
-    // the disclosure wherever the user had it
-    if (state.params.showGas && $('pp-opts').hidden) $('pp-opts-toggle').click();
     syncGasBar();
     renderPaths();
   });
@@ -5252,7 +5388,7 @@
         syncSwatchGroup('cloud-swatches', state.params.cloudPalette);
         updateTurbRamp();
         syncModelControls();   // the Models tabs' cloud/turbidity tuning sliders
-        setDockView(state.params.dockView);   // imported dock arrangement
+        syncDock();          // imported pane arrangement
         // an imported box describes different water; drop the numbers measured
         // over the old one rather than showing them against the new outline
         if (!clampSample(state.params.cloudSample)) {

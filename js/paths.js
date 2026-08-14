@@ -913,7 +913,7 @@ const Paths = (function () {
       line: null, markers: [], profile: null, expanded: true,
       mirrored: false, preMirrorNodes: null,
       plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
-      showNodes: false, showLegs: false, legGas: {},
+      showNodes: true, showLegs: false, showGas: true, legGas: {},
       ceilings: (p.ceilings || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet })),
       floors: (p.floors || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet })),
       offsets: (p.offsets || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet }))
@@ -1002,7 +1002,7 @@ const Paths = (function () {
       color: COLORS[(id - 1) % COLORS.length],
       line: null, markers: [], profile: null, expanded: true,
       mirrored: false, preMirrorNodes: null, plotHeight: 62, plotHeightManual: false,
-      showNodes: false, showLegs: false, legGas: {}
+      showNodes: true, showLegs: false, showGas: true, legGas: {}
     };
     collapseOthers(p.id);
     paths.push(p);
@@ -1162,6 +1162,11 @@ const Paths = (function () {
    * since that already redraws the SVG directly for a smooth drag and only
    * needs to persist the final value here.
    */
+  function toggleShowGas(id) {
+    const p = paths.find((x) => x.id === id);
+    if (p) { p.showGas = !p.showGas; onChange(); }
+  }
+
   function toggleShowNodes(id) {
     const p = paths.find((x) => x.id === id);
     if (p) { p.showNodes = !p.showNodes; onChange(); }
@@ -1218,6 +1223,7 @@ const Paths = (function () {
         ? p.preMirrorNodes.map((n) => ({ lat: n.lat, lng: n.lng })) : null,
       plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
       expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
+      showGas: p.showGas,
       legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
       offsets: p.offsets || [],
       nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
@@ -1257,7 +1263,9 @@ const Paths = (function () {
         preMirrorNodes: Array.isArray(s.preMirrorNodes)
           ? s.preMirrorNodes.filter(valid).map((n) => L.latLng(n.lat, n.lng)) : null,
         plotHeight: s.plotHeight > 0 ? s.plotHeight : 62,
-        showNodes: !!s.showNodes,
+        // both default ON for paths written before they existed
+        showNodes: s.showNodes !== false,
+        showGas: s.showGas !== false,
         showLegs: !!s.showLegs,
         ceilings: Array.isArray(s.ceilings)
           ? s.ceilings.filter((c) => c && c.end > c.start && c.feet > 0) : [],
@@ -1323,7 +1331,7 @@ const Paths = (function () {
         color: COLORS[(id - 1) % COLORS.length],
         line: null, markers: [], profile: null, expanded: true,
         mirrored: false, preMirrorNodes: null, plotHeight: 62, plotHeightManual: false,
-      showNodes: false, showLegs: false, legGas: {}
+      showNodes: true, showLegs: false, showGas: true, legGas: {}
       };
       paths.push(p);
       selectedId = p.id;
@@ -1417,6 +1425,7 @@ const Paths = (function () {
     toggleExpand: toggleExpand,
     setMirrored: setMirrored,
     toggleShowNodes: toggleShowNodes,
+    toggleShowGas: toggleShowGas,
     setPlotHeight: setPlotHeight,
     legsOf: legsOf,
     nodeDistances: nodeDistances,

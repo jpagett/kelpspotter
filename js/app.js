@@ -3989,11 +3989,18 @@
     bg.setAttribute('width', w); bg.setAttribute('height', h);
     bg.setAttribute('fill', '#0a2830');
     clone.insertBefore(bg, clone.firstChild);
-    // axis text uses a CSS class on-page; inline what the raster needs
+    /*
+     * Axis text is styled by a CSS class on the page, which does not survive
+     * serialisation — so inline what the raster needs. The size is read off a
+     * live label rather than hardcoded, or an exported plot would ignore the
+     * label-size setting and come out at the default 8px.
+     */
+    const live = svg.querySelector('.pp-axis');
+    const liveSize = live ? getComputedStyle(live).fontSize.replace('px', '') : '8';
     clone.querySelectorAll('.pp-axis').forEach((t) => {
       t.setAttribute('fill', '#4d868b');
       t.setAttribute('font-family', 'monospace');
-      t.setAttribute('font-size', '8');
+      t.setAttribute('font-size', liveSize);
     });
     const blob = new Blob([new XMLSerializer().serializeToString(clone)],
                           { type: 'image/svg+xml;charset=utf-8' });
@@ -4176,6 +4183,14 @@
       dup.title = 'Duplicate — plan a variant without touching this one';
       dup.addEventListener('click', () => Paths.duplicate(p.id));
 
+      // the whole path — nodes, ceilings, floors and offsets — as one code
+      const share = document.createElement('button');
+      share.className = 'pp-del'; share.type = 'button'; share.textContent = '⇪';
+      share.title = 'Copy a share code for this path — bounds included';
+      share.addEventListener('click', () => {
+        Session.copyText(Session.shareCode('path', p), p.name);
+      });
+
       const del = document.createElement('button');
       del.className = 'pp-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete path';
       del.addEventListener('click', () => { Paths.remove(p.id); say(p.name + ' deleted'); });
@@ -4212,7 +4227,7 @@
       const actionsRow = document.createElement('div');
       actionsRow.className = 'pp-menu-actions';
       actionsRow.appendChild(color); actionsRow.appendChild(rev);
-      actionsRow.appendChild(dup); actionsRow.appendChild(del);
+      actionsRow.appendChild(dup); actionsRow.appendChild(share); actionsRow.appendChild(del);
       menu.appendChild(unitsRow); menu.appendChild(actionsRow);
       cog.addEventListener('click', () => {
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
@@ -5283,6 +5298,73 @@
       POI.restore(savedPois);
       say(savedPois.length + ' saved point' + (savedPois.length === 1 ? '' : 's') + ' restored');
     }
+
+    /*
+     * ---- text scale ----
+     * Every font-size in the stylesheet is calc(Npx * var(--fs-ui)), so these
+     * two numbers move all of them; --fs-plot multiplies the depth-profile
+     * labels a second time. Applied to the root rather than re-rendering
+     * anything — the profile SVG picks it up because its labels are styled by
+     * a class, not by an attribute.
+     */
+    function applyTextScale() {
+      const clampScale = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 1));
+      state.params.fsUi = clampScale(state.params.fsUi, 0.8, 1.6);
+      state.params.fsPlot = clampScale(state.params.fsPlot, 0.8, 2.5);
+      const root = document.documentElement;
+      root.style.setProperty('--fs-ui', state.params.fsUi);
+      root.style.setProperty('--fs-plot', state.params.fsPlot);
+      $('fs-ui').value = state.params.fsUi;
+      $('fs-plot').value = state.params.fsPlot;
+      $('fs-ui-val').textContent = Math.round(state.params.fsUi * 100) + '%';
+      $('fs-plot-val').textContent = Math.round(state.params.fsPlot * 100) + '%';
+    }
+    $('fs-ui').addEventListener('input', (ev) => {
+      state.params.fsUi = Number(ev.target.value);
+      applyTextScale();
+      schedulePersist();
+    });
+    $('fs-plot').addEventListener('input', (ev) => {
+      state.params.fsPlot = Number(ev.target.value);
+      applyTextScale();
+      // the plot's own layout is measured in JS, so it has to be redrawn for
+      // bigger labels to get the room they now need
+      renderPaths();
+      schedulePersist();
+    });
+    applyTextScale();
+
+    /*
+     * ---- share codes ----
+     * A pasted code is decoded and then handed to exactly the same review
+     * screen a session file gets. Nothing arrives on the map until the reader
+     * has seen what it is and said yes.
+     */
+    const shareModal = $('share-modal');
+    const shareErr = $('share-err');
+    function openShare() {
+      shareErr.hidden = true;
+      $('share-input').value = '';
+      shareModal.hidden = false;
+      $('share-input').focus();
+    }
+    const closeShare = () => { shareModal.hidden = true; };
+    $('share-paste').addEventListener('click', openShare);
+    $('share-close').addEventListener('click', closeShare);
+    shareModal.addEventListener('click', (ev) => { if (ev.target === shareModal) closeShare(); });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !shareModal.hidden) closeShare();
+    });
+    $('share-go').addEventListener('click', () => {
+      try {
+        const data = Session.readShareCode($('share-input').value);
+        closeShare();
+        SessionUI.open(Session.diff(data), 'shared code');
+      } catch (err) {
+        shareErr.textContent = 'Could not read that — ' + err.message + '.';
+        shareErr.hidden = false;
+      }
+    });
 
     $('session-export').addEventListener('click', () => Session.exportFile());
     $('session-import').addEventListener('click', () => $('session-file').click());

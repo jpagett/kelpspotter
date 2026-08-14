@@ -651,6 +651,22 @@ const POI = (function () {
       d.title = 'Charted depth under this point (NOAA DEM)';
       foot.appendChild(d);
     }
+    /*
+     * A code someone else can paste. Built by Session so a shared point and a
+     * shared path are the same kind of thing, and so it lands on the same
+     * review screen a session file does.
+     */
+    const share = document.createElement('button');
+    share.type = 'button';
+    share.className = 'poi-zoom poi-share';
+    share.textContent = 'Copy code';
+    share.title = 'Copy a share code for this point';
+    share.addEventListener('click', () => {
+      if (!window.Session || !Session.shareCode) { toast('Sharing is unavailable.', true); return; }
+      Session.copyText(Session.shareCode('poi', rec), rec.name);
+    });
+    foot.appendChild(share);
+
     const zoom = document.createElement('button');
     zoom.type = 'button';
     zoom.className = 'poi-zoom';

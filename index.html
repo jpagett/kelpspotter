@@ -44,6 +44,25 @@
         <button id="settings-toggle" class="btn ghost" aria-haspopup="true" aria-expanded="false"
                 title="Settings">⚙</button>
         <div id="settings-list" class="hdr-menu-list" hidden>
+          <!-- Text size. Graph labels get their own control because that is the
+               text people actually need bigger — small mono digits read at
+               arm's length on a boat — without inflating every panel to match. -->
+          <div class="menu-slider">
+            <div class="menu-slider-row">
+              <span class="label">Interface text</span><span id="fs-ui-val" class="value">100%</span>
+            </div>
+            <input id="fs-ui" type="range" min="0.8" max="1.6" step="0.05" value="1"
+                   aria-label="Interface text size">
+          </div>
+          <div class="menu-slider">
+            <div class="menu-slider-row">
+              <span class="label">Graph labels</span><span id="fs-plot-val" class="value">100%</span>
+            </div>
+            <input id="fs-plot" type="range" min="0.8" max="2.5" step="0.05" value="1"
+                   aria-label="Depth profile label size">
+          </div>
+          <button id="share-paste" class="menu-action" type="button"
+                  title="Add a point or path someone shared with you">Paste a shared point / path…</button>
           <button id="poi-import" class="menu-action" type="button"
                   title="Add markers from a KML, KMZ or GPX file">Import KML / KMZ / GPX…</button>
           <button id="session-export" class="menu-action" type="button"
@@ -426,6 +445,23 @@
   <!-- split-mode divider between the docked Paths and POI panes. A body child
        (not inside .poi-panel) on purpose: the panes carry backdrop-filter,
        which would trap a fixed-position child inside them. -->
+    <!-- Paste box for a shared point or path. What lands here goes through the
+       same review screen a session file does — nothing is added silently. -->
+  <div id="share-modal" class="share-modal" role="dialog" aria-label="Paste a shared point or path" hidden>
+    <div class="share-box">
+      <div class="share-head">
+        <span class="eyebrow">Paste a shared point or path</span>
+        <button id="share-close" class="sm-x" type="button" aria-label="Close">×</button>
+      </div>
+      <textarea id="share-input" class="share-input" rows="4" spellcheck="false"
+                placeholder="Paste a code beginning with kelp1:…"></textarea>
+      <div id="share-err" class="share-err" hidden></div>
+      <div class="share-foot">
+        <button id="share-go" class="btn" type="button">Review and add</button>
+      </div>
+    </div>
+  </div>
+
   <div id="poi-divider" class="poi-divider" aria-hidden="true"></div>
 
   <div class="activity" aria-live="polite">

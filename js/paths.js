@@ -1342,6 +1342,12 @@ const Paths = (function () {
   const pathUidOf = (p) => (window.Session ? Session.pathUid(p)
                                           : p.name + '|' + p.nodes.length);
 
+  // Bounds off the wire, filtered the same way restore() filters them: a span
+  // has to cover ground and a depth has to be a depth.
+  const cleanBounds = (list) => (Array.isArray(list) ? list : [])
+    .filter((b) => b && b.end > b.start && b.feet > 0)
+    .map((b) => ({ start: b.start, end: b.end, feet: b.feet }));
+
   function upsertPath(rec) {
     const nodes = (rec.nodes || []).map((n) => L.latLng(n.lat, n.lng));
     if (nodes.length < 2) return;
@@ -1349,9 +1355,9 @@ const Paths = (function () {
     if (existing) {
       existing.name = rec.name || existing.name;
       existing.color = rec.color || existing.color;
-      existing.ceilings = Array.isArray(rec.ceilings) ? rec.ceilings : existing.ceilings;
-      existing.floors = Array.isArray(rec.floors) ? rec.floors : existing.floors;
-      existing.offsets = Array.isArray(rec.offsets) ? rec.offsets : existing.offsets;
+      existing.ceilings = Array.isArray(rec.ceilings) ? cleanBounds(rec.ceilings) : existing.ceilings;
+      existing.floors = Array.isArray(rec.floors) ? cleanBounds(rec.floors) : existing.floors;
+      existing.offsets = Array.isArray(rec.offsets) ? cleanBounds(rec.offsets) : existing.offsets;
       existing.nodes = nodes;
       existing.profile = null;
       redraw(existing);
@@ -1359,9 +1365,19 @@ const Paths = (function () {
     } else {
       const id = nextId++;
       collapseOthers(id);
+      /*
+       * The bounds come across too. They did not before: a path arriving as a
+       * NEW record — every path in an imported session file, and every shared
+       * one — was rebuilt from its name, colour and nodes alone, so its
+       * ceilings and floors were silently dropped. A dive plan that arrives
+       * without its depth limits is worse than one that fails to arrive.
+       */
       const p = { id: id, name: rec.name || ('Path ' + id), nodes: nodes,
                   color: rec.color || COLORS[(id - 1) % COLORS.length],
-                  line: null, markers: [], profile: null, expanded: true };
+                  line: null, markers: [], profile: null, expanded: true,
+                  ceilings: cleanBounds(rec.ceilings),
+                  floors: cleanBounds(rec.floors),
+                  offsets: cleanBounds(rec.offsets) };
       paths.push(p);
       selectedId = p.id;
       paths.forEach(redraw);

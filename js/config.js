@@ -278,6 +278,15 @@ window.KELP_CONFIG = {
     overlayOrder: ['truecolor', 'depth', 'turbidity', 'kelp', 'clouds'],
     mode: 'composite',      // 'single' scene, or 'composite' (median composite over the range)
     /*
+     * Text scale, as multipliers on the drawn sizes — 1 is exactly what the
+     * design was drawn at. fsPlot is a second multiplier on the depth-profile
+     * labels alone: small mono digits read at arm's length on a boat are the
+     * text that actually needs to grow, and inflating every panel to match
+     * would cost more room than it is worth.
+     */
+    fsUi: 1,
+    fsPlot: 1,
+    /*
      * Where cloud cover is measured when picking dates.
      *
      * Sentinel-2's own CLOUDY_PIXEL_PERCENTAGE covers a whole ~110km granule,

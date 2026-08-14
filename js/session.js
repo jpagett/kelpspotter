@@ -31,6 +31,7 @@ const Session = (function () {
     'cloudVisMin', 'cloudSwirMin', 'cloudWhiteness',
     // where cloud is measured when picking dates, and whether to use it
     'cloudSample', 'useAoiCloud', 'minCoverage',
+    'fsUi', 'fsPlot',
     'turbMode', 'turbClarityMin', 'turbClarityMax',
     'turbGlint', 'turbNirFloor', 'turbGlintGain'
   ];
@@ -101,6 +102,105 @@ const Session = (function () {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     say('Session exported — ' + data.pois.length + ' POIs, ' + data.paths.length + ' paths', 'ok');
+  }
+
+  /* ------------------------------------------------------------ share codes */
+
+  /*
+   * One point or one path as a paste-able code.
+   *
+   * The payload is just a session file with a single record in it, so a code
+   * arrives at exactly the same review screen a whole session file does —
+   * matched by the same uid, diffed the same way, added only when the reader
+   * says so. Sharing a dive site should not be a second, quieter import path
+   * with its own rules about what silently overwrites what.
+   *
+   * base64 of the JSON, url-safe and unpadded so it survives a chat message,
+   * a URL and a QR code without anything helpfully re-wrapping it. Not
+   * compressed and not encrypted: it is a handful of coordinates, and a reader
+   * being able to eyeball what they were sent is a feature.
+   */
+  const SHARE_PREFIX = 'kelp1:';
+
+  function toB64Url(str) {
+    // btoa is byte-oriented; go through UTF-8 so accented names survive
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function fromB64Url(code) {
+    let b = code.replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    const bin = atob(b);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  /*
+   * Copy to the clipboard, with a fallback that still works.
+   *
+   * navigator.clipboard needs a secure context and a live user gesture, and
+   * quietly rejects without either — over plain http on a phone, which is a
+   * normal way to run this on a boat, it simply is not there. The fallback
+   * selects the text in a throwaway field so the code can at least be copied
+   * by hand rather than lost.
+   */
+  async function copyText(text, what) {
+    try {
+      await navigator.clipboard.writeText(text);
+      say(what + ' copied — paste it wherever you like', 'ok');
+      return true;
+    } catch (err) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed; left:8px; bottom:8px; width:min(90vw,520px); z-index:2000;';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      if (ok) {
+        ta.remove();
+        say(what + ' copied — paste it wherever you like', 'ok');
+        return true;
+      }
+      // leave it on screen, selected, so it can be copied manually
+      toast('Could not reach the clipboard — the code is selected, copy it by hand.', true);
+      ta.addEventListener('blur', () => ta.remove());
+      return false;
+    }
+  }
+
+  function shareCode(kind, rec) {
+    const payload = {
+      kelpspotter: SCHEMA,
+      exported: new Date().toISOString(),
+      pois: kind === 'poi' ? [poiRecord(rec)] : [],
+      paths: kind === 'path' ? [pathRecord(rec)] : [],
+      view: {}, user: {}
+    };
+    return SHARE_PREFIX + toB64Url(JSON.stringify(payload));
+  }
+
+  /*
+   * Read a pasted code. Tolerant about what surrounds it — people paste with
+   * quotes, stray newlines and a chat client's line wrapping — but strict
+   * about what it decodes to, since anything reaching parse() is treated as a
+   * session file from there on.
+   */
+  function readShareCode(text) {
+    const raw = String(text || '').trim().replace(/\s+/g, '');
+    const i = raw.toLowerCase().indexOf(SHARE_PREFIX);
+    if (i < 0) throw new Error('that does not look like a share code');
+    const body = raw.slice(i + SHARE_PREFIX.length).replace(/[^A-Za-z0-9\-_]/g, '');
+    if (!body) throw new Error('the code is empty');
+    let json;
+    try { json = fromB64Url(body); } catch (e) { throw new Error('the code is damaged'); }
+    const data = parse(json);
+    if (!data.pois.length && !data.paths.length) throw new Error('the code carries nothing');
+    return data;
   }
 
   function parse(text) {
@@ -287,6 +387,9 @@ const Session = (function () {
     apply: apply,
     poiUid: poiUid,
     pathUid: pathUid,
+    shareCode: shareCode,
+    copyText: copyText,
+    readShareCode: readShareCode,
     savePois: savePois,
     loadPois: loadPois,
     clearPois: clearPois

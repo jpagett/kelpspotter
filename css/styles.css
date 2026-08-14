@@ -1702,8 +1702,8 @@ input[type=range]::-moz-range-thumb {
 .pp-cyl-add:hover { border-color: var(--kelp); color: var(--kelp); }
 .pp-cyl-list { display: flex; flex-direction: column; gap: 8px; }
 .pp-cyl {
-  border: 1px solid var(--line); border-radius: 3px; padding: 6px 7px;
-  display: flex; flex-direction: column; gap: 5px;
+  border: 1px solid var(--line); border-radius: 3px; padding: 5px 6px;
+  display: flex; flex-direction: column; gap: 3px;
   background: rgba(111,183,189,0.05);
 }
 .pp-cyl-head { display: flex; align-items: center; gap: 6px; }
@@ -1718,7 +1718,23 @@ input[type=range]::-moz-range-thumb {
   border: 1px solid var(--ctl-line); border-radius: 2px; font-size: calc(11px * var(--fs-ui, 1)); line-height: 1;
 }
 .pp-cyl-del:hover { color: #e2725b; border-color: #e2725b; }
-.pp-cyl-reserve { display: flex; align-items: center; gap: 6px; }
+/* one line per unit: total on the left, its reserve on the right */
+.pp-cyl-line { display: flex; align-items: flex-end; gap: 6px; }
+.pp-cyl-line > .pp-field { flex: 1 1 0; min-width: 0; }
+.pp-cyl-res { display: flex; align-items: flex-end; gap: 4px; flex: 1 1 0; min-width: 0; }
+/* an ignored reserve stays legible but visibly out of play */
+.pp-cyl-res.off { opacity: 0.42; }
+.pp-cyl-res .pp-field { flex: 1 1 0; min-width: 0; }
+.pp-cyl-res-btn {
+  flex: none; height: 20px; padding: 0 5px; cursor: pointer;
+  background: none; color: var(--ctl-fg);
+  border: 1px solid var(--ctl-line); border-radius: 2px;
+  font-family: var(--mono); font-size: calc(9px * var(--fs-ui, 1)); line-height: 1;
+}
+.pp-cyl-res-btn:hover { color: var(--kelp); border-color: var(--kelp); }
+.pp-cyl-res-btn[aria-pressed="true"] {
+  background: var(--current); color: var(--kelp); border-color: var(--kelp);
+}
 .pp-cyl-check { font-size: calc(10px * var(--fs-ui, 1)); color: var(--tide-dim); flex: 1; min-width: 0; }
 .pp-cyl-summary { color: var(--tide); }
 

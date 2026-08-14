@@ -4320,18 +4320,16 @@
       meta.textContent = p.nodes.length + 'n · ' + fmtDist(Paths.lengthOf(p));
       /*
        * Depth stats ride in the meta once a profile exists — planned depth,
-       * so ceilings and floors are reflected. The row shows only the max;
-       * avg and time-below-60ft live in the tooltip to keep the line short.
+       * so ceilings, floors and offsets are reflected. The row shows only the
+       * max; the average lives in the tooltip to keep the line short.
        */
       const prof = (p.profile || []).filter((sm) => sm.feet !== null);
       if (prof.length > 1) {
         const planned = prof.map((sm) => Paths.plannedFtAt(p, sm.distance, -sm.feet));
         const mx = Math.max.apply(null, planned);
         const avg = planned.reduce((a, b) => a + b, 0) / planned.length;
-        const pct60 = Math.round(100 * planned.filter((d) => d > 60).length / planned.length);
         meta.textContent += ' · ⌄' + fmtDepth(mx);
-        meta.title = 'planned max ' + fmtDepth(mx) + ' · avg ' + fmtDepth(avg) +
-                     ' · ' + pct60 + '% deeper than ' + fmtDepth(60);
+        meta.title = 'planned max ' + fmtDepth(mx) + ' · avg ' + fmtDepth(avg);
       }
 
       const caret = document.createElement('button');
@@ -5206,27 +5204,53 @@
       }
       card.appendChild(head);
 
-      // capacity and fill read as one fact about the cylinder, so they pair up
-      const spec = document.createElement('div');
-      spec.className = 'pp-cyl-spec';
-      spec.appendChild(numField('cuft', cyl.totalCuft, 1, 'Rated volume of the cylinder',
-        (v) => { cyl.totalCuft = v; }));
-      spec.appendChild(numField(pressU().label, cyl.startPsi, 0, 'Pressure it is filled to',
-        (v) => { cyl.startPsi = v; }));
-      card.appendChild(spec);
+      /*
+       * One line per unit: what the cylinder holds, and what is held back in
+       * that same unit, side by side. They used to be four stacked rows — two
+       * totals, then two reserve checkboxes far below them — so reading "how
+       * much psi do I actually have" meant pairing numbers across the card by
+       * eye. Reserve reads as a qualifier on the number beside it now.
+       *
+       * The reserve word is the switch. A checkbox for something that already
+       * greys out when off is one control too many, and the grey is the state
+       * you read at a glance anyway. Reserve by volume, by pressure, or both —
+       * the larger wins; see reserveCuft.
+       */
+      const specLine = (unitLabel, totalVal, dp, totalTitle, onTotal,
+                        resOn, resVal, resTitle, onToggle, onRes) => {
+        const line = document.createElement('div');
+        line.className = 'pp-cyl-line';
+        line.appendChild(numField(unitLabel, totalVal, dp, totalTitle, onTotal));
 
-      // reserve: by volume, by pressure, or both — the larger wins (see reserveCuft)
-      const resVol = document.createElement('div');
-      resVol.className = 'pp-cyl-reserve';
-      resVol.appendChild(checkField('Reserve cuft', cyl.useReserveCuft, (on) => { cyl.useReserveCuft = on; }));
-      resVol.appendChild(numField('', cyl.reserveCuft, 1, 'Volume held back', (v) => { cyl.reserveCuft = v; }));
-      card.appendChild(resVol);
+        const res = document.createElement('div');
+        res.className = 'pp-cyl-res' + (resOn ? '' : ' off');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pp-cyl-res-btn';
+        btn.textContent = 'reserve';
+        btn.setAttribute('aria-pressed', resOn ? 'true' : 'false');
+        btn.title = resOn ? 'Counted against usable gas — click to ignore it'
+                          : 'Ignored — click to hold this back';
+        btn.addEventListener('click', () => {
+          onToggle(!resOn); renderCylinders(); renderPaths();
+        });
+        const val = numField('', resVal, dp, resTitle, onRes);
+        // an ignored reserve keeps its number, so turning it back on does not
+        // cost the diver the figure they typed
+        val.querySelector('input').disabled = !resOn;
+        res.appendChild(btn); res.appendChild(val);
+        line.appendChild(res);
+        return line;
+      };
 
-      const resPsi = document.createElement('div');
-      resPsi.className = 'pp-cyl-reserve';
-      resPsi.appendChild(checkField('Reserve ' + pressU().label, cyl.useReservePsi, (on) => { cyl.useReservePsi = on; }));
-      resPsi.appendChild(numField('', cyl.reservePsi, 0, 'Gauge pressure held back', (v) => { cyl.reservePsi = v; }));
-      card.appendChild(resPsi);
+      card.appendChild(specLine('cuft', cyl.totalCuft, 1, 'Rated volume of the cylinder',
+        (v) => { cyl.totalCuft = v; },
+        cyl.useReserveCuft, cyl.reserveCuft, 'Volume held back',
+        (on) => { cyl.useReserveCuft = on; }, (v) => { cyl.reserveCuft = v; }));
+      card.appendChild(specLine(pressU().label, cyl.startPsi, 0, 'Pressure it is filled to',
+        (v) => { cyl.startPsi = v; },
+        cyl.useReservePsi, cyl.reservePsi, 'Gauge pressure held back',
+        (on) => { cyl.useReservePsi = on; }, (v) => { cyl.reservePsi = v; }));
 
       const summary = document.createElement('div');
       summary.className = 'pp-cyl-summary';

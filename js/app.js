@@ -1942,6 +1942,30 @@
    * Delete is now a single keypress, so it gets a way back. One toast at a
    * time (a new delete replaces it); the stash lives in Paths.undoRemove.
    */
+  /*
+   * Ctrl+Z / Cmd+Z, for people who reach for it before they reach for the
+   * toast — the toast only lives six seconds, and the stash outlives it.
+   * Skipped while typing, where the browser's own text undo is what is wanted,
+   * and while a session dialog is up, where the keystroke belongs to it.
+   */
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'z' && ev.key !== 'Z') return;
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+              t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (!$('session-modal').hidden || !$('share-modal').hidden) return;
+    ev.preventDefault();
+    if (Paths.undoRemove()) {
+      say('Undone', 'ok');
+      persistNow();
+      const el = $('undo-toast');
+      if (el) el.classList.remove('show');
+    } else {
+      say('Nothing to undo');
+    }
+  });
+
   let undoTimer = null;
   function showUndoToast(name) {
     let el = $('undo-toast');
@@ -2988,7 +3012,7 @@
     return null;
   }
 
-  function legColumns() {
+  function legColumns(p) {
     const u = depthU();
     const cols = [
       { key: 'leg', head: 'Leg', get: (r) => String(r.leg) },
@@ -3043,7 +3067,7 @@
    */
   function renderLegTable(p, host) {
     const rows = legData(p);
-    const cols = legColumns();
+    const cols = legColumns(p);
     host.textContent = '';
     if (!rows.length) {
       const t = document.createElement('div');
@@ -3194,7 +3218,7 @@
 
   function legCsv(p) {
     const rows = legData(p);
-    const cols = legColumns();
+    const cols = legColumns(p);
     const all = [cols.map((c) => c.head)].concat(rows.map((r) => cols.map((c) => c.get(r))));
     return all.map((r) => r.map((c) => {
       const s = String(c == null ? '' : c);

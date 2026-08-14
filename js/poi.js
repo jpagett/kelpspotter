@@ -222,9 +222,28 @@ const POI = (function () {
   }
 
   function addMarker(p) {
-    const m = L.marker([p.lat, p.lng], { icon: iconFor(p.symbol), pane: PANE, title: p.name });
+    /*
+     * Draggable, because a point dropped at the map centre or read off a
+     * screenshot is usually roughly right and wants nudging — and nudging it
+     * by typing coordinates means converting what your eye already knows into
+     * numbers. autoPan lets a drag continue past the edge of the view.
+     */
+    const m = L.marker([p.lat, p.lng], {
+      icon: iconFor(p.symbol), pane: PANE, title: p.name,
+      draggable: true, autoPan: true, autoPanSpeed: 12
+    });
     m.bindPopup('<b>' + escapeHtml(p.name) + '</b>' +
                 (p.desc ? '<br>' + escapeHtml(p.desc).slice(0, 300) : ''));
+    /*
+     * Only on drop, not on every frame: each move re-reads the charted depth
+     * and rewrites storage, and doing that per pointermove would hammer both
+     * for positions the user is still dragging through.
+     */
+    m.on('dragend', () => {
+      const ll = m.getLatLng();
+      // the marker is already where it was dropped, so the map must not follow
+      moveTo(p, ll.lat, ll.lng, false);
+    });
     m.addTo(map);
     return m;
   }
@@ -362,13 +381,19 @@ const POI = (function () {
     if (rec.marker.options) rec.marker.options.title = rec.name;
   }
 
-  function moveTo(rec, lat, lng) {
+  /*
+   * `follow` is for the caller that cannot see where the point went: typing a
+   * position into the panel can send it anywhere, so the map goes with it. A
+   * drag already put it where you were looking, and re-centring on drop would
+   * yank the view out from under the hand that just placed it.
+   */
+  function moveTo(rec, lat, lng, follow) {
     rec.lat = lat; rec.lng = lng;
     // the charted depth described where it used to be
     delete rec.depthFt;
     if (rec.marker) rec.marker.setLatLng([lat, lng]);
     refreshMarker(rec);
-    map.setView([lat, lng], Math.max(map.getZoom(), 14));
+    if (follow !== false) map.setView([lat, lng], Math.max(map.getZoom(), 14));
     say(rec.name + ' moved to ' + lat.toFixed(5) + ', ' + lng.toFixed(5));
     changed();
     scheduleAnnotate();          // re-read the charted depth at the new spot

@@ -72,7 +72,7 @@ const Session = (function () {
   }
   function pathRecord(p) {
     return { uid: pathUid(p), name: p.name, color: p.color,
-             ceilings: p.ceilings || [], floors: p.floors || [],
+             ceilings: p.ceilings || [], floors: p.floors || [], offsets: p.offsets || [],
              nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng })) };
   }
 

@@ -3484,9 +3484,29 @@
     };
     (p.floors || []).forEach((f) => tagBound(f, '≤'));     // max depth
     (p.ceilings || []).forEach((c) => tagBound(c, '≥'));   // min depth
+    /*
+     * Offsets tag differently because their number is a CLEARANCE, not a
+     * depth: tagBound would put "10" at the 10 ft gridline and read as a bound
+     * at that depth. Anchor it to the planned line instead, where the diver
+     * actually is, and mark it ↑ for "off the bottom".
+     */
+    (p.offsets || []).forEach((b) => {
+      let near = null;
+      pts.forEach((s) => {
+        if (!near || Math.abs(s.distance - b.start) < Math.abs(near.distance - b.start)) near = s;
+      });
+      if (!near) return;
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('class', 'pp-axis');
+      t.setAttribute('x', x(Math.max(0, b.start)) + 2);
+      t.setAttribute('y', Math.max(PADT + 6, y(effFt(near)) - 2));
+      t.textContent = '↑' + Math.round(depthU().from(b.feet));
+      svg.appendChild(t);
+    });
 
-    // dotted true bottom, drawn only over the capped stretches
-    if ((p.ceilings || []).length || (p.floors || []).length) {
+    // dotted true bottom, drawn only over the capped stretches — an offset
+    // lifts the diver off the seabed, so seeing the seabed is the whole point
+    if ((p.ceilings || []).length || (p.floors || []).length || (p.offsets || []).length) {
       let run = [];
       const flush = () => {
         if (run.length > 1) {
@@ -3794,6 +3814,7 @@
    */
   let pendingCeil = null;   // {pathId, dist, feet}
   let pendingFloor = null;  // same shape, for the mirror gesture
+  let pendingOffset = null; // {pathId, dist, feet} — feet is a CLEARANCE, not a depth
   let plotMenuEl = null;
 
   function closePlotMenu() {
@@ -3830,6 +3851,46 @@
 
     const pendingHere = pendingCeil && pendingCeil.pathId === p.id;
     const pendingFloorHere = pendingFloor && pendingFloor.pathId === p.id;
+    const pendingOffsetHere = pendingOffset && pendingOffset.pathId === p.id;
+
+    /*
+     * An offset is a CLEARANCE, so it is read as the gap between the seabed
+     * here and where you clicked — click 10 ft above the bottom and you get
+     * "fly 10 ft off it", the same "its value is where you clicked" idiom the
+     * floor and ceiling items use. Profile samples carry elevation, so the
+     * bottom in positive feet is -sample.feet.
+     */
+    const bottomHere = -at.sample.feet;
+    const clearHere = Math.max(0, Math.round(bottomHere - at.feet));
+    item(clearHere > 0
+          ? 'Set offset start — ' + fmtDepth(clearHere) + ' off the bottom'
+          : 'Set offset start (click above the seabed)',
+      () => {
+        pendingOffset = { pathId: p.id, dist: at.dist, feet: clearHere };
+        say('Offset started at ' + fmtDist(at.dist) + ', ' + fmtDepth(clearHere) +
+            ' off the bottom — right-click the plot again to set the end');
+      }, clearHere <= 0,
+      'Swim a fixed height above the seabed; the height is how far above the ' +
+      'bottom you clicked. Ceilings and floors still override it.');
+
+    item(pendingOffsetHere
+          ? 'Set offset end — ' + fmtDepth(pendingOffset.feet) + ' off the bottom'
+          : 'Set offset end (no start yet)',
+      () => {
+        if (!pendingOffsetHere) return;
+        if (Paths.addOffset(p.id, pendingOffset.dist, at.dist, pendingOffset.feet)) {
+          say('Offset: ' + fmtDepth(pendingOffset.feet) + ' off the bottom from ' +
+              fmtDist(Math.min(pendingOffset.dist, at.dist)) + ' to ' +
+              fmtDist(Math.max(pendingOffset.dist, at.dist)), 'ok');
+          pendingOffset = null;
+          renderPaths();
+          persistNow();
+        } else {
+          toast('Could not set that offset — zero-length span?', true);
+        }
+      }, !pendingOffsetHere,
+      'Close the offset here, using the clearance from the start click');
+
     item('Set floor start — max ' + fmtDepth(at.feet), () => {
       pendingFloor = { pathId: p.id, dist: at.dist, feet: at.feet };
       say('Floor started at ' + fmtDist(at.dist) + ', max ' + fmtDepth(at.feet) +
@@ -3888,6 +3949,14 @@
       item('Clear floors (' + p.floors.length + ')', () => {
         Paths.clearFloors(p.id);
         say('Floors cleared from ' + p.name);
+        renderPaths();
+        persistNow();
+      });
+    }
+    if ((p.offsets || []).length) {
+      item('Clear offsets (' + p.offsets.length + ')', () => {
+        Paths.clearOffsets(p.id);
+        say('Offsets cleared from ' + p.name);
         renderPaths();
         persistNow();
       });
@@ -5044,6 +5113,7 @@
         plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
         expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
         legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
+        offsets: p.offsets || [],
         nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
       }))));
       const sc = state.scenes[state.idx];

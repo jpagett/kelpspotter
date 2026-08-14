@@ -811,14 +811,54 @@ const Paths = (function () {
   }
 
   /*
-   * The planned depth at a point: the bottom, capped by any ceiling, then
-   * pushed back down by any floor — but never below the bottom, since rock is
-   * not negotiable. This single function is what the plot, the hover readout,
-   * the leg table and the gas model all agree on.
+   * Offsets: fly a fixed height ABOVE the seabed over a span — "stay 10 ft off
+   * the bottom along the reef". Unlike a ceiling or a floor this is not a
+   * depth, it is a clearance, so the planned line follows the bottom contour
+   * rather than flattening out. Where two overlap the LARGEST wins, which is
+   * the one that keeps the diver furthest off the rock — the same
+   * most-restrictive rule the other two bounds use.
+   */
+  function addOffset(id, a, b, feet) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !(feet > 0)) return false;
+    const start = Math.min(a, b), end = Math.max(a, b);
+    if (!(end > start)) return false;
+    if (!p.offsets) p.offsets = [];
+    p.offsets.push({ start: start, end: end, feet: Math.round(feet) });
+    onChange();
+    return true;
+  }
+  function clearOffsets(id) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || !p.offsets || !p.offsets.length) return;
+    p.offsets = [];
+    onChange();
+  }
+  function offsetFtAt(p, dist) {            // clearance above the bottom
+    if (!p || !p.offsets) return null;
+    let o = null;
+    p.offsets.forEach((s) => {
+      if (dist >= s.start && dist <= s.end && (o === null || s.feet > o)) o = s.feet;
+    });
+    return o;
+  }
+
+  /*
+   * The planned depth at a point: the bottom — lifted by any offset — capped
+   * by any floor, then pushed back down by any ceiling, but never below the
+   * bottom, since rock is not negotiable. This single function is what the
+   * plot, the hover readout, the leg table and the gas model all agree on.
+   *
+   * Order matters. The offset is a preference about where to swim; a floor and
+   * a ceiling are limits, so they are applied after it and can override it.
+   * Fly 10 ft off the bottom but a ceiling says stay below 20 ft, and the
+   * ceiling wins.
    */
   function plannedFtAt(p, dist, bottomFt) {
     let planned = bottomFt;
-    const f = floorFtAt(p, dist);                       // max depth caps first
+    const o = offsetFtAt(p, dist);                      // lift off the seabed
+    if (o !== null) planned = Math.max(0, bottomFt - o);
+    const f = floorFtAt(p, dist);                       // max depth caps next
     if (f !== null && f < planned) planned = f;
     const c = ceilingFtAt(p, dist);                     // min depth pushes back down
     if (c !== null && c > planned) planned = Math.min(bottomFt, c);
@@ -828,7 +868,8 @@ const Paths = (function () {
   /*
    * Reverse the direction of travel. Headings, leg order and the profile's
    * x-axis all flip, so this is for running the same line from the other end —
-   * ceilings and floors are remapped (start' = total - end) so they stay glued
+   * ceilings, floors and offsets are remapped (start' = total - end) so they
+   * stay glued
    * to the same stretch of seabed.
    */
   function reversePath(id) {
@@ -837,7 +878,7 @@ const Paths = (function () {
     const total = lengthOf(p);
     p.nodes.reverse();
     if (p.preMirrorNodes) p.preMirrorNodes.reverse();
-    ['ceilings', 'floors'].forEach((k) => {
+    ['ceilings', 'floors', 'offsets'].forEach((k) => {
       (p[k] || []).forEach((b) => {
         const s0 = b.start;
         b.start = Math.max(0, total - b.end);
@@ -866,7 +907,8 @@ const Paths = (function () {
       plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
       showNodes: false, showLegs: false, legGas: {},
       ceilings: (p.ceilings || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet })),
-      floors: (p.floors || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet }))
+      floors: (p.floors || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet })),
+      offsets: (p.offsets || []).map((b) => ({ start: b.start, end: b.end, feet: b.feet }))
     };
     collapseOthers(nid);
     paths.push(copy);
@@ -1169,6 +1211,7 @@ const Paths = (function () {
       plotHeight: p.plotHeight, plotHeightManual: p.plotHeightManual,
       expanded: p.expanded, showNodes: p.showNodes, showLegs: p.showLegs,
       legGas: p.legGas, ceilings: p.ceilings || [], floors: p.floors || [],
+      offsets: p.offsets || [],
       nodes: p.nodes.map((n) => ({ lat: n.lat, lng: n.lng }))
     } };
     if (Paths.onRemoved) { try { Paths.onRemoved(p.name); } catch (e) { /* ui only */ } }
@@ -1212,6 +1255,8 @@ const Paths = (function () {
           ? s.ceilings.filter((c) => c && c.end > c.start && c.feet > 0) : [],
         floors: Array.isArray(s.floors)
           ? s.floors.filter((c) => c && c.end > c.start && c.feet > 0) : [],
+        offsets: Array.isArray(s.offsets)
+          ? s.offsets.filter((c) => c && c.end > c.start && c.feet > 0) : [],
         plotHeightManual: !!s.plotHeightManual,
         legGas: (s.legGas && typeof s.legGas === 'object') ? s.legGas : {}
       });
@@ -1298,6 +1343,7 @@ const Paths = (function () {
       existing.color = rec.color || existing.color;
       existing.ceilings = Array.isArray(rec.ceilings) ? rec.ceilings : existing.ceilings;
       existing.floors = Array.isArray(rec.floors) ? rec.floors : existing.floors;
+      existing.offsets = Array.isArray(rec.offsets) ? rec.offsets : existing.offsets;
       existing.nodes = nodes;
       existing.profile = null;
       redraw(existing);
@@ -1328,6 +1374,9 @@ const Paths = (function () {
     addCeiling: addCeiling,
     clearCeilings: clearCeilings,
     ceilingFtAt: ceilingFtAt,
+    addOffset: addOffset,
+    clearOffsets: clearOffsets,
+    offsetFtAt: offsetFtAt,
     addFloor: addFloor,
     clearFloors: clearFloors,
     floorFtAt: floorFtAt,

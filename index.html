@@ -363,15 +363,15 @@
                   title="Collapse this panel">Paths</button>
         </div>
         <div class="pp-tools">
+          <!-- Path options sits on the title row rather than in a strip of its
+               own below it: one button does not justify a whole band of
+               chrome, and on a phone that band was pure height. -->
+          <button id="pp-opts-toggle" class="pp-opts-toggle" type="button" aria-expanded="false"
+                  title="Diver and cylinder settings"><span class="sect-caret">&#9656;</span> Options</button>
           <button id="pp-add" class="pp-tool" title="Draw a new path">+</button>
           <button id="pp-load" class="pp-tool" title="Load a path spreadsheet">⤓</button>
           <button id="pp-save" class="pp-tool" title="Export the selected path" disabled>💾</button>
         </div>
-      </div>
-      <!-- always-visible strip: the gas toggle plus the options disclosure -->
-      <div id="pp-global-tools" class="pp-global-tools">
-        <button id="pp-opts-toggle" class="pp-opts-toggle" type="button" aria-expanded="false"
-                title="Diver and cylinder settings"><span class="sect-caret">&#9656;</span> Path options</button>
       </div>
       <div id="pp-opts" class="pp-opts" hidden>
         <div class="pp-opts-group">

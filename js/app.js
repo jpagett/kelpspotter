@@ -570,13 +570,23 @@
     el.className = 'depth-probe show';
   }
 
-  async function fetchDepth(latlng) {
+  /*
+   * `urgent` is for the depth crosshair: the one lookup the user is actually
+   * waiting on, watching a "…" until it lands. It supersedes the previous
+   * read (already true for any probe), cancels the debounced hover read that
+   * would otherwise fire behind it, and goes through DemSampler's priority
+   * gate so bulk sample batches stop queueing ahead of it.
+   */
+  async function fetchDepth(latlng, urgent) {
     const key = latlng.lat.toFixed(4) + ',' + latlng.lng.toFixed(4);
     if (probeCache.has(key)) return probeCache.get(key);
 
+    if (urgent && probeTimer) { clearTimeout(probeTimer); probeTimer = null; }
     if (probeAbort) probeAbort.abort();
     probeAbort = new AbortController();
-    const metres = await DemSampler.identify(latlng.lat, latlng.lng, probeAbort.signal);
+    const read = urgent && DemSampler.urgentIdentify
+      ? DemSampler.urgentIdentify : DemSampler.identify;
+    const metres = await read(latlng.lat, latlng.lng, probeAbort.signal);
     if (probeCache.size > 800) probeCache.clear();
     probeCache.set(key, metres);
     return metres;
@@ -2038,7 +2048,46 @@
    * or copy the coordinates. Node markers, grips and the plot own their own
    * context menus and stop propagation, so this only fires on the map itself.
    */
-  function openMapMenu(latlng, cx, cy) {
+  /*
+   * Put a popup menu on screen near (cx, cy) and, above all, ON SCREEN.
+   *
+   * The old placement clamped only the right and bottom edges, so a menu
+   * opened near the left or top could sit at a negative offset with its first
+   * items off the screen. On touch it was worse for a reason clamping cannot
+   * fix: the menu opened centred on the finger, so the hand that summoned it
+   * was covering it. A finger is ~10mm of screen, so the menu is nudged clear
+   * of the touch point and flipped to the other side when that would push it
+   * off the edge — which is what a native context menu does.
+   */
+  function placeMenu(menu, cx, cy) {
+    const pad = 8;
+    const nudge = COARSE_POINTER ? 18 : 2;
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+
+    let left = cx + nudge;
+    if (left + mw > vw - pad) left = cx - nudge - mw;      // flip to the left
+    left = Math.max(pad, Math.min(left, vw - mw - pad));
+
+    let top = cy + nudge;
+    if (top + mh > vh - pad) top = cy - nudge - mh;        // flip above
+    top = Math.max(pad, Math.min(top, vh - mh - pad));
+
+    /*
+     * A menu taller than the screen cannot be flipped out of trouble; give it
+     * the full height and let it scroll rather than running off the bottom.
+     */
+    if (mh > vh - pad * 2) {
+      top = pad;
+      menu.style.maxHeight = (vh - pad * 2) + 'px';
+      menu.style.overflowY = 'auto';
+    }
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.top = Math.round(top) + 'px';
+  }
+
+  function openMapMenu(latlng, cx, cy, pathHit) {
     closePlotMenu();
     const menu = document.createElement('div');
     menu.className = 'plot-menu';
@@ -2052,6 +2101,38 @@
       b.addEventListener('click', () => { closePlotMenu(); fn(); });
       menu.appendChild(b);
     };
+    /*
+     * Pressed ON a path: that line's actions come first, because a press that
+     * landed on a drawn object is asking about the object, not the water under
+     * it. The open-water actions stay below — the press may have been a near
+     * miss, and hiding them would make the menu depend on pixel luck.
+     */
+    if (pathHit) {
+      head.textContent = pathHit.path.name + ' · ' + head.textContent;
+      item('Add node to path', () => {
+        Paths.insertNodeAt(pathHit.path.id, pathHit.at);
+      });
+      item('Open path', () => {
+        if (window.MobileShell && MobileShell.active) {
+          MobileShell.openSheet('paths');
+        } else if (state.params.pathsMin) {
+          state.params.pathsMin = false;
+          syncDock(); syncDockWidth(); schedulePersist();
+        }
+        Paths.select(pathHit.path.id);
+        Paths.setExpanded(pathHit.path.id, true);
+        // the list is rebuilt by that change, so scroll after it lands
+        setTimeout(() => {
+          const row = document.querySelector('.pp-item[data-path="' + pathHit.path.id + '"]');
+          if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+        }, 80);
+        say('Opened ' + pathHit.path.name);
+      });
+      const sep = document.createElement('div');
+      sep.className = 'plot-menu-sep';
+      menu.appendChild(sep);
+    }
+
     item('Add POI here', () => {
       const name = window.prompt('Name for this point:', 'Marked spot');
       if (name === null) return;
@@ -2072,11 +2153,14 @@
         .catch(() => toast(txt, false));   // clipboard blocked: show it instead
     });
     document.body.appendChild(menu);
-    const mw = menu.offsetWidth, mh = menu.offsetHeight;
-    menu.style.left = Math.min(cx, window.innerWidth - mw - 8) + 'px';
-    menu.style.top = Math.min(cy, window.innerHeight - mh - 8) + 'px';
+    placeMenu(menu, cx, cy);
     plotMenuEl = menu;
   }
+  // the line's own right-click, routed from paths.js
+  Paths.onPathMenu = (p, latlng, cx, cy) => {
+    if (Paths.drawing) return;
+    openMapMenu(latlng, cx, cy, { path: p, at: latlng });
+  };
   map.on('contextmenu', (ev) => {
     if (Paths.drawing) return;             // placing nodes; a menu would ambush
     L.DomEvent.preventDefault(ev.originalEvent);
@@ -2099,7 +2183,13 @@
       t = setTimeout(() => {
         t = null;
         const pt = map.mouseEventToLatLng({ clientX: sx, clientY: sy });
-        openMapMenu(pt, sx, sy);
+        /*
+         * A finger is wide, so "on the line" has to be judged generously —
+         * and the line's own contextmenu never fires here anyway, because
+         * this press is watched on the map container rather than the path.
+         */
+        const hit = Paths.pathNear ? Paths.pathNear(pt, COARSE_POINTER ? 26 : 14) : null;
+        openMapMenu(hit ? hit.at : pt, sx, sy, hit);
         if (navigator.vibrate) navigator.vibrate(12);
       }, 550);
     });
@@ -2167,7 +2257,7 @@
   async function tapCursorRead(m, latlng) {
     tapCursorLabel(m, '…');
     try {
-      const metres = await fetchDepth(latlng);
+      const metres = await fetchDepth(latlng, true);
       if (metres === null || metres === undefined) { tapCursorLabel(m, 'no data'); return; }
       const ft = Math.round(Math.abs(metres) * M_TO_FT);
       tapCursorLabel(m, ft.toLocaleString() + ' ft ' + (metres < 0 ? 'depth' : 'elev.'));
@@ -2178,10 +2268,30 @@
   function removeTapCursor() {
     if (tapCursor) { map.removeLayer(tapCursor); tapCursor = null; }
   }
+  /*
+   * Placing it takes a DOUBLE tap. A single tap is how you dismiss a menu,
+   * finish looking at something, or just touch the map to bring it forward —
+   * and every one of those moved the crosshair, so it wandered off constantly
+   * and each move cost a depth lookup. Two taps is a deliberate act.
+   *
+   * Leaflet's own dblclick is bound to zoom and is suppressed here for touch,
+   * so this counts taps itself: two within 320ms and 28px of each other. The
+   * mouse never reaches this handler at all (see the breakpoint test).
+   */
+  let lastTapAt = 0, lastTapPt = null;
   map.on('click', (ev) => {
     if (!window.matchMedia(window.KELP_MOBILE_MQ).matches) return;  // touch layouts only
     if (Paths.drawing) return;                                     // taps place nodes there
     if (!depthEnabled()) return;                                   // nothing to read from
+
+    const now = Date.now();
+    const pt = ev.containerPoint;
+    const quick = now - lastTapAt < 320;
+    const near = lastTapPt && Math.abs(pt.x - lastTapPt.x) < 28 && Math.abs(pt.y - lastTapPt.y) < 28;
+    lastTapAt = now; lastTapPt = pt;
+    if (!(quick && near)) return;        // first tap: note it and do nothing
+    lastTapAt = 0;                       // a third tap starts a fresh pair
+
     if (!tapCursor) {
       tapCursor = L.marker(ev.latlng, {
         draggable: true,

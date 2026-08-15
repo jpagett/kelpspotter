@@ -460,15 +460,53 @@ const POI = (function () {
     say('Points of interest cleared');
   }
 
-  // does this record match the panel filter? name, description, symbol label
-  // and charted depth are all searchable ("wreck", "80 ft", "anacapa"…)
-  function matchesFilter(rec) {
-    if (!filterText) return true;
-    const hay = [rec.name, rec.desc,
-      (SYMBOLS[rec.symbol] || SYMBOLS.marker).label,
+  /*
+   * ---- filtering ----
+   * Subsequence matching, not substring: the query's characters must appear in
+   * order, but anything may sit between them. So "rstea" finds "Refugio State
+   * Beach" — the initials-plus-a-bit way people actually half-remember a dive
+   * site, and the way a phone keyboard makes you want to search, since every
+   * character you skip is a character you did not have to type.
+   *
+   * Spaces in the query are dropped rather than treated as separators: a
+   * subsequence already spans words, so "rs tea" and "rstea" ask the same
+   * thing. Matching is greedy left-to-right, one pass, no backtracking — it is
+   * a list of dive sites, not a search engine.
+   */
+  function subsequenceSpan(hay, needle) {
+    let i = 0, first = -1, last = -1;
+    for (let n = 0; n < needle.length; n++) {
+      const at = hay.indexOf(needle[n], i);
+      if (at < 0) return null;
+      if (first < 0) first = at;
+      last = at;
+      i = at + 1;
+    }
+    return { first: first, span: last - first + 1 };
+  }
+
+  function filterScore(rec) {
+    if (!filterText) return 0;
+    const name = (rec.name || '').toLowerCase();
+    const extras = [rec.desc, (SYMBOLS[rec.symbol] || SYMBOLS.marker).label,
       (typeof rec.depthFt === 'number' && rec.depthFt > 0) ? rec.depthFt + ' ft' : ''
     ].join(' ').toLowerCase();
-    return filterText.split(/\s+/).every((w) => hay.includes(w));
+
+    // a plain substring hit is the strongest signal there is
+    if (name.includes(filterText)) return 1000 - name.indexOf(filterText);
+    const inName = subsequenceSpan(name, filterText);
+    /*
+     * Tighter and earlier wins. "rstea" scores better on "Refugio State Beach"
+     * than on a name where the same letters are scattered across forty
+     * characters, so the thing you meant floats to the top.
+     */
+    if (inName) return 500 - Math.min(400, inName.span) - Math.min(50, inName.first);
+    if (extras.includes(filterText)) return 100;
+    return subsequenceSpan(extras, filterText) ? 10 : -1;
+  }
+
+  function matchesFilter(rec) {
+    return !filterText || filterScore(rec) >= 0;
   }
 
   function render() {
@@ -483,7 +521,18 @@ const POI = (function () {
       note.textContent = 'No points yet — import a KML from the ⚙ menu.';
       return;
     }
-    const shown = items.filter(matchesFilter);
+    /*
+     * Ranked while filtering, left alone otherwise: with no query the list's
+     * own order is the user's order (creation / import), and re-sorting it
+     * behind their back would be its own bug.
+     */
+    let shown = items.filter(matchesFilter);
+    if (filterText) {
+      shown = shown
+        .map((rec, i) => ({ rec: rec, i: i, score: filterScore(rec) }))
+        .sort((a, b) => (b.score - a.score) || (a.i - b.i))
+        .map((x) => x.rec);
+    }
     note.textContent = (filterText
       ? shown.length + ' of ' + items.length + ' point' + (items.length === 1 ? '' : 's')
       : items.length + ' point' + (items.length === 1 ? '' : 's')) +
@@ -741,7 +790,7 @@ const POI = (function () {
     if (clr) clr.addEventListener('click', clearAll);
     const search = document.getElementById('poi-search');
     if (search) search.addEventListener('input', () => {
-      filterText = search.value.trim().toLowerCase();
+      filterText = search.value.toLowerCase().replace(/\s+/g, '');
       render();
     });
     const fit = document.getElementById('poi-fit');

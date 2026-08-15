@@ -63,8 +63,42 @@
     get active() { return mq.matches; },
     closeSheet() {
       if (mq.matches && document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+    },
+    // the mirror image: bring a named sheet up, for an action elsewhere that
+    // needs a panel on screen ("open this path" from the map, say)
+    openSheet(name) {
+      if (mq.matches && document.body.dataset.sheet !== name) openSheet(name);
     }
   };
+
+  /*
+   * ------------------------------------------------ tap the title bar to close
+   * Every one of these panels has a header that means "collapse me" on the
+   * desktop dock, and meant nothing at all inside a sheet — the collapse it
+   * performs is overridden by the sheet CSS, so tapping the panel's own name
+   * appeared to be broken. On a phone the equivalent of collapsing a panel is
+   * closing the sheet, so that is what the header now does.
+   *
+   * Delegated from the panel rather than bound to the header element, because
+   * the headers are rebuilt by renders. Controls that live IN the header keep
+   * their own jobs; only bare header space closes the sheet.
+   */
+  // the legend is deliberately absent: it has no title bar, only the ramps,
+  // and those are draggable controls rather than a header
+  const HEADERS = '.pp-head, .poi-head, .console-head, .act-head';
+  const HEADER_CONTROLS = '.pp-tools, .poi-tools, .pp-opts-toggle, input, select, .ov-item';
+  Object.values(SHEETS).forEach((sel) => {
+    const panel = document.querySelector(sel);
+    if (!panel) return;
+    panel.addEventListener('click', (ev) => {
+      if (!mq.matches || !document.body.dataset.sheet) return;
+      const head = ev.target.closest(HEADERS);
+      if (!head || !panel.contains(head)) return;
+      if (ev.target.closest(HEADER_CONTROLS)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      openSheet(document.body.dataset.sheet);
+    }, true);
+  });
 
   // The map is the hero: touching it dismisses whatever is open.
   const mapEl = $('map');

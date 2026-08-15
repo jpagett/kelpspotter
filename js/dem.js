@@ -25,6 +25,35 @@ const DemSampler = (function () {
 
   function init(config) { cfg = config; }
 
+  /*
+   * ---- priority gate ----
+   * Everything here talks to one NOAA host, and a browser opens only a handful
+   * of connections to any one host. So a bulk read already in flight — a
+   * profile is 250 samples, a POI import is one per point — sits in front of a
+   * single-point lookup and makes it wait for work nobody is looking at.
+   *
+   * The gate lets an urgent read say so. Bulk batches check it before starting
+   * the NEXT chunk, so raising it never cancels or corrupts work in progress;
+   * it just stops more being queued ahead of the thing the user is watching.
+   * Chunk-boundary granularity is the point: it is enough to win the race, and
+   * it cannot leave a half-finished profile behind.
+   */
+  let priorityHolds = 0;
+  let waiting = [];
+  function takePriority() {
+    priorityHolds++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      priorityHolds = Math.max(0, priorityHolds - 1);
+      if (!priorityHolds) waiting.splice(0).forEach((go) => go());
+    };
+  }
+  function waitTurn() {
+    return priorityHolds ? new Promise((go) => waiting.push(go)) : null;
+  }
+
   const keyOf = (step, gx, gy) => step + '|' + gx + '|' + gy;
 
   // Nearest power-of-two degree step giving roughly `cols` columns across `width`.
@@ -35,6 +64,8 @@ const DemSampler = (function () {
   }
 
   async function postSamples(points) {
+    const held = waitTurn();          // yield to an urgent single-point read
+    if (held) await held;
     const baseUrl = cfg.DEPTH.probe.url;
     const body = new URLSearchParams({
       geometry: JSON.stringify({ points: points, spatialReference: { wkid: 4326 } }),
@@ -60,6 +91,17 @@ const DemSampler = (function () {
 
   // Single-point lookup, used by the cursor readout. Returns metres, or null
   // where the mosaic has no data.
+  /*
+   * identify, but ahead of any bulk work. Used for the thing under the user's
+   * finger — the depth crosshair — where a two second wait behind a profile
+   * read reads as the app having ignored the tap.
+   */
+  async function urgentIdentify(lat, lng, signal) {
+    const release = takePriority();
+    try { return await identify(lat, lng, signal); }
+    finally { release(); }
+  }
+
   async function identify(lat, lng, signal) {
     const geom = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
     const url = cfg.DEPTH.probe.url + '/identify?f=json&geometryType=esriGeometryPoint' +
@@ -193,6 +235,7 @@ const DemSampler = (function () {
     init: init,
     grid: grid,
     identify: identify,
+    urgentIdentify: urgentIdentify,
     points: points,
     alongPath: alongPath,
     haversine: haversine,

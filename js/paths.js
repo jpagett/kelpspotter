@@ -24,6 +24,8 @@ const Paths = (function () {
   let selectedId = null;
   let drawing = null;      // the path being drawn, or null
   let onChange = function () {};
+  // set by app.js: open the context menu for a path (see openPathMenu there)
+  let onPathMenu = null;
 
   function init(config, leaflet, leafletMap, logger, toaster, changed) {
     cfg = config; L = leaflet; map = leafletMap;
@@ -610,10 +612,31 @@ const Paths = (function () {
             drawing.nodes.push(ev.latlng);
             redraw(drawing);
             onChange();
-          } else if (!(oe && oe.shiftKey)) {   // shift-drag is box select
+            L.DomEvent.stop(ev);
+            return;
+          }
+          /*
+           * On touch a plain tap near the line does NOT edit the path. The
+           * hit-line is deliberately fat — far fatter than the drawn line —
+           * so on a phone it covered any tap "near" a path and silently
+           * inserted a node, while the tap the user actually wanted (drop the
+           * depth crosshair) never reached the map underneath. A tap is a
+           * question, not an edit; adding a node is now a deliberate choice in
+           * the long-press menu. The mouse keeps click-to-insert, where the
+           * pointer is exact and the gesture is unambiguous.
+           */
+          if (COARSE) return;                  // fall through to the map's tap
+          if (!(oe && oe.shiftKey)) {          // shift-drag is box select
             insertNodeAt(p, ev.latlng);
           }
           L.DomEvent.stop(ev);
+        });
+        // right-click / long-press on the line: that PATH's actions
+        p.hitLine.on('contextmenu', (ev) => {
+          L.DomEvent.stop(ev);
+          if (onPathMenu) onPathMenu(p, ev.latlng,
+            ev.originalEvent ? ev.originalEvent.clientX : 0,
+            ev.originalEvent ? ev.originalEvent.clientY : 0);
         });
       }
     }
@@ -733,6 +756,27 @@ const Paths = (function () {
    * done in projected pixel space (via L.LineUtil) so "nearest" matches what
    * the eye sees on screen, and the new node lands exactly ON the line.
    */
+  /*
+   * Which path is under this position, and where on it. Used by the map's
+   * long-press so a press on a line can offer that LINE's actions instead of
+   * open water's. Distance is measured in screen pixels, because "near the
+   * path" is a thing the eye judges, not the ocean.
+   */
+  function pathNear(latlng, tolPx) {
+    const pt = map.latLngToLayerPoint(latlng);
+    let best = null, bestD = Infinity;
+    paths.forEach((p) => {
+      for (let i = 0; i < p.nodes.length - 1; i++) {
+        const a = map.latLngToLayerPoint(p.nodes[i]);
+        const b = map.latLngToLayerPoint(p.nodes[i + 1]);
+        const cp = L.LineUtil.closestPointOnSegment(pt, a, b);
+        const d = pt.distanceTo(cp);
+        if (d < bestD) { bestD = d; best = { path: p, at: map.layerPointToLatLng(cp) }; }
+      }
+    });
+    return (best && bestD <= (tolPx || NODE_GRAB_PX)) ? best : null;
+  }
+
   function insertNodeAt(p, latlng) {
     if (p.nodes.length < 2) return;
     const pt = map.latLngToLayerPoint(latlng);
@@ -1205,6 +1249,15 @@ const Paths = (function () {
     onChange();
   }
 
+  // explicit open/close, for callers that know which state they want rather
+  // than "the other one" (the map menu's Open path, for instance)
+  function setExpanded(id, on) {
+    const p = paths.find((x) => x.id === id);
+    if (!p || p.expanded === !!on) return;
+    p.expanded = !!on;
+    onChange();
+  }
+
   function toggleExpand(id) {
     const p = paths.find((x) => x.id === id);
     if (p) { p.expanded = !p.expanded; onChange(); }
@@ -1531,6 +1584,7 @@ const Paths = (function () {
     select: select,
     rename: rename,
     toggleExpand: toggleExpand,
+    setExpanded: setExpanded,
     setMirrored: setMirrored,
     toggleShowNodes: toggleShowNodes,
     toggleShowGas: toggleShowGas,
@@ -1549,6 +1603,12 @@ const Paths = (function () {
     clearPicked: clearPicked,
     get pickedCount() { return picked.size; },
     parseCoords: parseCoords,
+    pathNear: pathNear,
+    insertNodeAt: (id, latlng) => {
+      const p = paths.find((x) => x.id === id);
+      if (p) insertNodeAt(p, latlng);
+    },
+    set onPathMenu(fn) { onPathMenu = fn; },
     // shared field behaviour, so a POI coordinate box and a path node's box
     // behave identically — they are the same job wearing two hats
     selectOnFocus: selectOnFocus,

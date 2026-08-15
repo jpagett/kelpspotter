@@ -1714,6 +1714,9 @@ input[type=range]::-moz-range-thumb {
 .poi-coord-row { display: flex; align-items: center; gap: 6px; width: 100%; }
 .poi-coord-row .poi-coord { flex: 1; min-width: 0; }
 
+/* divider between a path's own actions and the open-water ones */
+.plot-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; z-index: 1100; left: 50%; bottom: 88px; transform: translateX(-50%);
@@ -1756,8 +1759,10 @@ input[type=range]::-moz-range-thumb {
 
 /* ---------- path options: diver + cylinders ---------- */
 .pp-global-tools { align-items: center; }
+/* margin-left:auto no longer applies — it now sits in .pp-tools beside the
+   other title-row buttons, which handle their own spacing */
 .pp-opts-toggle {
-  margin-left: auto; height: 20px; padding: 0 8px; cursor: pointer;
+  height: 20px; padding: 0 8px; cursor: pointer;
   background: none; color: var(--ctl-fg);
   border: 1px solid var(--ctl-line); border-radius: 2px;
   font-family: var(--mono); font-size: calc(10px * var(--fs-ui, 1)); line-height: 1;
@@ -2163,6 +2168,51 @@ input[type=range]::-moz-range-thumb {
   .pp-menu-units { gap: 4px; margin-top: 2px; }
   .pp-unit-cell { gap: 0; }
   .pp-menu-actions { margin-top: 4px; }
+
+  /*
+   * ---- general compaction ----
+   * A phone gives one panel the whole screen, and every band of padding is
+   * subtracted from the only thing anyone opened the panel to read. What
+   * follows takes back the SPACE BETWEEN things — outer padding, section gaps,
+   * the room around headers — and leaves the things themselves alone. Nothing
+   * here shrinks a control below the size a thumb needs; where a rule touches
+   * a control at all it is a container, not a target.
+   */
+  .console-body, #pp-body, #poi-body, .act-log { padding-top: 0; }
+  .pp-head, .poi-head { padding: 6px 8px; }
+  .console-head, .act-head { padding: 7px 10px; }
+  .sect { padding: 8px 10px; }
+  .sect + .sect { border-top: 1px solid var(--line); }
+  .field { margin-bottom: 7px; }
+  .pp-opts { padding: 0 8px 8px; gap: 7px; }
+  .pp-opts-group { padding: 6px 7px; gap: 5px; }
+  .pp-cyl { padding: 4px 5px; gap: 2px; }
+  .pp-cyl-list { gap: 6px; }
+  .poi-list { gap: 3px; }
+  .pp-list { gap: 4px; }
+  .legend { padding: 4px 12px 12px !important; }
+  .legend-menu { margin-top: 8px; gap: 12px; }
+  .act-log { gap: 2px; }
+
+  /*
+   * The node coordinate box. It held a 210px minimum from the desktop popup,
+   * which on a phone forced the popup wider than the map it points at — and
+   * it never needed the room: "34.412345, -119.876543" is 22 characters, and
+   * the field is read far more often than it is typed into (the Paste button
+   * beside it is how a position usually arrives).
+   */
+  .node-coord input {
+    /*
+     * Sized to the CONTENT it must hold: "34.412345, -119.876543" is 22
+     * monospace characters, and a box that shows 20 of them is a box you
+     * cannot read a position out of. 11px keeps all 22 inside ~160px, which
+     * is where the shrinking had to stop.
+     */
+    width: auto; min-width: 0; flex: 1 1 auto; max-width: 50vw;
+    font-size: calc(11px * var(--fs-ui, 1)); padding: 5px 6px;
+  }
+  .node-coord { gap: 4px; max-width: 88vw; }
+  .node-coord-popup .leaflet-popup-content { margin: 5px 6px; }
 
   /*
    * ---- the popped-out graph takes the screen ----

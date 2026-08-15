@@ -10,6 +10,16 @@
   const COARSE_POINTER = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   /*
+   * How close to the drawn seabed a press counts as "grab this stretch and
+   * lift it" — in viewBox px, since that is what the plot is drawn in. One
+   * constant because TWO things must agree on it exactly: the hit test that
+   * starts an offset drag, and the invisible band that tells the browser not
+   * to scroll there. If the band were the smaller of the two, a press in the
+   * gap would start a drag and get scrolled out from under itself.
+   */
+  const SEABED_GRAB_PX = COARSE_POINTER ? 30 : 14;
+
+  /*
    * ---- drag readout ----
    * A value that is being dragged should say what it is while it is being
    * dragged. The plot's numbers live inside an SVG that is torn down and
@@ -3433,6 +3443,32 @@
     svg.appendChild(line);
 
     /*
+     * The seabed's grab band. Invisible, exactly as wide as the hit test that
+     * starts an offset drag, and carrying touch-action:none — which is the
+     * whole point of it existing as an element at all.
+     *
+     * The plot as a whole is touch-action:pan-y so the sheet can still be
+     * scrolled by dragging over it. An offset drag is VERTICAL, so the browser
+     * read the first few pixels of one as a scroll, took the gesture, and the
+     * page moved instead of the seabed. touch-action is only consulted where
+     * the gesture BEGINS, so the exemption has to be a real element under the
+     * finger rather than a flag set once the drag is under way.
+     *
+     * Scoping it to the band means the rest of the plot still scrolls the
+     * sheet normally: the only place you cannot scroll from is the one place
+     * a downward drag already means something else.
+     */
+    const seabedGrab = document.createElementNS(NS, 'polyline');
+    seabedGrab.setAttribute('points', line.getAttribute('points'));
+    seabedGrab.setAttribute('fill', 'none');
+    seabedGrab.setAttribute('stroke', 'transparent');
+    seabedGrab.setAttribute('stroke-width', String(SEABED_GRAB_PX * 2));
+    seabedGrab.setAttribute('stroke-linejoin', 'round');
+    seabedGrab.setAttribute('class', 'seabed-grab');
+    seabedGrab.setAttribute('clip-path', 'url(#' + clipId + ')');
+    svg.appendChild(seabedGrab);
+
+    /*
      * Each ceiling/floor gets an invisible fat grab-line over its span: drag it
      * vertically to adjust the bound's depth, right-click it to remove just
      * that one. The visible flat segment is part of the planned polyline, so
@@ -4006,9 +4042,7 @@
       document.removeEventListener('pointerup', onUp);
       document.removeEventListener('pointercancel', onUp);
     };
-    // viewBox px: the curve is 1px wide and fingers are not. A fingertip covers
-    // roughly three times what a cursor points at, so touch gets a wider catch.
-    const NEAR_PX = COARSE_POINTER ? 30 : 14;
+    const NEAR_PX = SEABED_GRAB_PX;   // shared with the no-scroll band above
     svg.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       const at = plotPoint(ev.clientX, ev.clientY);
@@ -4646,6 +4680,22 @@
       const sep = document.createElement('div');
       sep.className = 'pp-menu-sep';
       menu.appendChild(sep);
+
+      /*
+       * Zoom to. The row already tells you the path exists; this answers
+       * "where IS it", which the list on its own never can. Same contract as a
+       * point's Zoom to: get the panel out of the way FIRST, then move the
+       * map, because on a phone the panel is the screen and fitting bounds
+       * behind it looks like nothing happened.
+       */
+      menuItem('Zoom to', () => {
+        toggleMenu(false);
+        if (window.MobileShell) MobileShell.closeSheet();
+        if (!p.nodes.length) return;
+        map.fitBounds(L.latLngBounds(p.nodes.map((n) => [n.lat, n.lng])).pad(0.25));
+        Paths.select(p.id);
+        say('Zoomed to ' + p.name);
+      }, 'Fit the map to this path');
 
       menuItem('Reverse direction', () => Paths.reverse(p.id),
         'Run the line from the other end — headings, legs and bounds all follow');

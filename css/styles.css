@@ -1464,6 +1464,9 @@ input[type=range]::-moz-range-thumb {
    ours to time for the long-press menu; grips must own their whole gesture */
 .pp-profile svg { touch-action: pan-y; }
 .bound-grip { touch-action: none; }
+/* the seabed's offset-drag band: a vertical drag here adjusts the offset, so
+   the browser must not read it as a scroll (see the seabedGrab comment) */
+.seabed-grab { touch-action: none; }
 /* the depth-axis pan gutter owns its whole gesture, even on touch */
 .pp-ax-pan { touch-action: none; }
 
@@ -2139,6 +2142,27 @@ input[type=range]::-moz-range-thumb {
   /* the sheet header already opens and closes the sheet — a second collapse
      control inside it only invites a mis-tap */
   #pp-collapse, #poi-collapse { pointer-events: none; }
+
+  /*
+   * ---- a path's settings menu, compacted ----
+   * Eleven rows of ~25px carrying 60px of gap between them: the air was a
+   * fifth of the menu's height. Taking the gap out is free — each row already
+   * carries its own padding, so nothing moves closer to its neighbour than it
+   * was inside its own box.
+   *
+   * What is deliberately NOT touched is the row height. At 25px these are
+   * already under the 44px touch guideline, and a settings menu where the
+   * wrong line gets tapped is worse than a settings menu that is tall — the
+   * rows are full-width, so the only axis a thumb can miss in is this one.
+   */
+  .pp-menu {
+    gap: 1px; padding: 4px;
+    max-width: min(280px, calc(100vw - 32px));
+  }
+  .pp-menu-sep { margin: 3px 2px; }
+  .pp-menu-units { gap: 4px; margin-top: 2px; }
+  .pp-unit-cell { gap: 0; }
+  .pp-menu-actions { margin-top: 4px; }
 
   /*
    * ---- the popped-out graph takes the screen ----

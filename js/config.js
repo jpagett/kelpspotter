@@ -16,6 +16,22 @@
  *
  * Leave CLIENT_ID as the placeholder to stay in demo mode.
  */
+/*
+ * The phone-shell breakpoint, in one place because CSS and JS must agree on it
+ * exactly: the stylesheet swaps in the tab-bar/sheet layout, and app.js and
+ * mobile.js gate real behaviour on the same answer (tap-to-probe, sheet mode,
+ * whether a panel can be dragged). If they ever disagreed you would get a
+ * draggable bottom sheet, or a phone laid out as a desktop.
+ *
+ * Two triggers, not one. Width alone missed landscape: a modern phone turned
+ * sideways is 844-932px wide, over the width cut-off, but only ~400px TALL —
+ * the desktop dock assumes vertical room it does not have there. The second
+ * clause catches exactly that shape, and `pointer: coarse` keeps a merely
+ * short desktop window out of it.
+ */
+window.KELP_MOBILE_MQ =
+  '(max-width: 820px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse)';
+
 window.KELP_CONFIG = {
   /*
    * Public kelp backend (api/main.py on Cloud Run). When this answers, visitors

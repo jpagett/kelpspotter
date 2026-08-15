@@ -2,7 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--
+    user-scalable=no is a deliberate trade, not an oversight. This is a map
+    application: pinch is the map's own gesture, and a pinch that started a few
+    pixels off the canvas used to zoom the DOCUMENT instead, leaving the header
+    and tab bar scaled past the screen edge with no obvious way back. Browser
+    zoom is also the wrong tool for the actual need here — it magnifies a
+    fixed-position layout rather than reflowing it — so the app carries its own
+    Interface text control (80-160%, plus a separate graph-label scale) under
+    the settings menu, which resizes type without breaking the layout.
+  -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>KelpSpotter · Santa Barbara Channel</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <!-- installable: with sw.js already registered, this makes "Add to Home

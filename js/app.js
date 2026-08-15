@@ -2069,6 +2069,45 @@
   })();
 
   /*
+   * ---- long-press == right-click ----
+   * Touch has no secondary button, so every right-click menu in the app needs a
+   * touch route to the same place. Rather than reimplement each menu's opening
+   * logic for touch, a matured press SYNTHESISES a contextmenu event at the
+   * finger: the element's existing right-click handler then runs unchanged, and
+   * a menu added later inherits touch support without anyone remembering to
+   * wire it. Mouse pointers are ignored — they already have the real button.
+   *
+   * Timings match the map/node presses (550ms, 10px) so no surface feels
+   * different from its neighbour.
+   */
+  function longPressContextMenu(el, opts) {
+    const o = opts || {};
+    let timer = null, sx = 0, sy = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType === 'mouse') return;
+      if (o.skip && ev.target.closest(o.skip)) return;
+      sx = ev.clientX; sy = ev.clientY;
+      cancel();
+      timer = setTimeout(() => {
+        timer = null;
+        ev.target.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: sx, clientY: sy
+        }));
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 550);
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (!timer) return;
+      if (Math.abs(ev.clientX - sx) > 10 || Math.abs(ev.clientY - sy) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((k) =>
+      el.addEventListener(k, cancel));
+    // and stop the OS text-selection callout riding along with it
+    el.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  }
+
+  /*
    * ---- tap depth cursor (touch layouts) ----
    * The hover probe needs a cursor, which touch does not have — so on a phone a
    * TAP plants one: a draggable crosshair whose label reads the depth under it
@@ -2098,7 +2137,7 @@
     if (tapCursor) { map.removeLayer(tapCursor); tapCursor = null; }
   }
   map.on('click', (ev) => {
-    if (!window.matchMedia('(max-width: 820px)').matches) return;  // touch layouts only
+    if (!window.matchMedia(window.KELP_MOBILE_MQ).matches) return;  // touch layouts only
     if (Paths.drawing) return;                                     // taps place nodes there
     if (!depthEnabled()) return;                                   // nothing to read from
     if (!tapCursor) {
@@ -3427,6 +3466,7 @@
           persistNow();
         }
       });
+      longPressContextMenu(grip);   // same removal by touch
       svg.appendChild(grip);
 
       /*
@@ -3798,6 +3838,14 @@
     const cancelPlotPress = () => { if (plotPress) { clearTimeout(plotPress); plotPress = null; } };
     svg.addEventListener('pointerdown', (ev) => {
       if (ev.pointerType === 'mouse') return;
+      /*
+       * The bound grips and their endpoint handles sit ON the plot and carry
+       * their own right-click action (remove this bound). Without this guard
+       * the plot's press swallowed theirs, so a long-press on a ceiling grip
+       * offered to ADD a bound at that depth instead of removing the one the
+       * finger was actually on.
+       */
+      if (ev.target.closest('.bound-grip, .bound-end, .pp-ax-pan')) return;
       pressX = ev.clientX; pressY = ev.clientY;
       cancelPlotPress();
       plotPress = setTimeout(() => {
@@ -4270,8 +4318,34 @@
     requestAnimationFrame(go);
     setTimeout(go, 50);
   }
+  /*
+   * The panel is rebuilt wholesale on every change, which momentarily collapses
+   * its content to zero height — and a scroll container whose content vanishes
+   * is scrolled back to 0 by the browser. So expanding a path you had scrolled
+   * down to threw you back to the top of the list, exactly when you wanted to
+   * look at what you just opened. Capture the offset around the rebuild and put
+   * it back. Whichever ancestor actually scrolls is found at run time, because
+   * that differs by breakpoint: the sheet itself on a phone, .pp-inner on the
+   * desktop dock.
+   */
+  function scrollKeeper(el) {
+    let node = el;
+    while (node && node !== document.body) {
+      if (node.scrollHeight > node.clientHeight + 1) {
+        const cs = getComputedStyle(node);
+        if (/(auto|scroll)/.test(cs.overflowY)) {
+          const top = node.scrollTop;
+          return () => { node.scrollTop = top; };
+        }
+      }
+      node = node.parentElement;
+    }
+    return () => {};
+  }
+
   function renderPathsNow() {
     const box = $('pp-list');
+    const restoreScroll = scrollKeeper(box);
     box.textContent = '';
     const list = Paths.list;
     $('pp-add').setAttribute('aria-pressed', Paths.drawing ? 'true' : 'false');
@@ -4281,7 +4355,7 @@
     $('pp-note').textContent = !list.length
       ? 'No paths yet — press + or Ctrl-click the map.'
       : (Paths.drawing ? 'Click the map to add nodes. Esc or ✓ to finish.'
-                       : (matchMedia('(max-width: 820px)').matches
+                       : (matchMedia(window.KELP_MOBILE_MQ).matches
                             ? 'Drag a node to move it; long-press one for coordinates and delete.'
                             : 'Drag a node to move it; right-click or hover one for coordinates and delete.'));
 
@@ -4293,8 +4367,16 @@
       const row = document.createElement('div');
       row.className = 'pp-row';
       row.addEventListener('click', (ev) => {
-        if (ev.target.closest('.pp-cog, .pp-menu, .pp-caret, .pp-pencil, .pp-mirror, .pp-name-input')) return;
-        // (.pp-mirror also covers the node-marker and leg-table buttons, which share its styling)
+        /*
+         * Every control on the row owns its own click, so the row only acts on
+         * bare space. This is a structural test, not a list of class names:
+         * the old enumerated list silently rotted when the settings button was
+         * renamed .pp-cog -> .pp-menu-btn, after which tapping Settings ALSO
+         * ran the row handler — the re-render from toggleExpand tore down the
+         * menu that the button had just opened, so Settings only ever looked
+         * like a graph collapse toggle.
+         */
+        if (ev.target.closest('button, input, select, label, .pp-menu')) return;
         // The row is the graph's title bar, so it opens and closes the plot —
         // the caret is still there for keyboard use, and is excluded above so
         // a click on it toggles once rather than twice.
@@ -4529,6 +4611,8 @@
         ev.preventDefault(); ev.stopPropagation();
         toggleMenu(true);
       });
+      // touch route to that same menu — the row's controls keep their own taps
+      longPressContextMenu(row, { skip: 'button, input, select, label' });
 
       caret.classList.add('pp-caret-big');   // primary affordance: open the plot
       row.appendChild(sw); row.appendChild(nameWrap); row.appendChild(meta);
@@ -4689,6 +4773,7 @@
       }
     });
     syncPopout();
+    restoreScroll();
   }
 
   /*
@@ -4814,7 +4899,7 @@
       if (ev.button !== 0) return;
       // On a phone these panels are bottom sheets, not floating boxes. Dragging
       // would write inline left/top that overrides the sheet layout.
-      if (window.matchMedia('(max-width: 820px)').matches) return;
+      if (window.matchMedia(window.KELP_MOBILE_MQ).matches) return;
       if (ev.target.closest(interactiveSelector)) return;
       const r = unpin();
       drag = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height, left: r.left, top: r.top };
@@ -4847,7 +4932,7 @@
    * fill the screen (.mobile-full) rather than just revealing the body in
    * place, and it starts collapsed on load rather than open.
    */
-  const mobileQuery = window.matchMedia('(max-width: 820px)');
+  const mobileQuery = window.matchMedia(window.KELP_MOBILE_MQ);
   const pathsPanel = $('pp-collapse').closest('.paths-panel');
 
   /*

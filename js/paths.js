@@ -292,6 +292,14 @@ const Paths = (function () {
     el.addEventListener('pointerdown', (ev) => {
       if (ev.pointerType === 'mouse') return;      // desktop keeps hover + right-click
       sx = ev.clientX; sy = ev.clientY;
+      /*
+       * Confirm the grab the instant the finger lands, not when the drag has
+       * already moved the node: on touch there is no cursor and no hover, so
+       * without this there was no way to tell a node had been caught except by
+       * dragging and seeing whether anything moved — and on a miss the map
+       * panned instead, which reads as the app ignoring you.
+       */
+      el.classList.add('grabbed');
       cancel();
       timer = setTimeout(() => {
         timer = null;
@@ -307,7 +315,7 @@ const Paths = (function () {
           Math.abs(ev.clientY - sy) > MOVE_TOLERANCE) cancel();   // it's a drag
     });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => {
-      el.addEventListener(t, () => { cancel(); restoreDrag(); });
+      el.addEventListener(t, () => { cancel(); restoreDrag(); el.classList.remove('grabbed'); });
     });
     // suppress the OS long-press menu on the node itself
     el.addEventListener('contextmenu', (ev) => ev.preventDefault());
@@ -604,6 +612,8 @@ const Paths = (function () {
       });
       m.on('dragend', () => {
         dragFrom = null; groupFrom = null;
+        const el = m.getElement();
+        if (el) el.classList.remove('grabbed');
         p.profile = null;
         refreshProfile(p);
       });
@@ -619,6 +629,8 @@ const Paths = (function () {
       m.on('dragstart', () => {
         closeNodeEditor();
         cancelLongPress(m);      // a real drag cancels any pending long press
+        const el = m.getElement();
+        if (el) el.classList.add('grabbed');   // also covers mouse drags
       });
       m.addTo(map);
       bindLongPress(m, p, i);      // needs the icon element, so after addTo
@@ -685,7 +697,15 @@ const Paths = (function () {
    */
   const SNAP_PX = 70;
   const DRAW_SNAP_PX = 18;   // tighter while drawing: every click would otherwise grab
-  const NODE_GRAB_PX = 14;   // treat a click this close to a node as 'grab it'
+  /*
+   * How close a click counts as "grab that node". A fingertip contact patch is
+   * ~9mm across and the finger hides the target, so the mouse figure asked for
+   * precision nobody has on a phone — misses inserted a node instead, which is
+   * the wrong action AND edits the path. Coarse pointers get roughly a finger's
+   * width; the CSS hit halo on .path-node widens the marker itself to match.
+   */
+  const COARSE = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const NODE_GRAB_PX = COARSE ? 30 : 14;
 
   /*
    * Nearest point on any custom depth contour, in screen space. Shared by the

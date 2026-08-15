@@ -982,11 +982,39 @@ input[type=range]::-moz-range-thumb {
 .path-node span {
   display: block; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid var(--abyss); box-sizing: border-box;
+  transition: transform 90ms ease, box-shadow 90ms ease;
 }
 /* box-selected nodes: ringed so a multi-selection is obvious before dragging */
 .path-node.picked span {
   border-color: var(--foam);
   box-shadow: 0 0 0 2px var(--kelp-hot);
+}
+/*
+ * Caught it. Added the moment a finger lands (see bindLongPress) and cleared on
+ * release, so the grab is confirmed before anything moves — on touch there is
+ * no cursor to change and no hover state to light up, and a missed grab pans
+ * the map instead, which is indistinguishable from the app ignoring the tap.
+ */
+.path-node.grabbed span {
+  transform: scale(1.55);
+  box-shadow: 0 0 0 3px var(--kelp-hot), 0 0 12px 2px rgba(255,209,102,0.55);
+}
+/*
+ * Touch hit halo. The dot stays 11px — a node big enough to hit reliably would
+ * hide the line it sits on — while the TARGET grows to ~35px, which is the
+ * documented minimum for a fingertip. A pseudo-element is used rather than
+ * padding on the icon because Leaflet writes the icon's box size inline from
+ * iconSize and would overwrite it. Events on the halo report .path-node as
+ * their target, so marker dragging and the long press both keep working.
+ */
+@media (pointer: coarse) {
+  .path-node::after {
+    content: ''; position: absolute; inset: -12px; border-radius: 50%;
+  }
+  /* the POI pin is bigger to begin with, so it needs less help */
+  .poi-pin::after {
+    content: ''; position: absolute; inset: -8px; border-radius: 50%;
+  }
 }
 /* shift-drag rubber band (replaces Leaflet's box zoom) */
 .node-select-box {
@@ -1425,7 +1453,8 @@ input[type=range]::-moz-range-thumb {
 /* the mode field carries two buttons plus a value, so it needs the full row */
 #pp-opts .pp-opts-group > .pp-field:has(.pp-mode-btns) { grid-column: 1 / -1; }
 
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .pp-opts-group { grid-template-columns: 1fr; }
 }
 
@@ -1455,7 +1484,8 @@ input[type=range]::-moz-range-thumb {
   left: 14px !important; bottom: 16px !important;
   right: auto !important; top: auto !important; margin: 0 !important;
 }
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   /*
    * The bottom-left corner is where it sits on desktop, but on a phone that's
    * also where an open sheet's grab handle lands, and the tab bar crowds it
@@ -1526,7 +1556,8 @@ input[type=range]::-moz-range-thumb {
   padding: 4px 12px; min-height: 30px;
 }
 .undo-toast button:hover { background: var(--kelp); color: var(--abyss); }
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .undo-toast { bottom: calc(var(--tabbar-h) + var(--safe-b) + 12px); }
 }
 
@@ -1555,7 +1586,8 @@ input[type=range]::-moz-range-thumb {
 }
 .plot-menu button:hover:not(:disabled) { background: rgba(242,177,52,0.12); color: var(--foam); }
 .plot-menu button:disabled { opacity: 0.35; cursor: default; }
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .plot-menu button { padding: 12px 10px; font-size: calc(13px * var(--fs-ui, 1)); }  /* thumb-sized */
 }
 
@@ -1626,7 +1658,8 @@ input[type=range]::-moz-range-thumb {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sm-detail { font-family: var(--mono); font-size: calc(9px * var(--fs-ui, 1)); color: var(--tide-dim);
   max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .sm-sheet { width: 100vw; max-width: none; max-height: 88vh;
     border-radius: 14px 14px 0 0; align-self: end; }
   .session-modal { place-items: end center; }
@@ -1653,7 +1686,8 @@ input[type=range]::-moz-range-thumb {
 @keyframes sweep { from { left: -40%; } to { left: 100%; } }
 
 /* ---------- responsive ---------- */
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   /* Header buttons crop instead of wrapping onto a second row. The rest of the
      old flow-based mobile layout was replaced by the sheet shell at the bottom
      of this file — a scrolling document fought the fixed sheets. */
@@ -1789,8 +1823,17 @@ input[type=range]::-moz-range-thumb {
    Nothing here moves DOM nodes — the panels stay exactly where they are and only
    their positioning changes — so every existing handler keeps working.
    ========================================================================== */
-@media (max-width: 820px) {
-  :root { --tabbar-h: 56px; --safe-b: env(safe-area-inset-bottom, 0px); }
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  /*
+   * 46px, not 56: the bar is permanent furniture on every screen, and its
+   * icon+label stack only needs ~30px of it. The six pixels per tab that the
+   * old height spent on air are worth more as map. Each tab is still a
+   * full-width column, so the TARGET stays well over the 44px minimum in the
+   * axis that matters — a thumb misses horizontally between tabs, not
+   * vertically against a bar that spans the screen.
+   */
+  :root { --tabbar-h: 46px; --safe-b: env(safe-area-inset-bottom, 0px); }
 
   /* ---- header: strip it to brand + state + the two things you still need ---- */
   .header { padding: 0 10px; gap: 8px; }
@@ -1850,11 +1893,20 @@ input[type=range]::-moz-range-thumb {
      and inline styles would otherwise beat these rules. */
   .console, .paths-panel, .activity, .legend, .poi-panel {
     position: fixed !important;
-    left: 0 !important; right: 0 !important; top: auto !important;
+    left: 0 !important; right: 0 !important;
+    /*
+     * Floor to ceiling, not 66vh. A sheet capped at two thirds left a strip of
+     * map above it that was too short to read a chart in and too tall to
+     * ignore — it could not be panned without closing the sheet, so it was
+     * dead pixels taken from the panel that the user had just asked to see.
+     * The header stays exposed because it carries the connection state and the
+     * settings menu, which a panel must never be able to hide.
+     */
+    top: var(--header-h) !important;
     bottom: calc(var(--tabbar-h) + var(--safe-b)) !important;
     width: auto !important; height: auto !important;
     min-width: 0 !important;
-    max-height: 66vh !important;
+    max-height: none !important;
     /* On a tablet a full-width sheet stretches controls drawn for a ~320px
        column, so cap it and centre. Below 520px this never binds. */
     max-width: 520px !important;
@@ -1875,7 +1927,15 @@ input[type=range]::-moz-range-thumb {
      poke out from behind it, so retire them until the map is the focus again. */
   body[data-sheet]:not([data-sheet=""]) .zoom-control,
   body[data-sheet]:not([data-sheet=""]) .map-actions,
-  body[data-sheet]:not([data-sheet=""]) .overlay-picker {
+  body[data-sheet]:not([data-sheet=""]) .overlay-picker,
+  /*
+   * The sign-in banner belongs to the map too, and it outranks the sheets
+   * (z 950 vs 940). Once sheets grew to full height it began floating over
+   * them — it landed squarely on the POI panel's filter box, so tapping the
+   * search field hit "sign in with Google" instead. It has nothing to say
+   * while a panel is up, so it stands down with the rest of the map chrome.
+   */
+  body[data-sheet]:not([data-sheet=""]) .signin-notice {
     opacity: 0; pointer-events: none;
   }
 
@@ -1943,7 +2003,7 @@ input[type=range]::-moz-range-thumb {
      since they sit alone against the map with nothing adjacent to mis-hit */
   .ov-icon { width: 34px; height: 34px; font-size: calc(13px * var(--fs-ui, 1)); }
   .ov-flyout input[type=range] { width: 92px; }
-  .cc-cog, .pp-cog, .pp-caret, .pp-pencil { padding: 4px 6px; font-size: calc(13px * var(--fs-ui, 1)); }
+  .cc-cog, .pp-caret, .pp-pencil { padding: 4px 6px; font-size: calc(13px * var(--fs-ui, 1)); }
   /* the node editor is reached by long-press on a phone, so size it for a thumb */
   .node-coord input { font-size: calc(13px * var(--fs-ui, 1)); padding: 8px 9px; }
   .bound-grip { stroke-width: 20; }
@@ -1995,11 +2055,39 @@ input[type=range]::-moz-range-thumb {
    * not hold 44px buttons — but each gets an invisible ~12px halo, so the
    * finger target is ~40px+ without moving a single pixel of layout.
    */
-  .pp-pencil, .pp-mirror, .pp-cog, .pp-caret,
+  .pp-pencil, .pp-mirror, .pp-menu-btn, .pp-caret,
   .poi-sym, .poi-eye, .poi-del { position: relative; }
-  .pp-pencil::after, .pp-mirror::after, .pp-cog::after, .pp-caret::after,
+  .pp-pencil::after, .pp-mirror::after, .pp-menu-btn::after, .pp-caret::after,
   .poi-sym::after, .poi-eye::after, .poi-del::after {
-    content: ''; position: absolute; inset: -10px -6px;
+    content: ''; position: absolute; inset: -10px -7px;
+  }
+  /*
+   * ...and room for those halos to exist. At the desktop 8px gap the halos of
+   * neighbouring row buttons met in the middle and split the difference, so
+   * each button's real target came out at ~24px — the halo was being granted
+   * and then taken straight back by the button next to it. The wider gap is
+   * what makes the halo mean anything: 20px of glyph becomes a 34x40 target.
+   */
+  .pp-row { gap: 12px; }
+  .poi-item { gap: 12px; }
+  /*
+   * Row priorities on a narrow screen. .pp-meta was flex:0 0 auto — it never
+   * gave a pixel back — so the name, which is the only thing identifying the
+   * row, was squeezed to ZERO width and the caret pushed 21px past the panel
+   * edge. The name is the identity and keeps a floor; the measurements are
+   * secondary and ellipsize instead of shoving.
+   */
+  /*
+   * basis 0, not auto: on `auto` the name asks for its full text width first,
+   * so a long path name pushed the four controls onto a line of their own and
+   * the row's height changed with whatever the path was called. From zero it
+   * simply takes what is left over and ellipsizes, and the controls hold
+   * still.
+   */
+  .pp-name-wrap { flex: 1 1 0; min-width: 4.5em; }
+  .pp-meta {
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
   /* the sheet header already opens and closes the sheet — a second collapse
@@ -2007,9 +2095,58 @@ input[type=range]::-moz-range-thumb {
   #pp-collapse, #poi-collapse { pointer-events: none; }
 }
 
+/*
+ * Narrow phones: the stats get their own line.
+ * Name, four controls and "3n · 2.23 mi · ⌄59 ft" do not fit across 375px —
+ * something has to give, and squeezing all of them produced a row where the
+ * name was clipped AND the stats read "3n…", so neither survived. Dropping the
+ * measurements to a second line costs ~14px of row height and makes all of it
+ * legible. Wider phones keep the single line.
+ */
+@media (max-width: 430px) {
+  .pp-row { flex-wrap: wrap; row-gap: 2px; }
+  .pp-meta {
+    order: 99; flex: 1 0 100%;
+    overflow: visible; text-overflow: clip;
+    padding-left: 21px;      /* aligns under the name, past the colour swatch */
+  }
+}
+
+/*
+ * Smallest phones (320px). Even one line of controls does not fit beside the
+ * name here, and the one that wrapped was the expand caret — which landed on
+ * its own at the far LEFT, under the colour swatch, reading as a stray glyph
+ * rather than the row's control. Sending it down deliberately, to sit at the
+ * right-hand end of the stats line, makes the second line look composed:
+ * measurements on the left, chevron on the right, still under the thumb.
+ */
+@media (max-width: 360px) {
+  .pp-meta { flex: 1 1 auto; }
+  .pp-caret { order: 100; margin-left: auto; }
+}
+
+/*
+ * ---- pinch belongs to the map ----
+ * `manipulation` means "panning and pinch only" — its real effect here is
+ * removing the double-tap-to-zoom delay and gesture on this chrome, which is
+ * the other way the interface used to end up scaled. It deliberately does NOT
+ * say pan-y: the leg table scrolls horizontally inside a sheet, and an
+ * ancestor restricted to one axis would kill that.
+ *
+ * Blocking the pinch itself is the JS guard's job (see mobile.js) — CSS has no
+ * value that drops pinch while keeping both scroll axes. The map is untouched
+ * either way: Leaflet sets its own touch-action and owns pinch entirely.
+ */
+.header, .tabbar, .console, .paths-panel, .activity, .legend, .poi-panel,
+.map-actions, .overlay-picker, .signin-notice, .toast, .undo-toast,
+.plot-menu, .pp-menu, .session-modal {
+  touch-action: manipulation;
+}
+
 /* ---- the tab bar itself: mobile only ---- */
 .tabbar { display: none; }
-@media (max-width: 820px) {
+@media (max-width: 820px),
+       (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .tabbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 960;
     display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
@@ -2029,6 +2166,85 @@ input[type=range]::-moz-range-thumb {
   .tab-ico { font-size: calc(15px * var(--fs-ui, 1)); line-height: 1; }
   .tab[aria-pressed="true"] { color: var(--kelp); }
   .tab[aria-pressed="true"] .tab-ico { text-shadow: 0 0 10px var(--kelp); }
+}
+
+/* ==========================================================================
+   LANDSCAPE: the tab bar becomes a right-hand rail
+   --------------------------------------------------------------------------
+   Sideways, vertical pixels are the scarce ones — a phone gives up more than
+   half its height and loses none of its width. A bar across the bottom spends
+   that scarce axis on chrome, so it rotates to the long edge instead, where
+   the space it takes is the space there is plenty of. The rail goes RIGHT
+   rather than left because that is the thumb's side for most one-handed
+   grips, and because the map's own controls already live on that side, so
+   related things stay together.
+   ========================================================================== */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  :root {
+    --tabbar-w: 62px;
+    /* the notch/home-indicator moves to a side edge when the phone rotates */
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: 0px;
+    --tabbar-h: 0px;          /* nothing is reserved along the bottom now */
+  }
+
+  .tabbar {
+    top: var(--header-h); bottom: 0; left: auto;
+    right: 0;
+    width: calc(var(--tabbar-w) + var(--safe-r));
+    height: auto;
+    padding-bottom: 0; padding-right: var(--safe-r);
+    grid-auto-flow: row; grid-auto-columns: none; grid-auto-rows: 1fr;
+    border-top: none; border-left: 1px solid var(--line);
+  }
+
+  #map { inset: var(--header-h) calc(var(--tabbar-w) + var(--safe-r)) 0 0; }
+
+  /*
+   * Sheets fill the area beside the rail. They still slide from the bottom:
+   * a panel that flies in from the side would fight the rail it sits next to,
+   * and the downward dismiss-swipe is already muscle memory from portrait.
+   */
+  .console, .paths-panel, .activity, .legend, .poi-panel {
+    top: var(--header-h) !important;
+    bottom: 0 !important;
+    right: calc(var(--tabbar-w) + var(--safe-r)) !important;
+    left: 0 !important;
+    max-width: none !important;
+    border-radius: 14px 14px 0 0 !important;
+    transform: translateY(101%);
+  }
+  body[data-sheet="console"]  .console,
+  body[data-sheet="paths"]    .paths-panel,
+  body[data-sheet="legend"]   .legend,
+  body[data-sheet="poi"]      .poi-panel,
+  body[data-sheet="activity"] .activity { transform: translateY(0); }
+
+  /* floating map controls clear the rail instead of the bottom bar */
+  .map-actions  { right: calc(var(--tabbar-w) + var(--safe-r) + 10px); bottom: 62px; }
+  .overlay-picker { right: calc(var(--tabbar-w) + var(--safe-r) + 10px); bottom: 14px; }
+  .undo-toast { bottom: 12px; }
+  .leaflet-control-scale { right: calc(var(--tabbar-w) + var(--safe-r) + 8px) !important; }
+  /*
+   * Anything spanning the full width has to stop at the rail too, or it hides
+   * beneath it — the sign-in banner's dismiss button ended up directly under
+   * the Console tab, so the tap that meant "close this" switched panels.
+   */
+  .signin-notice, .toast {
+    right: calc(var(--tabbar-w) + var(--safe-r) + 8px) !important;
+  }
+
+  /*
+   * Two lines of chrome is one too many when there are only ~430px of height.
+   * The rail's icons carry the same meaning as its labels, so the labels go
+   * and the icon grows into the room they leave.
+   */
+  .tab-label { display: none; }
+  .tab-ico { font-size: calc(19px * var(--fs-ui, 1)); }
+
+  /* the sheet's grab handle would eat a scarce row; the rail is the control */
+  .console::before, .paths-panel::before, .activity::before,
+  .legend::before, .poi-panel::before { display: none; }
 }
 
 /* ---- profile skeleton: shown while the DEM read is in flight ---- */

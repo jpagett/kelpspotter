@@ -9,7 +9,7 @@
  * handler in app.js keeps working and desktop is entirely unaffected.
  */
 (function () {
-  const MOBILE = '(max-width: 820px)';
+  const MOBILE = window.KELP_MOBILE_MQ;
   const mq = window.matchMedia(MOBILE);
   const $ = (id) => document.getElementById(id);
   const bar = $('tabbar');
@@ -64,6 +64,30 @@
       openSheet(document.body.dataset.sheet);
     }
   });
+
+  /*
+   * ------------------------------------------------- pinch belongs to the map
+   * iOS Safari has ignored user-scalable=no since version 10, and honours
+   * touch-action only for gestures that begin inside the element. A pinch
+   * whose two fingers straddle a panel edge still reached the document and
+   * scaled the entire interface, which on a fixed layout means the header and
+   * tab bar simply leave the screen — with the zoom-out gesture then landing
+   * on whatever is under the fingers rather than the page.
+   *
+   * These are the WebKit-only gesture events, and they are cancelable: killing
+   * them outside the map leaves Leaflet's own pinch untouched (it never sees
+   * them; it works from raw touch points) while the chrome stops scaling.
+   * A second guard covers multi-touch that starts on the chrome.
+   */
+  const inMap = (t) => !!(t && t.closest && t.closest('#map'));
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((type) => {
+    document.addEventListener(type, (ev) => {
+      if (!inMap(ev.target)) ev.preventDefault();
+    }, { passive: false });
+  });
+  document.addEventListener('touchmove', (ev) => {
+    if (ev.touches.length > 1 && !inMap(ev.target)) ev.preventDefault();
+  }, { passive: false });
 
   /* ------------------------------------------------------- entering mobile */
 

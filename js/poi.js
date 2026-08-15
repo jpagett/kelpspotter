@@ -533,10 +533,21 @@ const POI = (function () {
         .sort((a, b) => (b.score - a.score) || (a.i - b.i))
         .map((x) => x.rec);
     }
-    note.textContent = (filterText
-      ? shown.length + ' of ' + items.length + ' point' + (items.length === 1 ? '' : 's')
-      : items.length + ' point' + (items.length === 1 ? '' : 's')) +
-      ' · tap one to open it';
+    /*
+     * "0 of 2 points · tap one to open it" invited the reader to tap something
+     * that is not there, and left them guessing whether the filter had failed
+     * or the list was empty. A search that finds nothing says so, and says what
+     * it searched for, so the next move is obvious: change the query.
+     */
+    if (filterText && !shown.length) {
+      note.textContent = 'Nothing matches “' + filterText + '” — ' +
+        items.length + ' point' + (items.length === 1 ? '' : 's') + ' hidden';
+    } else {
+      note.textContent = (filterText
+        ? shown.length + ' of ' + items.length + ' point' + (items.length === 1 ? '' : 's')
+        : items.length + ' point' + (items.length === 1 ? '' : 's')) +
+        ' · tap one to open it';
+    }
     shown.forEach((rec) => {
       const item = document.createElement('div');
       item.className = 'poi-item' + (rec.visible ? '' : ' off') + (rec.open ? ' open' : '');

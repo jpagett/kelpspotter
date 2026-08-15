@@ -7,7 +7,15 @@
   --line:    rgba(111,183,189,0.18);
   --foam:    #e8f4f2;   /* primary text                */
   --tide:    #6fb7bd;   /* secondary text / labels     */
-  --tide-dim:#4d868b;
+  /*
+   * Raised from #4d868b, which measured 3.75:1 on a panel — under AA for text,
+   * and this is the colour nearly all the secondary text uses: hints, meta,
+   * eyebrows, unit labels, the date range. 5.02:1 on a panel and 6.00:1 on the
+   * map background now. Still clearly dimmer than --tide (6.76:1), so the type
+   * hierarchy it exists to express is unchanged — this is a legibility floor,
+   * not a brightening. The app is read in sunlight on a boat.
+   */
+  --tide-dim:#5e9da3;
   /*
    * Controls, not chrome. A --line hairline measures 1.42:1 against a panel
    * row and --tide-dim glyphs 2.98:1 on a raised control — so an outlined
@@ -17,13 +25,15 @@
    * borders, hint text and meta keep --line and --tide-dim, so raising button
    * visibility doesn't also shout every divider in the app.
    *
-   * Both clear WCAG 2.1's 3:1 for non-text UI (borders 3.4:1 on a row and
-   * 3.1:1 on a raised control; glyphs 4.7:1 and 4.1:1) and both stay below
-   * --tide's 6.3:1 body text, so the type hierarchy is unchanged. Deliberately
-   * still muted — the palette is meant to read low-contrast, just not absent.
+   * Both clear WCAG 2.1's 3:1 for non-text UI, and --ctl-fg now also clears
+   * 4.5:1 as TEXT on both surfaces it lands on — 5.73:1 on a panel and 4.56:1
+   * on a raised control. That last number is why it moved from #5f9ea5, which
+   * was 4.05:1 there: these glyphs are small and several of them (the row's +
+   * and ⤢) are the only label the button has. Still below --tide's 6.76:1, so
+   * the hierarchy holds and the palette still reads muted, just not absent.
    */
   --ctl-line: rgba(120,190,196,0.6);
-  --ctl-fg:   #5f9ea5;
+  --ctl-fg:   #66a8af;
 
   /*
    * Text scale. Every font-size in this file is written as
@@ -1107,7 +1117,11 @@ input[type=range]::-moz-range-thumb {
   color: var(--tide-dim);
 }
 .act-line + .act-line { margin-top: 2px; }
-.act-line .act-t { color: var(--current); flex: none; }
+/* --current is a SURFACE token; as text it measured 1.5:1 — the timestamps
+   were effectively invisible rather than merely quiet. --tide-dim keeps them
+   recessive (5.02:1) while the message beside them stays brighter, which is
+   the hierarchy this was reaching for. */
+.act-line .act-t { color: var(--tide-dim); flex: none; }
 .act-line .act-m { min-width: 0; word-break: break-word; }
 .act-log .act-line:last-child { color: var(--tide); }
 .act-log .act-line.ok:last-child { color: var(--foam); }
@@ -2053,6 +2067,42 @@ input[type=range]::-moz-range-thumb {
   .cal-nav { width: 30px; height: 30px; }
   .seg button { padding: 14px 0; min-height: 44px; }
   .pp-tool { width: 32px; height: 30px; }
+  /*
+   * Options sits in that same row and had kept its desktop 20px height, so the
+   * one control on the title bar carrying a WORD was also the hardest to hit —
+   * 48x18 of real target against its neighbours' 32x30. Match the row.
+   */
+  .pp-opts-toggle { height: 30px; padding: 0 10px; }
+
+  /*
+   * ---- primary console controls, sized for a thumb ----
+   * These are full-width rows, so the axis a finger misses in is height, and
+   * all three were built to a mouse's tolerances:
+   *   the section headers that open Depth and Models were 13px tall — the
+   *   single most-tapped controls in the console and the thinnest thing in it;
+   *   the date button, which opens the calendar, was 25px;
+   *   the POI filter box was 25px.
+   * Padding is what grows, not the type: the text stays exactly as it reads
+   * now, and the row around it becomes catchable.
+   */
+  .sect-toggle { min-height: 34px; padding: 4px 0; }
+  .date-display .big { min-height: 38px; }
+  .poi-search { min-height: 34px; padding: 7px 9px; }
+  .pp-legs-toggle { min-height: 32px; }
+  /* Settings carries a word like Options and had the same 20px desktop height */
+  .pp-menu-btn { height: 28px; }
+  /* the import review's cancel × — small, and on a flow you may want out of */
+  .sm-x { min-width: 34px; min-height: 34px; }
+
+  /*
+   * Menu rows at 30px, not the 25px they were compacted to.
+   * Last pass took 60px of dead GAP out of this menu, which was free; the row
+   * height was left alone on the argument that it should not shrink. Measuring
+   * it as a TARGET rather than as layout says 25px was already too short — so
+   * the rows grow, and the menu still ends up shorter than it started because
+   * the air is not coming back.
+   */
+  .pp-menu-item { min-height: 30px; }
   /* compact overlay toggles — smaller than the 44px touch standard on purpose,
      since they sit alone against the map with nothing adjacent to mis-hit */
   .ov-icon { width: 34px; height: 34px; font-size: calc(13px * var(--fs-ui, 1)); }
@@ -2123,7 +2173,14 @@ input[type=range]::-moz-range-thumb {
    * what makes the halo mean anything: 20px of glyph becomes a 34x40 target.
    */
   .pp-row { gap: 12px; }
-  .poi-item { gap: 12px; }
+  /*
+   * .poi-ROW, not .poi-item: the item is a block wrapper, so a gap on it does
+   * nothing whatsoever. The flex row actually holding these buttons was still
+   * at the desktop 8px, so the halos granted above met in the middle and each
+   * button kept only ~20px of usable width — this rule's own trap, sprung by
+   * aiming it one element too high.
+   */
+  .poi-row { gap: 14px; }
   /*
    * Row priorities on a narrow screen. .pp-meta was flex:0 0 auto — it never
    * gave a pixel back — so the name, which is the only thing identifying the
@@ -2163,6 +2220,16 @@ input[type=range]::-moz-range-thumb {
   .pp-menu {
     gap: 1px; padding: 4px;
     max-width: min(280px, calc(100vw - 32px));
+    /*
+     * Sideways there are only ~320px of sheet, and this menu is taller than
+     * that. It is position:absolute, so it does NOT extend the sheet's scroll
+     * area — the items past the fold could not be reached by scrolling, or by
+     * anything else. Cap it to what is actually on screen and let the MENU
+     * scroll instead.
+     */
+    max-height: calc(100vh - var(--header-h) - 44px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .pp-menu-sep { margin: 3px 2px; }
   .pp-menu-units { gap: 4px; margin-top: 2px; }
@@ -2180,7 +2247,9 @@ input[type=range]::-moz-range-thumb {
    */
   .console-body, #pp-body, #poi-body, .act-log { padding-top: 0; }
   .pp-head, .poi-head { padding: 6px 8px; }
-  .console-head, .act-head { padding: 7px 10px; }
+  /* these headers ARE the close control on a sheet now, so they need the
+     height of one — the compaction above had them at 25px */
+  .console-head, .act-head { padding: 7px 10px; min-height: 34px; }
   .sect { padding: 8px 10px; }
   .sect + .sect { border-top: 1px solid var(--line); }
   .field { margin-bottom: 7px; }

@@ -4589,12 +4589,21 @@
     $('pp-add').textContent = Paths.drawing ? '✓' : '+';
     $('pp-add').title = Paths.drawing ? 'Finish this path' : 'Draw a new path';
     $('pp-save').disabled = !Paths.selectedId;
+    /*
+     * Every one of these teaches the gesture that exists on the device doing
+     * the reading. The empty state used to advertise Ctrl-click on a phone,
+     * where there is no Ctrl key and no click — the one message a first-time
+     * user is guaranteed to see was the one that could not be followed.
+     */
+    const onPhone = matchMedia(window.KELP_MOBILE_MQ).matches;
     $('pp-note').textContent = !list.length
-      ? 'No paths yet — press + or Ctrl-click the map.'
-      : (Paths.drawing ? 'Click the map to add nodes. Esc or ✓ to finish.'
-                       : (matchMedia(window.KELP_MOBILE_MQ).matches
-                            ? 'Drag a node to move it; long-press one for coordinates and delete.'
-                            : 'Drag a node to move it; right-click or hover one for coordinates and delete.'));
+      ? (onPhone ? 'No paths yet — press + and tap the map to place nodes.'
+                 : 'No paths yet — press + or Ctrl-click the map.')
+      : (Paths.drawing
+           ? (onPhone ? 'Tap the map to add nodes. ✓ to finish.'
+                      : 'Click the map to add nodes. Esc or ✓ to finish.')
+           : (onPhone ? 'Drag a node to move it; long-press one for coordinates and delete.'
+                      : 'Drag a node to move it; right-click or hover one for coordinates and delete.'));
 
     list.forEach((p) => {
       const item = document.createElement('div');
@@ -4851,6 +4860,25 @@
         box.querySelectorAll('.pp-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
         menu.hidden = (open === undefined) ? !menu.hidden : !open;
         cog.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+        /*
+         * On a phone this menu is placed rather than anchored. Absolute
+         * positioning inside the row put it wherever the row happened to be —
+         * fine down a tall screen, but sideways there are only ~320px of sheet
+         * and the menu is taller than that, so it ran off the bottom. Worse,
+         * being absolutely positioned it did not extend the sheet's scroll
+         * area, so the items past the fold could not be reached at all.
+         *
+         * position:fixed + the same placer the map menus use puts it against
+         * the VIEWPORT, where "off the bottom" is a thing that can be
+         * corrected. Desktop keeps the anchored menu, which is right there:
+         * it has the room, and the menu should travel with its row.
+         */
+        if (menu.hidden) { menu.style.position = ''; menu.style.left = ''; menu.style.top = ''; return; }
+        if (window.MobileShell && MobileShell.active) {
+          const r = cog.getBoundingClientRect();
+          menu.style.position = 'fixed';
+          placeMenu(menu, r.left + r.width / 2, r.bottom);
+        }
       };
       cog.addEventListener('click', () => toggleMenu());
       /*

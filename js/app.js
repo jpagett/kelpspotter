@@ -1772,7 +1772,10 @@
     if (ev.key === 'ArrowLeft' || ev.key === '[') { if (stepScene(-1)) ev.preventDefault(); return; }
     if (ev.key === 'ArrowRight' || ev.key === ']') { if (stepScene(1)) ev.preventDefault(); return; }
     if (ev.key === 'n' || ev.key === 'N') {
-      if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();
+      // same deal as the + button: entering draw mode clears the panel
+      // (declared later in this scope; hoisted, and this runs long after load)
+      if (Paths.drawing) Paths.finishDrawing();
+      else { Paths.startDrawing(); clearTheWayForDrawing(); }
       ev.preventDefault();
     }
   });
@@ -5485,8 +5488,33 @@
   renderCylinders();
   syncGasBar();
 
+  /*
+   * Starting a path is a request to work on the MAP, so the panel that was
+   * used to ask for it gets out of the way in the same action — otherwise the
+   * button puts you in draw mode and then leaves you looking at the list you
+   * have to dismiss before you can place a single node. On a phone that panel
+   * IS the screen, so it is the whole interaction.
+   *
+   * Only on the way in. Finishing a path is when you want the list back, and
+   * the panel is one tap away either way (a tab on a phone, the header strip
+   * on the desktop dock).
+   *
+   * POI's pane is deliberately left as the user set it: they asked for the
+   * paths dialog to move, not for their dock layout to be rearranged.
+   */
+  function clearTheWayForDrawing() {
+    if (window.MobileShell && MobileShell.active) { MobileShell.closeSheet(); return; }
+    if (state.params.pathsMin) return;               // already out of the way
+    state.params.pathsMin = true;
+    syncDock();
+    syncDockWidth();
+    schedulePersist();
+  }
+
   $('pp-add').addEventListener('click', () => {
-    if (Paths.drawing) Paths.finishDrawing(); else Paths.startDrawing();
+    if (Paths.drawing) { Paths.finishDrawing(); return; }
+    Paths.startDrawing();
+    clearTheWayForDrawing();
   });
   $('pp-save').addEventListener('click', () => Paths.exportPath(Paths.selectedId));
   $('pp-load').addEventListener('click', () => $('pp-file').click());

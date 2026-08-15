@@ -149,6 +149,65 @@ const Paths = (function () {
    * second number >= 60 is taken as the start of the other coordinate instead
    * (that is what distinguishes "34 24 119 52" = two DDM pairs from nonsense).
    */
+  /*
+   * ---- coordinate / name field behaviour, shared by paths and POIs ----
+   *
+   * These fields are almost always REPLACED, not edited: you open one to paste
+   * a position someone sent you, or to rename a path outright. So focusing one
+   * selects what is in it — a paste then overwrites in one action instead of
+   * needing a select-all first, which on a phone means a long press and two
+   * handle drags.
+   *
+   * The select is deferred a tick because pointerdown on a touch keyboard sets
+   * the caret AFTER focus fires, which would undo an immediate select().
+   */
+  function selectOnFocus(input) {
+    const selectAll = () => setTimeout(() => {
+      try { input.select(); } catch (e) { /* not selectable, no matter */ }
+    }, 0);
+    input.addEventListener('focus', selectAll);
+    // a second tap inside an already-focused field is a request to place the
+    // caret, so only the first one selects
+    input.addEventListener('pointerup', (ev) => {
+      if (document.activeElement !== input) selectAll();
+      ev.stopPropagation();
+    });
+  }
+
+  /*
+   * A Paste button beside a coordinate field, on touch only. Pasting into a
+   * text input on a phone means long-press, wait for the bubble, aim at
+   * "Paste" — and the long press is a gesture this app has already claimed
+   * elsewhere, so it is exactly the interaction we spent the rest of this work
+   * suppressing. One button does it directly.
+   *
+   * navigator.clipboard.readText is unavailable on non-secure origins and
+   * refused outright by Firefox, so the button only appears where it can
+   * actually work, and a denied permission falls back to telling the user
+   * rather than failing silently.
+   */
+  function pasteButton(input, onPaste, toaster) {
+    if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) return null;
+    if (!navigator.clipboard || !navigator.clipboard.readText) return null;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'field-paste';
+    b.textContent = 'Paste';
+    b.title = 'Paste a position from the clipboard';
+    b.addEventListener('click', async (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text) return;
+        input.value = text.trim();
+        if (onPaste) onPaste();
+      } catch (err) {
+        if (toaster) toaster('Clipboard access was blocked — paste into the field instead.', true);
+      }
+    });
+    return b;
+  }
+
   function parseCoords(text) {
     if (!text) return null;
     let t = String(text).toUpperCase()
@@ -360,7 +419,13 @@ const Paths = (function () {
     input.addEventListener('paste', () => {
       setTimeout(() => { if (parseCoords(input.value)) apply(); }, 0);
     });
+    selectOnFocus(input);
     wrap.appendChild(input);
+
+    // touch: a Paste button, since long-press-to-paste is a gesture this app
+    // uses for its own menus
+    const pasteBtn = pasteButton(input, () => { if (parseCoords(input.value)) apply(); }, toast);
+    if (pasteBtn) wrap.appendChild(pasteBtn);
 
     // same action as right-clicking the node, reachable without a right button
     const del = document.createElement('button');
@@ -1484,6 +1549,10 @@ const Paths = (function () {
     clearPicked: clearPicked,
     get pickedCount() { return picked.size; },
     parseCoords: parseCoords,
+    // shared field behaviour, so a POI coordinate box and a path node's box
+    // behave identically — they are the same job wearing two hats
+    selectOnFocus: selectOnFocus,
+    pasteButton: pasteButton,
     get list() { return paths; },
     get selectedId() { return selectedId; },
     get drawing() { return !!drawing; },

@@ -1665,6 +1665,52 @@ input[type=range]::-moz-range-thumb {
   .session-modal { place-items: end center; }
 }
 
+/*
+ * ---- drag readout ----
+ * The value under your hand, while your hand is on it. The plot's own labels
+ * live in an SVG that is rebuilt every frame of a drag and are drawn at plot
+ * scale, so on a phone they end up small and directly beneath the finger
+ * doing the dragging. This is a plain DOM chip that follows the pointer and
+ * sits above it. pointer-events:none so it can never become the drag target.
+ */
+.drag-readout {
+  position: fixed; z-index: 1250; pointer-events: none;
+  transform: translate(-50%, 0);
+  padding: 4px 9px; border-radius: 3px;
+  background: var(--deep); border: 1px solid var(--kelp);
+  color: var(--foam); font-family: var(--mono);
+  font-size: calc(11px * var(--fs-ui, 1)); line-height: 1; white-space: nowrap;
+  opacity: 0; transition: opacity 90ms ease;
+}
+.drag-readout.show { opacity: 1; }
+@media (pointer: coarse) {
+  /* read at arm's length, past a hand that is covering the plot */
+  .drag-readout { font-size: calc(13px * var(--fs-ui, 1)); padding: 6px 11px; }
+}
+
+/* an offset's number is a clearance, so it carries its unit and enough weight
+   to be read against the seabed line it is anchored to */
+.pp-offset-tag { font-weight: 600; }
+
+/*
+ * Paste button beside a coordinate field (touch only — see Paths.pasteButton).
+ * Sized as a real target rather than a hint: it exists precisely because the
+ * long-press route to the OS paste bubble is unavailable here.
+ */
+.field-paste {
+  flex: none; cursor: pointer;
+  min-height: 34px; padding: 0 12px;
+  background: var(--current); color: var(--kelp);
+  border: 1px solid var(--ctl-line); border-radius: 3px;
+  font-family: var(--mono); font-size: calc(11px * var(--fs-ui, 1));
+  letter-spacing: 0.06em;
+}
+.field-paste:hover { border-color: var(--kelp); }
+.field-paste:active { background: var(--kelp); color: var(--abyss); }
+/* the POI position row: field takes the space, button keeps its size */
+.poi-coord-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+.poi-coord-row .poi-coord { flex: 1; min-width: 0; }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; z-index: 1100; left: 50%; bottom: 88px; transform: translateX(-50%);
@@ -2093,6 +2139,50 @@ input[type=range]::-moz-range-thumb {
   /* the sheet header already opens and closes the sheet — a second collapse
      control inside it only invites a mis-tap */
   #pp-collapse, #poi-collapse { pointer-events: none; }
+
+  /*
+   * ---- the popped-out graph takes the screen ----
+   * It was a 70vw x 60vh window floating over everything — which on a phone
+   * is neither a window (there is nothing to see beside it) nor full screen
+   * (the graph stays cramped). Popping a graph out is a request to look at
+   * THAT, closely, so it gets the room: header to tab bar, the same envelope
+   * the sheets use. Dragging and the resize corner go with it; there is
+   * nowhere to drag it to and nothing to resize against.
+   */
+  .plot-popout {
+    left: 0 !important; right: 0 !important;
+    top: var(--header-h) !important;
+    bottom: calc(var(--tabbar-h) + var(--safe-b)) !important;
+    width: auto !important; height: auto !important;
+    max-width: none; min-width: 0; min-height: 0;
+    border-radius: 0; border-left: none; border-right: none;
+    resize: none;
+  }
+  .plot-popout-head { cursor: default; }
+  /* the plot should use the height it just gained */
+  .plot-popout-body { flex: 1; display: flex; flex-direction: column; }
+  .plot-popout-body .pp-profile { flex: 1; min-height: 0; }
+  .plot-popout-body .pp-profile svg { height: 100% !important; }
+
+  /*
+   * ---- a long press is a gesture here, not a text selection ----
+   * Long-press opens context menus and starts drags all over this UI, and the
+   * OS answering the same press with a selection highlight and a Copy/Look Up
+   * bubble fought every one of them. Chrome is not prose; suppress selection
+   * across it and hand it back to the fields where typing actually happens.
+   * -webkit-touch-callout is the iOS half — user-select alone does not stop
+   * the callout bubble there.
+   */
+  .header, .tabbar, .console, .paths-panel, .activity, .legend, .poi-panel,
+  .plot-popout, .map-actions, .overlay-picker, .signin-notice,
+  .plot-menu, .pp-menu, .leaflet-container {
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea, [contenteditable] {
+    -webkit-user-select: text; user-select: text;
+    -webkit-touch-callout: default;
+  }
 }
 
 /*
@@ -2213,6 +2303,13 @@ input[type=range]::-moz-range-thumb {
     max-width: none !important;
     border-radius: 14px 14px 0 0 !important;
     transform: translateY(101%);
+  }
+  /* the popped-out graph fills the same envelope, clear of the rail */
+  .plot-popout {
+    top: var(--header-h) !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: calc(var(--tabbar-w) + var(--safe-r)) !important;
   }
   body[data-sheet="console"]  .console,
   body[data-sheet="paths"]    .paths-panel,

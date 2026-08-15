@@ -356,6 +356,10 @@ const POI = (function () {
   }
 
   function flyTo(rec) {
+    // Get the panel out of the way first, so the map is already visible when
+    // it moves: on a phone the POI sheet fills the screen, and centring the
+    // map behind it looked like the button had done nothing at all.
+    if (window.MobileShell) MobileShell.closeSheet();
     map.setView([rec.lat, rec.lng], Math.max(map.getZoom(), 14));
     if (rec.marker) rec.marker.openPopup();
   }
@@ -648,7 +652,25 @@ const POI = (function () {
       setTimeout(() => { if (readCoords(coord.value)) applyCoord(); }, 0);
     });
     coord.addEventListener('blur', applyCoord);
-    field('Position', coord);
+    // focusing selects what is there, so a paste replaces the position rather
+    // than landing in the middle of it — same behaviour as a path node's box
+    if (window.Paths && Paths.selectOnFocus) Paths.selectOnFocus(coord);
+    /*
+     * On touch the field gets a Paste button. blur fires before the button's
+     * click, and blur runs applyCoord — which would re-stamp the OLD position
+     * into the field before the paste ever landed. Wrapping both in one row
+     * and applying explicitly after the paste keeps that order honest.
+     */
+    const coordPaste = (window.Paths && Paths.pasteButton)
+      ? Paths.pasteButton(coord, applyCoord, toast) : null;
+    if (coordPaste) {
+      const row = document.createElement('div');
+      row.className = 'poi-coord-row';
+      row.appendChild(coord); row.appendChild(coordPaste);
+      field('Position', row);
+    } else {
+      field('Position', coord);
+    }
 
     const desc = document.createElement('textarea');
     desc.className = 'poi-desc';

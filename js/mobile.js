@@ -51,6 +51,21 @@
     tab.addEventListener('click', () => openSheet(tab.dataset.sheet));
   });
 
+  /*
+   * The one thing other modules need from the shell: get out of the way. An
+   * action inside a sheet that moves the MAP has nothing to show while the
+   * sheet is still covering it — the panel is the whole screen on a phone, so
+   * "zoom to this point" otherwise just recentred something invisible.
+   * Deliberately a no-op on desktop, where the panels are a side dock and
+   * closing one nobody asked to close would be its own annoyance.
+   */
+  window.MobileShell = {
+    get active() { return mq.matches; },
+    closeSheet() {
+      if (mq.matches && document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+    }
+  };
+
   // The map is the hero: touching it dismisses whatever is open.
   const mapEl = $('map');
   if (mapEl) {

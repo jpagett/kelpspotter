@@ -5,6 +5,35 @@
   const cfg = window.KELP_CONFIG;
   const $ = (id) => document.getElementById(id);
 
+  // Touch or pen: hit areas that are comfortable for a cursor are not for a
+  // fingertip, and several places on the profile plot size themselves by this.
+  const COARSE_POINTER = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+  /*
+   * ---- drag readout ----
+   * A value that is being dragged should say what it is while it is being
+   * dragged. The plot's numbers live inside an SVG that is torn down and
+   * rebuilt on every frame of a drag, so the readout is a plain DOM chip that
+   * follows the pointer instead — it survives the re-render, and it stays
+   * legible over the plot at any zoom. Offset above the finger so the value
+   * is not under the hand setting it.
+   */
+  let dragReadoutEl = null;
+  function showDragReadout(text, clientX, clientY) {
+    if (!dragReadoutEl) {
+      dragReadoutEl = document.createElement('div');
+      dragReadoutEl.className = 'drag-readout';
+      document.body.appendChild(dragReadoutEl);
+    }
+    dragReadoutEl.textContent = text;
+    dragReadoutEl.style.left = clientX + 'px';
+    dragReadoutEl.style.top = Math.max(4, clientY - (COARSE_POINTER ? 46 : 26)) + 'px';
+    dragReadoutEl.classList.add('show');
+  }
+  function hideDragReadout() {
+    if (dragReadoutEl) dragReadoutEl.classList.remove('show');
+  }
+
   const state = {
     engine: null,
     scenes: [],        // filtered to the current cloud ceiling
@@ -3413,18 +3442,29 @@
       grip.setAttribute('x1', x1); grip.setAttribute('x2', x2);
       grip.setAttribute('y1', y(bound.feet)); grip.setAttribute('y2', y(bound.feet));
       grip.setAttribute('stroke', 'transparent');
-      grip.setAttribute('stroke-width', '12');
+      grip.setAttribute('stroke-width', COARSE_POINTER ? '26' : '12');
       grip.setAttribute('class', 'bound-grip');
       grip.style.cursor = 'ns-resize';
       let dragging = false, preview = null, label = null;
+      /*
+       * grabDy holds the gap between where the finger landed and the bound's
+       * own line, so the line keeps that gap for the rest of the drag. Without
+       * it the bound teleported so its centre sat under the touch point the
+       * instant it was grabbed — on a fingertip, which covers ~30px of water
+       * column, that meant every adjustment began by throwing the value
+       * several feet away from where it was.
+       */
+      let grabDy = 0;
       const ftFromY = (clientY) => {
         const r = svg.getBoundingClientRect();
-        const vy = ((clientY - r.top) / r.height) * H;
+        const vy = ((clientY - grabDy - r.top) / r.height) * H;
         return Math.max(1, Math.round(panD + ((vy - PADT) / plotH) * (maxD || 1)));
       };
       grip.addEventListener('pointerdown', (ev) => {
         if (ev.button !== 0) return;
         dragging = true;
+        const gr = svg.getBoundingClientRect();
+        grabDy = ev.clientY - (gr.top + (y(bound.feet) / H) * gr.height);
         // capture keeps the drag when the pointer outruns the thin hit line;
         // it can throw for an already-released pointer, and losing capture is
         // a degraded drag rather than an error, so it must not abort setup
@@ -3446,10 +3486,14 @@
         preview.setAttribute('y1', yy); preview.setAttribute('y2', yy);
         label.setAttribute('y', yy - 3);
         label.textContent = fmtDepth(ft);
+        // the in-plot label is small and sits under the hand on touch
+        showDragReadout((kind === 'ceiling' ? 'Ceiling ' : 'Floor ') + fmtDepth(ft),
+                        ev.clientX, ev.clientY);
       });
       grip.addEventListener('pointerup', (ev) => {
         if (!dragging) return;
         dragging = false;
+        hideDragReadout();
         bound.feet = ftFromY(ev.clientY);
         say((kind === 'ceiling' ? 'Ceiling' : 'Floor') + ' moved to ' + fmtDepth(bound.feet));
         renderPaths();
@@ -3466,7 +3510,13 @@
           persistNow();
         }
       });
-      longPressContextMenu(grip);   // same removal by touch
+      /*
+       * Same removal by touch. Hold still to delete, drag to move: the press
+       * cancels itself past 10px of travel, so the two gestures cannot be
+       * confused by anything except a hand that grabs the grip and then waits
+       * half a second without moving — which is what a long press IS.
+       */
+      longPressContextMenu(grip);
       svg.appendChild(grip);
 
       /*
@@ -3477,21 +3527,29 @@
       [['start', x1], ['end', x2]].forEach(([which, hx]) => {
         const h = document.createElementNS(NS, 'circle');
         h.setAttribute('cx', hx); h.setAttribute('cy', y(bound.feet));
+        // the drawn dot stays small so it does not hide the line it marks;
+        // stroke-width is what a pointer actually has to hit, and a fingertip
+        // needs far more of it than a cursor
         h.setAttribute('r', 5);
         h.setAttribute('class', 'bound-end');
         h.setAttribute('fill', p.color);
         h.setAttribute('stroke', '#05161c');
-        h.setAttribute('stroke-width', '1.5');
+        h.setAttribute('stroke-width', COARSE_POINTER ? '14' : '1.5');
+        if (COARSE_POINTER) h.setAttribute('paint-order', 'stroke');
         h.style.cursor = 'ew-resize';
-        let dragging2 = false;
+        let dragging2 = false, grabDx = 0;
         const distFromX = (clientX) => {
           const r = svg.getBoundingClientRect();
-          const vx = ((clientX - r.left) / r.width) * W;
+          const vx = ((clientX - grabDx - r.left) / r.width) * W;
           return Math.max(0, Math.min(maxX, ((vx - PADL) / (W - PADL - 4)) * maxX));
         };
         h.addEventListener('pointerdown', (ev) => {
           if (ev.button !== 0) return;
           dragging2 = true;
+          // hold the gap between finger and handle, so the span edge does not
+          // leap to the touch point before the drag has even begun
+          const r = svg.getBoundingClientRect();
+          grabDx = ev.clientX - (r.left + (hx / W) * r.width);
           try { h.setPointerCapture(ev.pointerId); } catch (e) { /* degrade */ }
           ev.stopPropagation(); ev.preventDefault();
         });
@@ -3500,12 +3558,15 @@
           // x only: endpoints re-scope the span. Depth belongs to the segment
           // drag — a diagonal endpoint drag made accidental depth nudges too
           // easy while aiming for a distance.
+          const r = svg.getBoundingClientRect();
           h.setAttribute('cx', Math.max(PADL, Math.min(W - 4,
-            ((ev.clientX - svg.getBoundingClientRect().left) / svg.getBoundingClientRect().width) * W)));
+            ((ev.clientX - grabDx - r.left) / r.width) * W)));
+          showDragReadout(fmtDist(distFromX(ev.clientX)), ev.clientX, ev.clientY);
         });
         h.addEventListener('pointerup', (ev) => {
           if (!dragging2) return;
           dragging2 = false;
+          hideDragReadout();
           const d = distFromX(ev.clientX);
           const MIN_SPAN = 20;   // metres — a bound needs somewhere to apply
           if (which === 'start') bound.start = Math.min(d, bound.end - MIN_SPAN);
@@ -3561,10 +3622,12 @@
       });
       if (!near) return;
       const t = document.createElementNS(NS, 'text');
-      t.setAttribute('class', 'pp-axis');
+      t.setAttribute('class', 'pp-axis pp-offset-tag');
       t.setAttribute('x', x(Math.max(0, b.start)) + 2);
       t.setAttribute('y', Math.max(PADT + 6, y(effFt(near)) - 2));
-      t.textContent = '↑' + Math.round(depthU().from(b.feet));
+      // the unit, not just a bare number: "↑10" beside a depth axis reads as a
+      // depth, which is the one thing this number is not
+      t.textContent = '↑' + Math.round(depthU().from(b.feet)) + ' ' + depthU().label;
       svg.appendChild(t);
     });
 
@@ -3940,7 +4003,9 @@
       document.removeEventListener('pointerup', onUp);
       document.removeEventListener('pointercancel', onUp);
     };
-    const NEAR_PX = 14;   // viewBox px: the curve is 1px wide and fingers are not
+    // viewBox px: the curve is 1px wide and fingers are not. A fingertip covers
+    // roughly three times what a cursor points at, so touch gets a wider catch.
+    const NEAR_PX = COARSE_POINTER ? 30 : 14;
     svg.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       const at = plotPoint(ev.clientX, ev.clientY);
@@ -3952,25 +4017,50 @@
       const onSeabed = Math.abs(vy - y(effFt(at.sample))) < NEAR_PX;
 
       if (onSeabed) {
-        const span = legSpanAt(at.dist);
         const bottomFt = -at.sample.feet;
         if (!p.offsets) p.offsets = [];
-        const band = { start: span[0], end: span[1], feet: 0 };
-        p.offsets.push(band);
-        let raf = 0;
+        /*
+         * Adjusting an offset that is already here, rather than stacking a new
+         * one on top of it. offsetFtAt takes the LARGEST band covering a
+         * point, so pushing a fresh band at 0 ft left the old one still
+         * winning: the line did not move until the drag passed the previous
+         * value, and it could never be brought back down. That read as "this
+         * section cannot be adjusted again" — and every attempt quietly left
+         * another dead band on the path.
+         */
+        const existing = (p.offsets || []).find(
+          (b) => at.dist >= b.start && at.dist <= b.end);
+        const band = existing || { start: legSpanAt(at.dist)[0], end: legSpanAt(at.dist)[1], feet: 0 };
+        const startFeet = band.feet || 0;
+        if (!existing) p.offsets.push(band);
+
+        let raf = 0, moved = false;
         const onMove = (e) => {
-          const lifted = (ev.clientY - e.clientY) * pxToFt;      // up is positive
-          band.feet = Math.max(0, Math.min(bottomFt, Math.round(lifted)));
+          /*
+           * Measured from where the finger STARTED and added to what the band
+           * already was, so the line stays under the finger instead of
+           * jumping to it — re-grabbing a 20 ft offset used to snap it to 0
+           * and start over from wherever the press landed.
+           */
+          const lifted = startFeet + (ev.clientY - e.clientY) * pxToFt;   // up is positive
+          const next = Math.max(0, Math.min(bottomFt, lifted));
+          if (Math.abs(next - band.feet) > 0.01) moved = true;
+          band.feet = next;
+          showDragReadout(fmtDepth(band.feet) + ' off the bottom', e.clientX, e.clientY);
           if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderPaths(); });
           e.preventDefault();
         };
         const onUp = () => {
           dragEnd(onMove, onUp);
+          hideDragReadout();
+          band.feet = Math.round(band.feet);   // whole feet is the planning unit
           const i = p.offsets.indexOf(band);
           if (band.feet <= 0) {
-            // a press without a drag: leave the path exactly as it was
+            // dragged to nothing, or pressed without dragging: either way the
+            // path should end up exactly as if this had not happened
             if (i >= 0) p.offsets.splice(i, 1);
-          } else {
+            if (existing && moved) { say('Offset cleared'); persistNow(); }
+          } else if (moved) {
             say('Offset: ' + fmtDepth(band.feet) + ' off the bottom from ' +
                 fmtDist(band.start) + ' to ' + fmtDist(band.end), 'ok');
             persistNow();

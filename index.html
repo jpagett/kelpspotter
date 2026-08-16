@@ -107,7 +107,9 @@
       <span class="sect-caret">▾</span><span class="eyebrow">Console</span>
     </button>
     <div id="console-body" class="console-body">
-    <div class="sect">
+    <!-- peek-keep: the two blocks that survive the console's middle state on a
+         phone (see the three-state sheet in mobile.js) -->
+    <div class="sect peek-keep">
       <div class="date-row">
         <button id="prev" class="step" aria-label="Previous scene">‹</button>
         <div class="date-display">
@@ -171,7 +173,7 @@
       </div>
     </div>
 
-    <div class="sect">
+    <div class="sect peek-keep peek-mode">
       <div class="seg" role="group" aria-label="View mode">
         <button id="mode-single" data-mode="single" aria-pressed="true">Single day</button>
         <button id="mode-composite" data-mode="composite" aria-pressed="false">Composite</button>

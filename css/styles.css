@@ -2013,6 +2013,45 @@ input[type=range]::-moz-range-thumb {
   body[data-sheet="poi"]      .poi-panel,
   body[data-sheet="activity"] .activity { transform: translateY(0); }
 
+  /* ==========================================================================
+     CONSOLE PEEK — the console's middle state
+     --------------------------------------------------------------------------
+     Stepping day by day needs two controls and none of the rest of the panel,
+     so peek keeps the date row and the single/composite switch and drops
+     everything else. Crucially it releases `top`, which turns the sheet from
+     floor-to-ceiling into a strip that hugs its own content and leaves the map
+     above it visible — being able to watch the water change as you step is the
+     whole point of the state.
+     ========================================================================== */
+  body[data-console="peek"] .console {
+    top: auto !important;
+    max-height: 45vh !important;
+    overflow-y: hidden;
+  }
+  /* only the two blocks marked in the markup survive */
+  body[data-console="peek"] .console-body > .sect:not(.peek-keep) { display: none; }
+  /* ...and inside the date block, only the stepper row itself */
+  body[data-console="peek"] .peek-keep .range-readout,
+  body[data-console="peek"] .peek-keep .cal { display: none !important; }
+  /* the panel's own name is redundant at this size; the grab handle above it
+     stays, because it is the drag target that expands the strip again */
+  body[data-console="peek"] .console-head { display: none; }
+  body[data-console="peek"] .console-body { padding-bottom: 4px; }
+  body[data-console="peek"] .peek-keep { padding: 6px 10px; }
+  body[data-console="peek"] .peek-keep + .peek-keep { border-top: none; padding-top: 0; }
+
+  /* the mode switch is a section of its own in the full panel; here it has to
+     read as one compact control */
+  body[data-console="peek"] .peek-mode .seg { max-width: 220px; margin: 0 auto; }
+  body[data-console="peek"] .peek-mode .seg button {
+    padding: 7px 0; min-height: 34px; font-size: calc(10px * var(--fs-ui, 1));
+  }
+
+  /* a wider, more obvious handle: in peek this strip is the only way back up */
+  body[data-console="peek"] .console::before {
+    width: 52px; height: 5px; margin: 7px auto 2px; opacity: 0.75;
+  }
+
   /* A sheet is opened deliberately, so its own collapse state must not hide the
      content, and the desktop View toggles must not keep it off-screen. */
   .poi-panel.collapsed #poi-body,

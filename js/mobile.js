@@ -25,11 +25,25 @@
 
   /* ---------------------------------------------------------------- sheets */
 
-  function openSheet(name) {
-    const current = document.body.dataset.sheet || '';
-    const next = current === name ? '' : name;
-    if (next) {
-      const panel = document.querySelector(SHEETS[next]);
+  /*
+   * The console has THREE states, not two: closed, peek and full.
+   *
+   * Stepping day by day is the console's most repetitive job, and the two
+   * controls it needs — the date steppers and single/composite — are three
+   * lines from the top of a panel that covers the whole screen. So you opened
+   * it, stepped once, closed it to look at the water, opened it again. Peek is
+   * those controls and nothing else, sitting on the bottom edge with the map
+   * still visible above it.
+   *
+   * Everything else keeps the plain open/closed toggle; a POI list has no
+   * meaningful half-open state.
+   */
+  const CONSOLE_STATES = ['full', 'peek'];
+  const consoleState = () => document.body.dataset.console || '';
+
+  function setSheet(name, cState) {
+    if (name) {
+      const panel = document.querySelector(SHEETS[name]);
       if (panel) {
         /*
          * A sheet the user just asked for must actually be usable, whatever
@@ -41,10 +55,32 @@
         panel.scrollTop = 0;
       }
     }
-    document.body.dataset.sheet = next;
+    document.body.dataset.sheet = name || '';
+    if (name === 'console' && cState) document.body.dataset.console = cState;
+    else delete document.body.dataset.console;
     bar.querySelectorAll('.tab').forEach((t) => {
-      t.setAttribute('aria-pressed', t.dataset.sheet === next ? 'true' : 'false');
+      t.setAttribute('aria-pressed', t.dataset.sheet === name ? 'true' : 'false');
     });
+    // the console's height changed, so the map's usable area did too
+    window.dispatchEvent(new Event('resize'));
+  }
+
+  function openSheet(name) {
+    const current = document.body.dataset.sheet || '';
+    if (name === 'console') {
+      /*
+       * Successive taps walk down the collapse: full, then peek, then closed.
+       * The first tap still opens the console the way it always did, so the
+       * new state is something you discover by carrying on rather than
+       * something you have to know about to get what you used to get.
+       */
+      if (current !== 'console') { setSheet('console', 'full'); return; }
+      const at = CONSOLE_STATES.indexOf(consoleState());
+      const next = CONSOLE_STATES[at + 1];
+      if (next) setSheet('console', next); else setSheet('');
+      return;
+    }
+    setSheet(current === name ? '' : name);
   }
 
   bar.querySelectorAll('.tab').forEach((tab) => {
@@ -62,7 +98,9 @@
   window.MobileShell = {
     get active() { return mq.matches; },
     closeSheet() {
-      if (mq.matches && document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+      // setSheet, not openSheet: for the console the latter STEPS (full ->
+      // peek), and a caller asking for the map to be visible means all the way
+      if (mq.matches && document.body.dataset.sheet) setSheet('');
     },
     // the mirror image: bring a named sheet up, for an action elsewhere that
     // needs a panel on screen ("open this path" from the map, say)
@@ -104,14 +142,20 @@
   const mapEl = $('map');
   if (mapEl) {
     mapEl.addEventListener('pointerdown', () => {
-      if (mq.matches && document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+      if (!mq.matches || !document.body.dataset.sheet) return;
+      /*
+       * Peek is designed to sit BESIDE the map — stepping through days means
+       * looking at the water between taps. Dismissing it on map contact would
+       * make the state useless the moment it was used. Everything else still
+       * gets out of the way.
+       */
+      if (document.body.dataset.console === 'peek') return;
+      setSheet('');
     });
   }
 
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && document.body.dataset.sheet) {
-      openSheet(document.body.dataset.sheet);
-    }
+    if (ev.key === 'Escape' && document.body.dataset.sheet) setSheet('');
   });
 
   /*
@@ -161,6 +205,7 @@
       document.documentElement.style.setProperty('--dock-w', '0px');  // no side dock on a phone
     } else {
       document.body.dataset.sheet = '';
+      delete document.body.dataset.console;
       bar.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-pressed', 'false'));
     }
     // Leaflet re-reads its container on window resize; the map box just changed.
@@ -169,6 +214,25 @@
 
   mq.addEventListener('change', applyMode);
   applyMode();
+
+  /*
+   * A belt to applyMode's braces. The sheet state lives in body attributes, and
+   * those are only meaningful inside the phone shell — a stale data-console
+   * left behind on the way out would spring back into effect the moment the
+   * device rotated in again. applyMode clears them, but it is driven by the
+   * media query's change event, which does not fire reliably everywhere a
+   * viewport can change size. This listens to plain resize, and deliberately
+   * only CLEARS: it never opens or restores anything, so it cannot fight
+   * applyMode or loop through the resize that applyMode itself dispatches.
+   */
+  window.addEventListener('resize', () => {
+    if (mq.matches) return;
+    if (document.body.dataset.sheet || document.body.dataset.console) {
+      document.body.dataset.sheet = '';
+      delete document.body.dataset.console;
+      bar.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-pressed', 'false'));
+    }
+  });
 
   /* --------------------------------------------------- draw a path on the map
    * The desktop control for this is the Paths panel's + button, which lives
@@ -205,15 +269,22 @@
     syncDraw();
   }
 
-  /* ------------------------------------------------ swipe a sheet closed
+  /* ------------------------------------------------ drag a sheet's top strip
    * A downward drag on the top strip of an open sheet dismisses it — the
    * gesture every bottom sheet teaches. Limited to the top 34px (the grab-
    * handle zone) so it never fights the sheet's own scrolling, and to a
    * mostly-vertical 48px travel so a horizontal fidget does nothing.
+   *
+   * For the console the same strip works BOTH ways, because it has somewhere
+   * to go in both: down steps full -> peek -> closed, up steps peek -> full.
+   * That makes the handle mean "resize me" rather than "dismiss me", which is
+   * the only way the middle state is reachable without knowing the tab-tap
+   * sequence.
    */
   Object.values(SHEETS).forEach((sel) => {
     const panel = document.querySelector(sel);
     if (!panel) return;
+    const isConsole = panel.classList.contains('console');
     let sy = null, sx = null;
     panel.addEventListener('pointerdown', (ev) => {
       if (!mq.matches || ev.pointerType === 'mouse') return;
@@ -224,9 +295,15 @@
     panel.addEventListener('pointermove', (ev) => {
       if (sy === null) return;
       const dy = ev.clientY - sy, dx = Math.abs(ev.clientX - sx);
-      if (dy > 48 && dy > dx * 2) {
-        sy = null;
-        if (document.body.dataset.sheet) openSheet(document.body.dataset.sheet);
+      if (Math.abs(dy) < 48 || Math.abs(dy) < dx * 2) return;   // not a vertical drag
+      sy = null;
+      if (!document.body.dataset.sheet) return;
+      if (!isConsole) { openSheet(document.body.dataset.sheet); return; }
+      if (dy > 0) {
+        if (consoleState() === 'full') setSheet('console', 'peek');   // full -> peek
+        else setSheet('');                                            // peek -> closed
+      } else if (consoleState() === 'peek') {
+        setSheet('console', 'full');                                  // peek -> full
       }
     });
     ['pointerup', 'pointercancel'].forEach((t) =>
